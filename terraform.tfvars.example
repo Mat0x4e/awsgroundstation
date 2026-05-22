@@ -1,10 +1,9 @@
-region                     = "us-east-2"
+# Stage 1: Deploy foundation (no Ground Station access required)
+region                     = "eu-central-1"
 environment                = "demo"
 project_name               = "groundstation-noaa20"
+ground_station_enabled     = false
 enable_processing_pipeline = false
-satellite_norad_id         = 43013
 
-tags = {
-  Owner   = "satellite-ops"
-  Purpose = "noaa20-hrd-reception"
-}
+# Stage 2: Once Ground Station access is approved, set:
+# ground_station_enabled = true

@@ -1,6 +1,6 @@
 output "mission_profile_arn" {
   description = "ARN of the Ground Station mission profile"
-  value       = module.mission_profile.mission_profile_arn
+  value       = var.ground_station_enabled ? module.mission_profile[0].mission_profile_arn : null
 }
 
 output "reception_bucket_name" {

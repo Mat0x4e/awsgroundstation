@@ -23,7 +23,23 @@ sns_client = boto3.client("sns")
 
 def handler(event, context):
     """Lambda entry point for contact scheduling."""
-    mission_profile_arn = os.environ["MISSION_PROFILE_ARN"]
+    mission_profile_arn = os.environ.get("MISSION_PROFILE_ARN", "")
+    if not mission_profile_arn:
+        logger.warning(
+            json.dumps(
+                {
+                    "action": "schedule_contact_skipped",
+                    "reason": "Ground Station not enabled - mission profile ARN not configured",
+                }
+            )
+        )
+        return {
+            "statusCode": 200,
+            "body": json.dumps(
+                {"scheduled": False, "reason": "ground_station_not_enabled"}
+            ),
+        }
+
     satellite_arn = os.environ["SATELLITE_ARN"]
     sns_topic_arn = os.environ["SNS_TOPIC_ARN"]
     min_elevation = float(os.environ.get("MINIMUM_ELEVATION_DEGREES", "10"))

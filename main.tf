@@ -45,6 +45,7 @@ module "s3_delivery" {
 }
 
 module "mission_profile" {
+  count  = var.ground_station_enabled ? 1 : 0
   source = "./modules/mission_profile"
 
   project_name           = var.project_name
@@ -61,7 +62,7 @@ module "contact_scheduler" {
   project_name        = var.project_name
   environment         = var.environment
   lambda_role_arn     = module.security.scheduler_role_arn
-  mission_profile_arn = module.mission_profile.mission_profile_arn
+  mission_profile_arn = var.ground_station_enabled ? module.mission_profile[0].mission_profile_arn : ""
   satellite_arn       = "arn:aws:groundstation::${data.aws_caller_identity.current.account_id}:satellite/${var.satellite_norad_id}"
   sns_topic_arn       = module.security.sns_topic_arn
   tags                = local.common_tags

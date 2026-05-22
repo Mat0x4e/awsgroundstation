@@ -31,6 +31,12 @@ variable "project_name" {
   default     = "groundstation-noaa20"
 }
 
+variable "ground_station_enabled" {
+  description = "Whether to create Ground Station resources (mission profile, tracking config). Set to true once Ground Station access is approved."
+  type        = bool
+  default     = false
+}
+
 variable "enable_processing_pipeline" {
   description = "Whether to create the processing pipeline resources"
   type        = bool

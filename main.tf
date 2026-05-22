@@ -30,7 +30,7 @@ module "security" {
   project_name               = var.project_name
   environment                = var.environment
   reception_bucket_arn       = module.s3_delivery.bucket_arn
-  output_bucket_arn          = ""
+  output_bucket_arn          = var.enable_processing_pipeline ? module.processing_pipeline[0].output_bucket_arn : ""
   enable_processing_pipeline = var.enable_processing_pipeline
   tags                       = local.common_tags
 }
@@ -47,12 +47,12 @@ module "s3_delivery" {
 module "mission_profile" {
   source = "./modules/mission_profile"
 
-  project_name         = var.project_name
-  environment          = var.environment
-  satellite_norad_id   = var.satellite_norad_id
-  reception_bucket_arn = module.s3_delivery.bucket_arn
-  kms_key_arn          = module.security.kms_key_arn
-  tags                 = local.common_tags
+  project_name           = var.project_name
+  environment            = var.environment
+  satellite_norad_id     = var.satellite_norad_id
+  reception_bucket_arn   = module.s3_delivery.bucket_arn
+  groundstation_role_arn = module.security.groundstation_role_arn
+  tags                   = local.common_tags
 }
 
 module "contact_scheduler" {
@@ -88,5 +88,6 @@ module "observability" {
   environment              = var.environment
   scheduler_log_group_name = module.contact_scheduler.log_group_name
   reception_bucket_name    = module.s3_delivery.bucket_name
+  kms_key_id               = module.security.kms_key_id
   tags                     = local.common_tags
 }

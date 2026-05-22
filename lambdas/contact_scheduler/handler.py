@@ -197,7 +197,11 @@ def reserve_contact(
 
 
 def publish_no_pass_notification(sns_topic_arn, message):
-    """Publish notification when no suitable pass is found."""
+    """Publish notification when no suitable pass is found.
+
+    Raises ClientError if the publish fails so the Lambda signals failure
+    rather than silently succeeding when an operator alert is lost.
+    """
     try:
         sns_client.publish(
             TopicArn=sns_topic_arn,
@@ -213,3 +217,4 @@ def publish_no_pass_notification(sns_topic_arn, message):
                 }
             )
         )
+        raise

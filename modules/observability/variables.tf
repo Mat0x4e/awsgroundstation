@@ -23,3 +23,8 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "kms_key_id" {
+  description = "ID of the KMS key for SNS topic encryption"
+  type        = string
+}

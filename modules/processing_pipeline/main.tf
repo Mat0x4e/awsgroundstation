@@ -105,7 +105,7 @@ resource "aws_lambda_function" "data_processor" {
   function_name    = "${var.project_name}-${var.environment}-data-processor"
   role             = var.lambda_role_arn
   handler          = "handler.handler"
-  runtime          = "python3.9"
+  runtime          = "python3.12"
   timeout          = 300
   memory_size      = 512
   filename         = data.archive_file.data_processor.output_path

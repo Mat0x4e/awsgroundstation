@@ -221,6 +221,14 @@ resource "aws_iam_role_policy" "processor_lambda" {
       {
         Effect = "Allow"
         Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey*"
+        ]
+        Resource = aws_kms_key.groundstation.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "sqs:ReceiveMessage",
           "sqs:DeleteMessage",
           "sqs:GetQueueAttributes"

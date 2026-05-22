@@ -3,7 +3,8 @@ data "aws_caller_identity" "current" {}
 
 # SNS topic for contact failure notifications
 resource "aws_sns_topic" "contact_failures" {
-  name = "${var.project_name}-${var.environment}-contact-failures"
+  name              = "${var.project_name}-${var.environment}-contact-failures"
+  kms_master_key_id = var.kms_key_id
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-${var.environment}-contact-failures"

@@ -1,6 +1,3 @@
-data "aws_caller_identity" "current" {}
-data "aws_region" "current" {}
-
 # Tracking configuration with autotrack
 resource "awscc_groundstation_config" "tracking" {
   name = "${var.project_name}-${var.environment}-tracking"
@@ -80,7 +77,7 @@ resource "awscc_groundstation_config" "s3_recording" {
     s3_recording_config = {
       bucket_arn = var.reception_bucket_arn
       prefix     = "year={year}/month={month}/day={day}/satellite={satellite_id}"
-      role_arn   = aws_iam_role.groundstation_delivery.arn
+      role_arn   = var.groundstation_role_arn
     }
   }
 
@@ -148,56 +145,3 @@ resource "awscc_groundstation_mission_profile" "noaa20_hrd" {
   ]
 }
 
-# IAM role for Ground Station to deliver data to S3
-resource "aws_iam_role" "groundstation_delivery" {
-  name = "${var.project_name}-${var.environment}-gs-delivery-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "groundstation.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
-
-  tags = merge(var.tags, {
-    Name = "${var.project_name}-${var.environment}-gs-delivery-role"
-  })
-}
-
-resource "aws_iam_role_policy" "groundstation_delivery" {
-  name = "${var.project_name}-${var.environment}-gs-delivery-policy"
-  role = aws_iam_role.groundstation_delivery.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:PutObject",
-          "s3:GetBucketLocation"
-        ]
-        Resource = [
-          var.reception_bucket_arn,
-          "${var.reception_bucket_arn}/*"
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "kms:Encrypt",
-          "kms:GenerateDataKey*"
-        ]
-        Resource = [
-          var.kms_key_arn
-        ]
-      }
-    ]
-  })
-}

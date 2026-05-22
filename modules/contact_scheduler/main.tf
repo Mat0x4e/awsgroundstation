@@ -8,7 +8,7 @@ resource "aws_lambda_function" "contact_scheduler" {
   function_name    = "${var.project_name}-${var.environment}-contact-scheduler"
   role             = var.lambda_role_arn
   handler          = "handler.handler"
-  runtime          = "python3.9"
+  runtime          = "python3.12"
   timeout          = 60
   memory_size      = 256
   filename         = data.archive_file.contact_scheduler.output_path

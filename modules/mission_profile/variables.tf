@@ -19,8 +19,8 @@ variable "reception_bucket_arn" {
   type        = string
 }
 
-variable "kms_key_arn" {
-  description = "ARN of the KMS key for encryption"
+variable "groundstation_role_arn" {
+  description = "ARN of the IAM role for Ground Station service data delivery"
   type        = string
 }
 

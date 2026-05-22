@@ -14,6 +14,8 @@ provider "awscc" {
   region = var.region
 }
 
+data "aws_caller_identity" "current" {}
+
 locals {
   common_tags = merge(var.tags, {
     Project     = var.project_name
@@ -53,14 +55,38 @@ module "mission_profile" {
   tags                 = local.common_tags
 }
 
-# Processing pipeline module (FEAT-002) - conditionally created
-# module "processing_pipeline" {
-#   count  = var.enable_processing_pipeline ? 1 : 0
-#   source = "./modules/processing_pipeline"
-#
-#   project_name         = var.project_name
-#   environment          = var.environment
-#   reception_bucket_arn = module.s3_delivery.bucket_arn
-#   kms_key_arn          = module.security.kms_key_arn
-#   tags                 = local.common_tags
-# }
+module "contact_scheduler" {
+  source = "./modules/contact_scheduler"
+
+  project_name        = var.project_name
+  environment         = var.environment
+  lambda_role_arn     = module.security.scheduler_role_arn
+  mission_profile_arn = module.mission_profile.mission_profile_arn
+  satellite_arn       = "arn:aws:groundstation::${data.aws_caller_identity.current.account_id}:satellite/${var.satellite_norad_id}"
+  sns_topic_arn       = module.security.sns_topic_arn
+  tags                = local.common_tags
+}
+
+module "processing_pipeline" {
+  count  = var.enable_processing_pipeline ? 1 : 0
+  source = "./modules/processing_pipeline"
+
+  project_name          = var.project_name
+  environment           = var.environment
+  reception_bucket_name = module.s3_delivery.bucket_name
+  reception_bucket_arn  = module.s3_delivery.bucket_arn
+  kms_key_id            = module.security.kms_key_id
+  kms_key_arn           = module.security.kms_key_arn
+  lambda_role_arn       = module.security.processor_role_arn
+  tags                  = local.common_tags
+}
+
+module "observability" {
+  source = "./modules/observability"
+
+  project_name             = var.project_name
+  environment              = var.environment
+  scheduler_log_group_name = module.contact_scheduler.log_group_name
+  reception_bucket_name    = module.s3_delivery.bucket_name
+  tags                     = local.common_tags
+}

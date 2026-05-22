@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Create the Contact Scheduler Lambda (Requirement 3), Processing Pipeline module (Requirement 4), and Observability module (Requirement 5). This covers automated contact scheduling, optional data processing pipeline, CloudWatch dashboard, and SNS notifications.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create lambdas/contact_scheduler/handler.py - Python Lambda function that: queries AWS Ground Station ListContacts API for AVAILABLE contacts in next 48 hours, filters for weekdays only (Mon-Fri), selects the pass with maximum elevation angle, calls ReserveContact to schedule it, publishes SNS notification if no suitable pass found, logs all scheduling decisions to CloudWatch. Include proper error handling and structured logging.",
     "Create lambdas/contact_scheduler/requirements.txt with boto3 (for local dev reference, already available in Lambda runtime)",

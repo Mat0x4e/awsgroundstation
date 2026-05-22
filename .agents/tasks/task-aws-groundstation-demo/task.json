@@ -1,0 +1,7 @@
+{
+  "task_id": "task-aws-groundstation-demo",
+  "task_description": "Build an AWS Ground Station demonstrator as a modular Terraform project for receiving NOAA-20 (JPSS-1) satellite data via S3 Data Delivery. Includes S3 reception infrastructure, Mission Profile configuration, automated Contact Scheduler Lambda, optional processing pipeline, CloudWatch observability, IAM security, and reproducible deployment.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

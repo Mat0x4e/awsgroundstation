@@ -1,0 +1,10 @@
+region                     = "us-east-2"
+environment                = "demo"
+project_name               = "groundstation-noaa20"
+enable_processing_pipeline = false
+satellite_norad_id         = 43013
+
+tags = {
+  Owner   = "satellite-ops"
+  Purpose = "noaa20-hrd-reception"
+}

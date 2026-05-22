@@ -1,0 +1,40 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Create the root Terraform project structure with provider configuration, variables, versions, and all child modules for the AWS Ground Station demonstrator. This includes Requirement 1 (S3 Data Delivery infrastructure), Requirement 2 (Mission Profile), and Requirement 6 (Security/IAM/KMS) as the foundational layer.",
+  "status": "in_progress",
+  "steps": [
+    "Create versions.tf at root with terraform required_version >= 1.5 and required providers: aws ~> 5.0, archive ~> 2.0",
+    "Create variables.tf at root with: region (string, validated against [us-east-2, us-west-2, eu-north-1, me-south-1, ap-southeast-2, af-south-1, eu-west-1, eu-central-1, sa-east-1, us-east-1]), environment (string, default 'demo'), project_name (string, default 'groundstation-noaa20'), enable_processing_pipeline (bool, default false), satellite_norad_id (number, default 43013), tags (map of strings)",
+    "Create main.tf at root that configures the AWS provider with var.region and calls all child modules, passing relevant variables. The processing_pipeline module should be conditionally created using count = var.enable_processing_pipeline ? 1 : 0",
+    "Create outputs.tf at root exposing: mission_profile_arn, reception_bucket_name, reception_bucket_arn, sns_topic_arn, dashboard_url, kms_key_arn, and conditionally output_bucket_name when processing pipeline is enabled",
+    "Create terraform.tfvars.example with sample values",
+    "Create modules/security/main.tf with: KMS CMK for encryption (with key policy allowing Ground Station service), IAM role for Ground Station service (with trust policy for groundstation.amazonaws.com), IAM role for Contact Scheduler Lambda (least privilege: groundstation:ListContacts, groundstation:ReserveContact, sns:Publish, logs:CreateLogGroup/Stream/PutLogEvents), IAM role for Processing Lambda (if enabled: s3:GetObject on reception bucket, s3:PutObject on output bucket, sqs:ReceiveMessage/DeleteMessage, logs permissions), CloudTrail trail for Ground Station API actions",
+    "Create modules/security/variables.tf with inputs: project_name, environment, reception_bucket_arn, output_bucket_arn (optional), enable_processing_pipeline, tags",
+    "Create modules/security/outputs.tf exposing: kms_key_arn, kms_key_id, groundstation_role_arn, scheduler_role_arn, processor_role_arn, cloudtrail_arn",
+    "Create modules/s3_delivery/main.tf with: S3 bucket for CADU reception (SSE-KMS encryption using provided KMS key ARN), bucket policy allowing groundstation.amazonaws.com to PutObject with prefix structure year=YYYY/month=MM/day=DD/contact-id/, lifecycle rule transitioning to GLACIER_DEEP_ARCHIVE after 30 days, public access block (all four settings true), S3 server access logging bucket for delete event auditing, CloudWatch metric alarm monitoring S3 bucket errors (4xx/5xx)",
+    "Create modules/s3_delivery/variables.tf with inputs: project_name, environment, kms_key_arn, tags",
+    "Create modules/s3_delivery/outputs.tf exposing: bucket_name, bucket_arn, bucket_id, logging_bucket_name",
+    "Create modules/mission_profile/main.tf with: aws_groundstation_mission_profile resource configured for NOAA-20 HRD X-band (center frequency 7812 MHz, bandwidth 30 MHz, QPSK modulation, RHCP polarization), minimum viable contact duration 300 seconds (5 min), maximum 720 seconds (12 min), tracking config with minimum elevation angle 10 degrees, dataflow edges connecting antenna to S3 recording config. Include data source to validate satellite registration.",
+    "Create modules/mission_profile/variables.tf with inputs: project_name, environment, satellite_norad_id, reception_bucket_arn, kms_key_arn, tags, minimum_elevation_degrees (default 10), contact_min_duration_seconds (default 300), contact_max_duration_seconds (default 720)",
+    "Create modules/mission_profile/outputs.tf exposing: mission_profile_arn, mission_profile_id"
+  ],
+  "acceptance_criteria": [
+    "Running terraform fmt -check -recursive reports no formatting issues",
+    "Running terraform init successfully downloads all required providers",
+    "Running terraform validate reports the configuration is valid",
+    "The root module correctly references all child modules with appropriate variable passing",
+    "Region variable has a validation block restricting to the 10 supported Ground Station regions",
+    "KMS key, IAM roles, S3 buckets, and Mission Profile are all defined in their respective modules",
+    "All S3 buckets have public access blocks enabled",
+    "Processing pipeline resources are conditionally created based on enable_processing_pipeline variable"
+  ],
+  "verification": [
+    "Install Terraform CLI: download and install terraform binary",
+    "Run: terraform fmt -check -recursive (from project root)",
+    "Run: terraform init (from project root)",
+    "Run: terraform validate (from project root)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

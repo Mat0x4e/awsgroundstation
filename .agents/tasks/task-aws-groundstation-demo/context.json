@@ -1,0 +1,29 @@
+{
+  "project_type": "Terraform infrastructure project with Python Lambda functions for AWS Ground Station NOAA-20 demonstrator",
+  "language": "HCL (Terraform) + Python (Lambda functions)",
+  "build_system": "Terraform CLI for infrastructure validation, Python for Lambda code",
+  "test_framework": "terraform validate + terraform fmt for HCL, pytest for Python Lambda code",
+  "build_command": "terraform init && terraform validate",
+  "test_command": "terraform fmt -check -recursive && terraform validate",
+  "verification_instructions": "1. Run terraform fmt -check -recursive to verify formatting. 2. Run terraform init to download providers. 3. Run terraform validate to confirm syntactically valid configuration. 4. Run python3 -m py_compile on Lambda source files to verify Python syntax.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "1. Install Terraform CLI. 2. Run terraform init in root module. 3. Ensure Python 3.9+ for Lambda development.",
+  "environment_constraints": "Terraform is NOT pre-installed - must be installed. OPEN_INTERNET network mode allows full access to registry.terraform.io and PyPI. No AWS credentials available so cannot run terraform plan/apply - validation only.",
+  "contribution_requirements": "Modular Terraform structure with reusable modules. All Lambda code in Python. Region validation against Ground Station supported regions.",
+  "key_patterns": "Standard Terraform module structure: root module calls child modules. Variables with validation blocks. Outputs for ARNs and resource names. Python Lambda code packaged as zip archives.",
+  "relevant_files": [
+    "main.tf",
+    "variables.tf",
+    "outputs.tf",
+    "versions.tf",
+    "modules/s3_delivery/main.tf",
+    "modules/mission_profile/main.tf",
+    "modules/contact_scheduler/main.tf",
+    "modules/processing_pipeline/main.tf",
+    "modules/observability/main.tf",
+    "modules/security/main.tf",
+    "lambdas/contact_scheduler/handler.py",
+    "lambdas/data_processor/handler.py"
+  ],
+  "directory_structure": "Root: main.tf, variables.tf, outputs.tf, versions.tf, terraform.tfvars.example. modules/: one module per requirement area. lambdas/: Python source for Lambda functions."
+}

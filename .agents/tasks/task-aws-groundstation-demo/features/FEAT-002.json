@@ -1,0 +1,44 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Create the Contact Scheduler Lambda (Requirement 3), Processing Pipeline module (Requirement 4), and Observability module (Requirement 5). This covers automated contact scheduling, optional data processing pipeline, CloudWatch dashboard, and SNS notifications.",
+  "status": "pending",
+  "steps": [
+    "Create lambdas/contact_scheduler/handler.py - Python Lambda function that: queries AWS Ground Station ListContacts API for AVAILABLE contacts in next 48 hours, filters for weekdays only (Mon-Fri), selects the pass with maximum elevation angle, calls ReserveContact to schedule it, publishes SNS notification if no suitable pass found, logs all scheduling decisions to CloudWatch. Include proper error handling and structured logging.",
+    "Create lambdas/contact_scheduler/requirements.txt with boto3 (for local dev reference, already available in Lambda runtime)",
+    "Create modules/contact_scheduler/main.tf with: Lambda function (Python 3.9 runtime, handler.handler entry point, 60s timeout, 256MB memory), archive_file data source to zip the Lambda code, EventBridge rule with cron(0 6 ? * MON-FRI *) to trigger at 06:00 UTC weekdays, EventBridge target pointing to the Lambda, Lambda permission for events.amazonaws.com invocation, CloudWatch Log Group with 90-day retention, SNS topic for scheduler notifications (no suitable pass alerts)",
+    "Create modules/contact_scheduler/variables.tf with inputs: project_name, environment, lambda_role_arn, mission_profile_arn, satellite_arn, sns_topic_arn, minimum_elevation_degrees (default 10), tags",
+    "Create modules/contact_scheduler/outputs.tf exposing: lambda_function_arn, lambda_function_name, eventbridge_rule_arn, log_group_name",
+    "Create lambdas/data_processor/handler.py - Python Lambda function that: receives SQS event containing S3 notification, downloads CADU file from reception bucket, performs basic processing (validates CADU frame structure, extracts metadata), uploads processed output to output bucket with date-based prefix (output/year=YYYY/month=MM/day=DD/), publishes CloudWatch custom metrics (processing_duration_ms, input_size_bytes, status), handles errors gracefully with structured logging",
+    "Create lambdas/data_processor/requirements.txt with boto3",
+    "Create modules/processing_pipeline/main.tf with: S3 output bucket (SSE-KMS encrypted, public access block), S3 event notification on reception bucket for new .cadu objects, SQS queue receiving S3 notifications, SQS dead letter queue (maxReceiveCount 3), Lambda function (Python 3.9, handler.handler, 300s timeout, 512MB memory), Lambda event source mapping from SQS, SNS topic for DLQ/failure alerts, CloudWatch alarm on DLQ messages visible. All resources conditional on enable_processing_pipeline.",
+    "Create modules/processing_pipeline/variables.tf with inputs: project_name, environment, reception_bucket_name, reception_bucket_arn, kms_key_id, kms_key_arn, lambda_role_arn, tags",
+    "Create modules/processing_pipeline/outputs.tf exposing: output_bucket_name, output_bucket_arn, sqs_queue_arn, dlq_arn, lambda_function_arn, sns_failure_topic_arn",
+    "Create modules/observability/main.tf with: CloudWatch dashboard showing contacts planned/active/completed/failed metrics, data volume received, success rate, estimated cost widget; SNS topic for contact failure notifications; CloudWatch metric alarms for FAILED and FAILED_TO_SCHEDULE contact statuses; EventBridge rule catching Ground Station contact state changes (FAILED, FAILED_TO_SCHEDULE) targeting SNS; CloudWatch Log Groups for all components with 90-day retention",
+    "Create modules/observability/variables.tf with inputs: project_name, environment, scheduler_log_group_name, reception_bucket_name, tags",
+    "Create modules/observability/outputs.tf exposing: dashboard_arn, dashboard_url, sns_alerts_topic_arn, contact_failure_alarm_arn",
+    "Update root main.tf to wire all new modules together: pass security module outputs (role ARNs, KMS key) to contact_scheduler, processing_pipeline, and observability modules. Ensure processing_pipeline module is conditional on var.enable_processing_pipeline.",
+    "Update root outputs.tf to include: scheduler_lambda_arn, eventbridge_rule_arn, dashboard_url, and conditionally output_bucket_name and processing_lambda_arn"
+  ],
+  "acceptance_criteria": [
+    "Running terraform fmt -check -recursive reports no formatting issues",
+    "Running terraform init and terraform validate succeed with no errors",
+    "Contact Scheduler Lambda Python code compiles without syntax errors (python3 -m py_compile)",
+    "Data Processor Lambda Python code compiles without syntax errors",
+    "EventBridge rule uses correct cron expression for 06:00 UTC weekdays",
+    "Processing pipeline resources are all conditional on enable_processing_pipeline",
+    "DLQ is configured with maxReceiveCount of 3 on the main SQS queue",
+    "CloudWatch dashboard JSON contains widgets for all required metrics",
+    "All Log Groups have 90-day retention configured",
+    "SNS notifications configured for both scheduler (no pass) and contact failures"
+  ],
+  "verification": [
+    "Run: terraform fmt -check -recursive",
+    "Run: terraform init",
+    "Run: terraform validate",
+    "Run: python3 -m py_compile lambdas/contact_scheduler/handler.py",
+    "Run: python3 -m py_compile lambdas/data_processor/handler.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

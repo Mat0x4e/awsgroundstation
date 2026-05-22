@@ -163,6 +163,14 @@ resource "aws_iam_role_policy" "scheduler_lambda" {
       {
         Effect = "Allow"
         Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt"
+        ]
+        Resource = aws_kms_key.groundstation.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
           "logs:PutLogEvents"
@@ -234,6 +242,13 @@ resource "aws_iam_role_policy" "processor_lambda" {
           "sqs:GetQueueAttributes"
         ]
         Resource = "arn:aws:sqs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:${var.project_name}-${var.environment}-*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricData"
+        ]
+        Resource = "*"
       },
       {
         Effect = "Allow"

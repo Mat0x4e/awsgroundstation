@@ -68,7 +68,7 @@ resource "aws_s3_bucket_policy" "reception" {
           Service = "groundstation.amazonaws.com"
         }
         Action   = "s3:PutObject"
-        Resource = "${aws_s3_bucket.reception.arn}/year=*/month=*/day=*/contact-id=*/*"
+        Resource = "${aws_s3_bucket.reception.arn}/year=*/month=*/day=*/satellite=*/*"
       },
       {
         Sid    = "AllowGroundStationGetBucketLocation"

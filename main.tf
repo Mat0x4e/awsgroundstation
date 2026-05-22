@@ -3,9 +3,12 @@ provider "aws" {
 
   default_tags {
     tags = merge(var.tags, {
-      Project     = var.project_name
-      Environment = var.environment
-      ManagedBy   = "terraform"
+      Project         = var.project_name
+      Environment     = var.environment
+      ManagedBy       = "terraform"
+      Objective       = var.objective
+      Owner           = var.owner
+      "Creation-Date" = var.creation_date
     })
   }
 }
@@ -18,9 +21,12 @@ data "aws_caller_identity" "current" {}
 
 locals {
   common_tags = merge(var.tags, {
-    Project     = var.project_name
-    Environment = var.environment
-    ManagedBy   = "terraform"
+    Project         = var.project_name
+    Environment     = var.environment
+    ManagedBy       = "terraform"
+    Objective       = var.objective
+    Owner           = var.owner
+    "Creation-Date" = var.creation_date
   })
 }
 

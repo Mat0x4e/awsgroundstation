@@ -49,6 +49,24 @@ variable "satellite_norad_id" {
   default     = 43013
 }
 
+variable "objective" {
+  description = "Project objective tag"
+  type        = string
+  default     = "demonstrator"
+}
+
+variable "owner" {
+  description = "Project owner"
+  type        = string
+  default     = "mathieu.bonnet"
+}
+
+variable "creation_date" {
+  description = "Project creation date (ISO format)"
+  type        = string
+  default     = "2025-05-22"
+}
+
 variable "tags" {
   description = "Common tags applied to all resources"
   type        = map(string)

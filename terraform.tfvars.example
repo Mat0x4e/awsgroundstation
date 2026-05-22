@@ -5,5 +5,10 @@ project_name               = "groundstation-noaa20"
 ground_station_enabled     = false
 enable_processing_pipeline = false
 
+# Default tags
+objective     = "demonstrator"
+owner         = "mathieu.bonnet"
+creation_date = "2025-05-22"
+
 # Stage 2: Once Ground Station access is approved, set:
 # ground_station_enabled = true

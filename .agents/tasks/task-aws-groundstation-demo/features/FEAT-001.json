@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Create the root Terraform project structure with provider configuration, variables, versions, and all child modules for the AWS Ground Station demonstrator. This includes Requirement 1 (S3 Data Delivery infrastructure), Requirement 2 (Mission Profile), and Requirement 6 (Security/IAM/KMS) as the foundational layer.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create versions.tf at root with terraform required_version >= 1.5 and required providers: aws ~> 5.0, archive ~> 2.0",
     "Create variables.tf at root with: region (string, validated against [us-east-2, us-west-2, eu-north-1, me-south-1, ap-southeast-2, af-south-1, eu-west-1, eu-central-1, sa-east-1, us-east-1]), environment (string, default 'demo'), project_name (string, default 'groundstation-noaa20'), enable_processing_pipeline (bool, default false), satellite_norad_id (number, default 43013), tags (map of strings)",
@@ -36,5 +36,5 @@
     "Run: terraform validate (from project root)"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Used awscc provider (~>1.0) for Ground Station resources (awscc_groundstation_config, awscc_groundstation_mission_profile) since the hashicorp/aws provider does not support these resource types. The S3 recording prefix uses {satellite_id} placeholder instead of {contact_id} since the awscc provider validates prefix against a strict regex that only allows specific placeholders. Lifecycle configuration requires an empty filter {} block to avoid deprecation warnings in provider 5.x."
 }

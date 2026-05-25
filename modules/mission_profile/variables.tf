@@ -42,8 +42,3 @@ variable "contact_min_duration_seconds" {
   default     = 300
 }
 
-variable "contact_max_duration_seconds" {
-  description = "Maximum contact duration in seconds"
-  type        = number
-  default     = 720
-}

@@ -24,13 +24,16 @@ resource "awscc_groundstation_config" "tracking" {
   ]
 }
 
-# Antenna downlink configuration for X-band HRD
-# NOAA-20 HRD: 7812 MHz center, 30 MHz bandwidth, QPSK modulation, RHCP polarization
-resource "awscc_groundstation_config" "antenna_downlink" {
-  name = "${var.project_name}-${var.environment}-antenna-downlink"
+# Antenna downlink demod/decode configuration for X-band HRD
+# NOAA-20 HRD: 7812 MHz center, 30 MHz bandwidth, QPSK demodulation, RHCP polarization
+# DemodulationConfig and DecodeConfig use UnvalidatedJSON per the CloudFormation schema.
+# QPSK demodulation is specified in the unvalidated_json field.
+# DecodeConfig is set to a passthrough (empty object) for raw CADU frame delivery to S3.
+resource "awscc_groundstation_config" "antenna_downlink_demod_decode" {
+  name = "${var.project_name}-${var.environment}-antenna-downlink-demod-decode"
 
   config_data = {
-    antenna_downlink_config = {
+    antenna_downlink_demod_decode_config = {
       spectrum_config = {
         bandwidth = {
           units = "MHz"
@@ -42,13 +45,23 @@ resource "awscc_groundstation_config" "antenna_downlink" {
         }
         polarization = "RIGHT_HAND"
       }
+      demodulation_config = {
+        unvalidated_json = jsonencode({
+          type = "QPSK"
+        })
+      }
+      decode_config = {
+        unvalidated_json = jsonencode({
+          type = "PASSTHROUGH"
+        })
+      }
     }
   }
 
   tags = [
     {
       key   = "Name"
-      value = "${var.project_name}-${var.environment}-antenna-downlink"
+      value = "${var.project_name}-${var.environment}-antenna-downlink-demod-decode"
     },
     {
       key   = "Frequency"
@@ -102,12 +115,26 @@ resource "awscc_groundstation_mission_profile" "noaa20_hrd" {
 
   dataflow_edges = [
     {
-      source      = awscc_groundstation_config.antenna_downlink.arn
+      source      = awscc_groundstation_config.antenna_downlink_demod_decode.arn
       destination = awscc_groundstation_config.s3_recording.arn
     }
   ]
 
   tracking_config_arn = awscc_groundstation_config.tracking.arn
+
+  lifecycle {
+    precondition {
+      condition     = var.satellite_onboarded == true
+      error_message = <<-EOT
+        satellite_onboarded must be set to true before creating Ground Station resources.
+        NOAA-20 (NORAD ID ${var.satellite_norad_id}) must be onboarded into this AWS account
+        as a manual prerequisite — contacts cannot be scheduled for a satellite that is not
+        registered. Follow the onboarding steps at:
+        https://docs.aws.amazon.com/ground-station/latest/ug/getting-started.html
+        Once confirmed, set satellite_onboarded = true in terraform.tfvars.
+      EOT
+    }
+  }
 
   tags = [
     {

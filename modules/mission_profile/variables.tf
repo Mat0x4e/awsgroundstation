@@ -42,3 +42,14 @@ variable "contact_min_duration_seconds" {
   default     = 300
 }
 
+variable "satellite_onboarded" {
+  description = <<-EOT
+    Confirms that the target satellite (NORAD ID specified by satellite_norad_id) has been
+    onboarded into this AWS account. This is a manual prerequisite — Ground Station resources
+    cannot be scheduled for a satellite that is not registered in the account.
+    See: https://docs.aws.amazon.com/ground-station/latest/ug/getting-started.html
+  EOT
+  type        = bool
+  default     = false
+}
+

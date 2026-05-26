@@ -1,5 +1,6 @@
 provider "aws" {
-  region = var.region
+  region  = var.region
+  profile = var.aws_profile
 
   default_tags {
     tags = merge(var.tags, {
@@ -14,7 +15,8 @@ provider "aws" {
 }
 
 provider "awscc" {
-  region = var.region
+  region  = var.region
+  profile = var.aws_profile
 }
 
 data "aws_caller_identity" "current" {}
@@ -44,10 +46,11 @@ module "security" {
 module "s3_delivery" {
   source = "./modules/s3_delivery"
 
-  project_name = var.project_name
-  environment  = var.environment
-  kms_key_arn  = module.security.kms_key_arn
-  tags         = local.common_tags
+  project_name  = var.project_name
+  environment   = var.environment
+  kms_key_arn   = module.security.kms_key_arn
+  sns_topic_arn = module.security.sns_topic_arn
+  tags          = local.common_tags
 }
 
 module "mission_profile" {
@@ -57,6 +60,7 @@ module "mission_profile" {
   project_name           = var.project_name
   environment            = var.environment
   satellite_norad_id     = var.satellite_norad_id
+  satellite_onboarded    = var.satellite_onboarded
   reception_bucket_arn   = module.s3_delivery.bucket_arn
   groundstation_role_arn = module.security.groundstation_role_arn
   tags                   = local.common_tags

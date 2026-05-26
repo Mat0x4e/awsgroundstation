@@ -6,19 +6,19 @@ Ce plan couvre uniquement les lacunes identifiées lors de l'analyse de conformi
 
 ## Tasks
 
-- [ ] 1. Configurer la démodulation QPSK dans le profil antenne
-  - [ ] 1.1 Remplacer `antenna_downlink_config` par `antenna_downlink_demod_decode_config` dans le module mission_profile
+- [x] 1. Configurer la démodulation QPSK dans le profil antenne
+  - [x] 1.1 Remplacer `antenna_downlink_config` par `antenna_downlink_demod_decode_config` dans le module mission_profile
     - Modifier `modules/mission_profile/main.tf` : remplacer le bloc `antenna_downlink_config` par `antenna_downlink_demod_decode_config` incluant les paramètres de démodulation QPSK (modulation, coding, unvalidated frame length)
     - Conserver les paramètres spectraux existants : 7812 MHz, 30 MHz BW, RHCP
     - Mettre à jour le dataflow edge dans le mission profile si l'ARN de la config change
     - _Requirements: 2.1_
 
-  - [ ] 1.2 Mettre à jour les tags et le nom de la ressource pour refléter demod-decode
+  - [x] 1.2 Mettre à jour les tags et le nom de la ressource pour refléter demod-decode
     - Renommer la ressource de `antenna_downlink` à `antenna_downlink_demod_decode` (ou ajouter un suffixe explicite)
     - Mettre à jour les références dans `awscc_groundstation_mission_profile.noaa20_hrd.dataflow_edges`
     - _Requirements: 2.1_
 
-- [ ] 2. Ajouter l'action SNS à l'alarme S3 errors
+- [x] 2. Ajouter l'action SNS à l'alarme S3 errors
   - [x] 2.1 Ajouter une variable `sns_topic_arn` au module s3_delivery
     - Ajouter la variable dans `modules/s3_delivery/variables.tf`
     - Passer `module.security.sns_topic_arn` depuis `main.tf` lors de l'appel du module
@@ -28,17 +28,17 @@ Ce plan couvre uniquement les lacunes identifiées lors de l'analyse de conformi
     - Ajouter `alarm_actions = [var.sns_topic_arn]` à la ressource dans `modules/s3_delivery/main.tf`
     - _Requirements: 1.5_
 
-- [ ] 3. Checkpoint — Valider la configuration
+- [x] 3. Checkpoint — Valider la configuration
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 4. Ajouter la validation du satellite NOAA-20
-  - [ ] 4.1 Créer un data source ou une précondition pour vérifier l'enregistrement du satellite
+- [x] 4. Ajouter la validation du satellite NOAA-20
+  - [x] 4.1 Créer un data source ou une précondition pour vérifier l'enregistrement du satellite
     - Ajouter un `data "aws_groundstation_satellite"` ou un bloc `precondition` dans le module mission_profile (ou dans `main.tf`) vérifiant que le satellite NORAD ID 43013 est onboarded dans le compte
     - Si le data source n'existe pas dans le provider AWS, utiliser un `check` block Terraform ou un `precondition` sur le module avec un message d'erreur explicite
     - _Requirements: 7.3_
 
-- [ ] 5. Remplacer le widget texte statique par une métrique de coût calculée
-  - [ ] 5.1 Remplacer le widget `text` "Estimated Cost" par un widget `metric` dans le dashboard CloudWatch
+- [x] 5. Remplacer le widget texte statique par une métrique de coût calculée
+  - [x] 5.1 Remplacer le widget `text` "Estimated Cost" par un widget `metric` dans le dashboard CloudWatch
     - Modifier `modules/observability/main.tf` : remplacer le dernier widget (type `text`) par un widget de type `metric` basé sur la durée des contacts (métrique `ContactDuration` ou calcul à partir de `ContactStatus` COMPLETED × durée moyenne)
     - Utiliser une expression mathématique CloudWatch si possible, sinon un widget `metric` avec la métrique `AWS/GroundStation` pertinente
     - _Requirements: 5.4_
@@ -50,7 +50,7 @@ Ce plan couvre uniquement les lacunes identifiées lors de l'analyse de conformi
     - Option B : ajouter un commentaire expliquant son usage futur et l'utiliser dans une validation ou un tag
     - _Requirements: 2.4_
 
-- [ ] 7. Checkpoint final — Validation Terraform
+- [x] 7. Checkpoint final — Validation Terraform
   - Exécuter `terraform fmt -check -recursive`, `terraform validate`, et `terraform plan`
   - Ensure all tests pass, ask the user if questions arise.
 

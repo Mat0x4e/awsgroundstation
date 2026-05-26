@@ -129,7 +129,7 @@ resource "aws_cloudwatch_dashboard" "groundstation" {
           metrics = [["AWS/GroundStation", "ContactStatus", "Status", "SCHEDULED"]]
           period  = 300
           stat    = "Sum"
-          region  = data.aws_region.current.name
+          region  = data.aws_region.current.id
         }
       },
       {
@@ -143,7 +143,7 @@ resource "aws_cloudwatch_dashboard" "groundstation" {
           metrics = [["AWS/GroundStation", "ContactStatus", "Status", "PASS"]]
           period  = 300
           stat    = "Sum"
-          region  = data.aws_region.current.name
+          region  = data.aws_region.current.id
         }
       },
       {
@@ -157,7 +157,7 @@ resource "aws_cloudwatch_dashboard" "groundstation" {
           metrics = [["AWS/GroundStation", "ContactStatus", "Status", "COMPLETED"]]
           period  = 300
           stat    = "Sum"
-          region  = data.aws_region.current.name
+          region  = data.aws_region.current.id
         }
       },
       {
@@ -171,7 +171,7 @@ resource "aws_cloudwatch_dashboard" "groundstation" {
           metrics = [["AWS/GroundStation", "ContactStatus", "Status", "FAILED"]]
           period  = 300
           stat    = "Sum"
-          region  = data.aws_region.current.name
+          region  = data.aws_region.current.id
         }
       },
       {
@@ -185,7 +185,7 @@ resource "aws_cloudwatch_dashboard" "groundstation" {
           metrics = [["AWS/S3", "BucketSizeBytes", "BucketName", var.reception_bucket_name, "StorageType", "StandardStorage"]]
           period  = 86400
           stat    = "Average"
-          region  = data.aws_region.current.name
+          region  = data.aws_region.current.id
         }
       },
       {
@@ -202,17 +202,31 @@ resource "aws_cloudwatch_dashboard" "groundstation" {
           ]
           period = 3600
           stat   = "Sum"
-          region = data.aws_region.current.name
+          region = data.aws_region.current.id
         }
       },
       {
-        type   = "text"
+        type   = "metric"
         x      = 0
         y      = 18
         width  = 24
-        height = 3
+        height = 6
         properties = {
-          markdown = "## Estimated Cost\nGround Station contacts are billed per-minute. Monitor contact duration and frequency to estimate costs. See [AWS Ground Station Pricing](https://aws.amazon.com/ground-station/pricing/)."
+          title = "Estimated Cost (USD)"
+          metrics = [
+            [{ "expression" = "m1 * 100", "label" = "Estimated Cost (USD) — ~$100/contact (10 min × $10/min)", "id" = "cost" }],
+            ["AWS/GroundStation", "ContactStatus", "Status", "COMPLETED", { "id" = "m1", "visible" = false, "stat" = "Sum" }]
+          ]
+          period = 86400
+          stat   = "Sum"
+          region = data.aws_region.current.id
+          view   = "timeSeries"
+          yAxis = {
+            left = {
+              label     = "USD"
+              showUnits = false
+            }
+          }
         }
       }
     ]

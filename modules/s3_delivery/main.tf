@@ -145,6 +145,7 @@ resource "aws_cloudwatch_metric_alarm" "s3_errors" {
   threshold           = 10
   alarm_description   = "Alert when S3 bucket experiences elevated 4xx errors"
   treat_missing_data  = "notBreaching"
+  alarm_actions       = [var.sns_topic_arn]
 
   dimensions = {
     BucketName = aws_s3_bucket.reception.id

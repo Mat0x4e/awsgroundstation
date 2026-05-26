@@ -13,6 +13,11 @@ variable "kms_key_arn" {
   type        = string
 }
 
+variable "sns_topic_arn" {
+  description = "ARN of the SNS topic for S3 alarm notifications"
+  type        = string
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

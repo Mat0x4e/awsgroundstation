@@ -37,6 +37,17 @@ variable "ground_station_enabled" {
   default     = false
 }
 
+variable "satellite_onboarded" {
+  description = <<-EOT
+    Confirms that the target satellite (NORAD ID 43013 — NOAA-20) has been onboarded
+    into this AWS account via the Ground Station console or support request.
+    Must be explicitly set to true alongside ground_station_enabled = true.
+    Onboarding is a manual prerequisite: https://docs.aws.amazon.com/ground-station/latest/ug/getting-started.html
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "enable_processing_pipeline" {
   description = "Whether to create the processing pipeline resources"
   type        = bool
@@ -56,15 +67,21 @@ variable "objective" {
 }
 
 variable "owner" {
-  description = "Project owner"
+  description = "Project owner (must be an @soprasteria.com email per org tag policy)"
   type        = string
-  default     = "mathieu.bonnet"
+  default     = "mathieu.bonnet@soprasteria.com"
 }
 
 variable "creation_date" {
   description = "Project creation date (ISO format)"
   type        = string
   default     = "2025-05-22"
+}
+
+variable "aws_profile" {
+  description = "AWS CLI profile to use for authentication"
+  type        = string
+  default     = null
 }
 
 variable "tags" {

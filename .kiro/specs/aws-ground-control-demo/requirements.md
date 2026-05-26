@@ -39,6 +39,101 @@ Démonstration de AWS Ground Station — un prototype d'infrastructure Terraform
 - **Contact_Scheduler**: Composant automatisant la planification des contacts en fonction des passages prédits de NOAA-20
 - **Contact_Dashboard**: Interface CloudWatch de suivi des contacts planifiés et exécutés, avec métriques de qualité
 
+## Schémas fonctionnels
+
+### Planification des contacts
+
+```mermaid
+sequenceDiagram
+    participant EB as EventBridge<br/>(cron 06:00 UTC)
+    participant CS as Contact Scheduler<br/>(Lambda)
+    participant GS as AWS Ground Station<br/>API
+    participant SNS as SNS Topic
+    participant CW as CloudWatch Logs
+
+    EB->>CS: Déclenchement quotidien
+    CS->>GS: ListContacts(status=AVAILABLE,<br/>startTime=now, endTime=now+48h)
+    GS-->>CS: Liste des passages disponibles
+    
+    alt Passage avec élévation ≥ 10°
+        CS->>CS: Sélection du passage<br/>avec élévation maximale
+        CS->>GS: ReserveContact(missionProfileArn,<br/>satelliteArn, startTime, endTime)
+        GS-->>CS: Contact réservé (contactId)
+        CS->>CW: Log: contact planifié<br/>(station, élévation, créneau)
+    else Aucun passage ≥ 10°
+        CS->>SNS: Notification: aucun passage<br/>disponible dans les 48h
+        CS->>CW: Log: aucun passage éligible
+    end
+```
+
+### Profil de mission et flux de données
+
+```mermaid
+flowchart TB
+    subgraph Espace["🛰️ Espace"]
+        SAT[NOAA-20 / JPSS-1<br/>Orbite LEO 825 km<br/>NORAD ID 43013]
+    end
+
+    subgraph GS["📡 AWS Ground Station"]
+        ANT[Antenne bande X<br/>7812 MHz / 30 MHz BW<br/>QPSK / RHCP]
+        MP[Mission Profile<br/>Élévation min: 10°<br/>Durée: 5–12 min]
+        DEMOD[Démodulation &<br/>Décodage CADU]
+    end
+
+    subgraph AWS["☁️ AWS Cloud (eu-central-1)"]
+        S3R[(S3 Réception<br/>SSE-KMS<br/>year/month/day/contact-id/)]
+        S3L[(S3 Logs<br/>Access Logging)]
+        
+        subgraph Pipeline["Pipeline optionnel"]
+            SQS[SQS Queue]
+            PROC[Lambda<br/>Data Processor]
+            DLQ[DLQ]
+            S3O[(S3 Output)]
+        end
+
+        subgraph Observabilité
+            CW[CloudWatch<br/>Dashboard]
+            ALARM[Alarmes<br/>Contact Failed]
+            SNS[SNS<br/>Notifications]
+            CT[CloudTrail<br/>Audit]
+        end
+    end
+
+    SAT -->|Flux HRD bande X<br/>~15 Mbps| ANT
+    ANT --> DEMOD
+    MP -.->|Configure| ANT
+    DEMOD -->|S3 Data Delivery<br/>Trames CADU| S3R
+    S3R -->|Access logs| S3L
+    S3R -->|Notification S3| SQS
+    SQS --> PROC
+    PROC -->|Données traitées| S3O
+    PROC -->|Échec| DLQ
+    S3R -->|Métriques| CW
+    GS -->|État contact| ALARM
+    ALARM --> SNS
+    S3R -.->|30 jours| GLACIER[(Glacier<br/>Deep Archive)]
+```
+
+### Cycle de vie d'un contact
+
+```mermaid
+stateDiagram-v2
+    [*] --> AVAILABLE: Passage prédit<br/>par éphémérides
+    AVAILABLE --> SCHEDULING: ReserveContact()
+    SCHEDULING --> SCHEDULED: Confirmation
+    SCHEDULED --> PREPASS: T-5 min
+    PREPASS --> PASS: Acquisition signal
+    PASS --> POSTPASS: Fin de visibilité
+    POSTPASS --> COMPLETED: Données livrées S3
+    
+    SCHEDULING --> FAILED_TO_SCHEDULE: Conflit / erreur
+    PASS --> FAILED: Perte signal /<br/>erreur antenne
+    
+    FAILED_TO_SCHEDULE --> [*]: Notification SNS
+    FAILED --> [*]: Notification SNS
+    COMPLETED --> [*]: Métriques CloudWatch
+```
+
 ## Requirements
 
 > **Convention de rédaction** : Les critères d'acceptation suivent le standard EARS (Easy Approach to Requirements Syntax) conforme aux règles de qualité INCOSE. Les mots-clés en majuscules anglaises sont des marqueurs normatifs :
@@ -59,7 +154,7 @@ Démonstration de AWS Ground Station — un prototype d'infrastructure Terraform
 
 1. THE Ground_Station_System SHALL créer un bucket S3 chiffré (SSE-KMS) dédié à la réception des trames CADU brutes de NOAA-20
 2. THE Ground_Station_System SHALL configurer la politique du bucket pour autoriser le service AWS Ground Station (`groundstation.amazonaws.com`) à y déposer des objets
-3. THE Ground_Station_System SHALL organiser les données reçues avec un préfixe structuré par date et identifiant de contact (`year=YYYY/month=MM/day=DD/contact-id/`)
+3. THE Ground_Station_System SHALL organiser les données reçues de manière structurée par date et identifiant de contact
 4. THE Ground_Station_System SHALL configurer une règle de cycle de vie S3 pour archiver les données vers Glacier Deep Archive après 30 jours
 5. IF le bucket S3 de réception est inaccessible lors d'un contact, THEN THE Ground_Station_System SHALL émettre une alarme CloudWatch
 
@@ -83,7 +178,7 @@ Démonstration de AWS Ground Station — un prototype d'infrastructure Terraform
 
 1. THE Contact_Scheduler SHALL interroger l'API AWS Ground Station (`ListContacts` avec statut `AVAILABLE`) pour identifier les créneaux de passage de NOAA-20 dans les prochaines 48 heures
 2. THE Contact_Scheduler SHALL planifier automatiquement un contact par jour ouvré (du lundi au vendredi) en sélectionnant le passage avec l'élévation maximale
-3. THE Contact_Scheduler SHALL être déclenché quotidiennement via une règle EventBridge (cron) à 06:00 UTC
+3. THE Contact_Scheduler SHALL être déclenché automatiquement chaque jour à 06:00 UTC
 4. IF aucun passage disponible ne dépasse l'angle d'élévation minimum de 10 degrés dans les prochaines 48 heures, THEN THE Contact_Scheduler SHALL émettre une notification SNS informant l'opérateur
 5. THE Contact_Scheduler SHALL enregistrer chaque planification (créneau choisi, station au sol, élévation maximale) dans les logs CloudWatch
 
@@ -93,8 +188,8 @@ Démonstration de AWS Ground Station — un prototype d'infrastructure Terraform
 
 #### Acceptance Criteria
 
-1. WHERE le pipeline de traitement est activé (variable Terraform `enable_processing_pipeline = true`), THE Data_Pipeline SHALL déclencher automatiquement un traitement via une notification S3 → SQS → Lambda à chaque nouveau fichier CADU déposé
-2. WHERE le pipeline de traitement est activé, THE Data_Pipeline SHALL stocker les données traitées dans un bucket S3 de sortie distinct, organisées par date (`output/year=YYYY/month=MM/day=DD/`)
+1. WHERE le pipeline de traitement est activé, THE Data_Pipeline SHALL déclencher automatiquement un traitement à chaque nouveau fichier CADU déposé dans le bucket de réception
+2. WHERE le pipeline de traitement est activé, THE Data_Pipeline SHALL stocker les données traitées dans un espace de stockage de sortie distinct, organisé par date
 3. IF le traitement échoue, THEN THE Data_Pipeline SHALL rediriger le message vers une file DLQ (Dead Letter Queue) et émettre une notification SNS
 4. WHERE le pipeline de traitement est activé, THE Data_Pipeline SHALL enregistrer les métriques de traitement (durée, taille des données brutes, statut) dans CloudWatch
 5. WHERE le pipeline de traitement est désactivé, THE Ground_Station_System SHALL uniquement stocker les données brutes dans le bucket de réception sans traitement supplémentaire
@@ -119,7 +214,7 @@ Démonstration de AWS Ground Station — un prototype d'infrastructure Terraform
 1. THE Ground_Station_System SHALL créer des rôles IAM dédiés avec des politiques de moindre privilège pour chaque composant (Lambda scheduler, Lambda traitement, service Ground Station, accès S3)
 2. THE Ground_Station_System SHALL chiffrer toutes les données au repos avec des clés KMS gérées par le client (CMK)
 3. THE Ground_Station_System SHALL activer CloudTrail pour auditer toutes les actions API liées à Ground Station dans la région de déploiement
-4. THE Ground_Station_System SHALL bloquer l'accès public aux buckets S3 via `aws_s3_bucket_public_access_block`
+4. THE Ground_Station_System SHALL bloquer tout accès public aux buckets de stockage
 5. IF une tentative de suppression d'objet est détectée sur le bucket de réception, THEN THE Ground_Station_System SHALL journaliser l'événement via S3 Server Access Logging
 
 ### Requirement 7: Déploiement et reproductibilité

@@ -6,7 +6,16 @@ Ce document décrit l'architecture de haut niveau du démonstrateur AWS Ground S
 
 **Satellite cible** : NOAA-20 (NORAD ID 43013), orbite LEO héliosynchrone 825 km, flux HRD bande X (7812 MHz, 30 MHz BW, QPSK, RHCP).
 
-**Région de déploiement** : `eu-central-1` (configurable parmi les 10 régions supportées par AWS Ground Station).
+**Région de déploiement** : `eu-central-1` (Frankfurt). Les contacts sont planifiés cross-région via les stations compatibles NOAA-20.
+
+**Stations Ground Station disponibles pour NOAA-20** (vérifié 2026-06-18) :
+- Cape Town 1 (`af-south-1`)
+- Hawaii 1 (`us-west-2`)
+- Ohio 1 (`us-east-2`)
+- Oregon 1 (`us-west-2`)
+- Stockholm 1 (`eu-north-1`) — station européenne la plus proche
+
+⚠️ **Ireland 1 (`eu-west-1`) ne supporte PAS NOAA-20.** Les contacts sont planifiés cross-région depuis `eu-central-1`.
 
 **Feature flags** :
 - `ground_station_enabled` — contrôle la création du Mission Profile et des ressources Ground Station

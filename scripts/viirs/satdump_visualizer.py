@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from scripts.viirs.models import CompositeInfo
+from .models import CompositeInfo
 
 
 class NoCompositesError(Exception):

@@ -24,9 +24,11 @@ from .models import BoundingBox, CBORMetadata, NASAMetadata
 
 
 # ---------------------------------------------------------------------------
-# Static POI list — major European cities (lat, lon, name)
+# Static POI list — global coverage (lat, lon, name)
+# Includes European cities, Caribbean/Central America, Pacific islands
 # ---------------------------------------------------------------------------
-_EUROPEAN_POI: list[tuple[float, float, str]] = [
+_POI_LIST: list[tuple[float, float, str]] = [
+    # ── Europe ──
     (48.8566, 2.3522, "Paris"),
     (51.5074, -0.1278, "London"),
     (52.5200, 13.4050, "Berlin"),
@@ -44,56 +46,47 @@ _EUROPEAN_POI: list[tuple[float, float, str]] = [
     (50.0755, 14.4378, "Prague"),
     (47.4979, 19.0402, "Budapest"),
     (52.2297, 21.0122, "Warsaw"),
-    (44.8176, 20.4569, "Belgrade"),
-    (45.8150, 15.9819, "Zagreb"),
-    (42.6977, 23.3219, "Sofia"),
-    (44.4268, 26.1025, "Bucharest"),
-    (41.3275, 19.8187, "Tirana"),
     (37.9838, 23.7275, "Athens"),
     (38.7223, -9.1393, "Lisbon"),
-    (43.2965, 5.3698, "Marseille"),
-    (45.7640, 4.8357, "Lyon"),
-    (48.5734, 7.7521, "Strasbourg"),
-    (53.5511, 9.9937, "Hamburg"),
-    (48.1351, 11.5820, "Munich"),
-    (51.2277, 6.7735, "Düsseldorf"),
-    (53.0793, 8.8017, "Bremen"),
-    (51.4556, 7.0116, "Dortmund"),
-    (45.4654, 9.1859, "Milan"),
-    (40.8518, 14.2681, "Naples"),
-    (43.7696, 11.2558, "Florence"),
-    (45.4375, 12.3358, "Venice"),
-    (39.2238, 9.1217, "Cagliari"),
-    (37.5079, 15.0830, "Catania"),
-    (41.1579, -8.6291, "Porto"),
-    (36.7213, -4.4214, "Málaga"),
     (41.3851, 2.1734, "Barcelona"),
-    (37.3891, -5.9845, "Seville"),
-    (43.2627, -2.9253, "Bilbao"),
-    (51.9225, 4.4792, "Rotterdam"),
-    (51.4416, 5.4697, "Eindhoven"),
-    (50.6292, 3.0573, "Lille"),
-    (43.6047, 1.4442, "Toulouse"),
-    (47.2184, -1.5536, "Nantes"),
-    (44.8378, -0.5792, "Bordeaux"),
-    (49.4431, 1.0993, "Rouen"),
-    (60.3913, 5.3221, "Bergen"),
-    (63.4305, 10.3951, "Trondheim"),
-    (57.7089, 11.9746, "Gothenburg"),
-    (55.7047, 13.1910, "Malmö"),
-    (60.4518, 22.2666, "Turku"),
-    (61.4978, 23.7610, "Tampere"),
-    (64.1455, -21.9420, "Keflavik"),
-    (55.9533, -3.1883, "Edinburgh"),
-    (53.4808, -2.2426, "Manchester"),
-    (52.4862, -1.8904, "Birmingham"),
-    (53.8008, -1.5491, "Leeds"),
-    (53.4084, -2.9916, "Liverpool"),
-    (51.4545, -2.5879, "Bristol"),
-    (57.1497, -2.0943, "Aberdeen"),
-    (54.5973, -5.9301, "Belfast"),
     (53.3498, -6.2603, "Dublin"),
-    (53.2707, -9.0568, "Galway"),
+    # ── Caribbean — countries & islands ──
+    (21.5, -79.9, "Cuba"),
+    (18.9, -72.3, "Haïti"),
+    (18.7, -69.9, "Rép. Dominicaine"),
+    (18.2, -66.5, "Porto Rico"),
+    (18.1, -77.3, "Jamaïque"),
+    (13.1, -59.6, "Barbade"),
+    (14.6, -61.0, "Martinique"),
+    (16.0, -61.7, "Guadeloupe"),
+    (10.5, -61.3, "Trinidad"),
+    (12.1, -68.9, "Curaçao"),
+    (17.3, -62.7, "St-Kitts"),
+    # ── Central America ──
+    (14.6, -90.5, "Guatemala"),
+    (13.7, -89.2, "El Salvador"),
+    (14.1, -87.2, "Honduras"),
+    (12.1, -86.3, "Nicaragua"),
+    (9.9, -84.1, "Costa Rica"),
+    (9.0, -79.5, "Panamá"),
+    (20.5, -87.4, "Yucatán"),
+    (19.4, -99.1, "México"),
+    # ── South America (north) ──
+    (10.5, -66.9, "Venezuela"),
+    (4.7, -74.1, "Colombia"),
+    (6.8, -58.2, "Guyana"),
+    # ── USA (south) ──
+    (25.8, -80.2, "Miami"),
+    (30.3, -81.7, "Jacksonville"),
+    (29.8, -90.0, "New Orleans"),
+    (29.4, -98.5, "San Antonio"),
+    (25.9, -97.5, "Brownsville"),
+    # ── Pacific ──
+    (21.3, -157.8, "Honolulu"),
+    (20.9, -156.4, "Maui"),
+    (19.7, -155.1, "Hawaiʻi"),
+    (37.8, -122.4, "San Francisco"),
+    (34.1, -118.2, "Los Angeles"),
 ]
 
 
@@ -216,7 +209,7 @@ class CartopyRenderer:
     def _add_poi_labels(self, ax, bbox: BoundingBox) -> None:
         """Annotate visible POI with white text on a semi-transparent black background."""
         mbbox = bbox.with_margin(self.MARGIN_DEG)
-        for lat, lon, name in _EUROPEAN_POI:
+        for lat, lon, name in _POI_LIST:
             if (
                 mbbox.lat_min <= lat <= mbbox.lat_max
                 and mbbox.lon_min <= lon <= mbbox.lon_max

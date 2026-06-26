@@ -264,8 +264,8 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
 
       # ── 5. CheckResults ────────────────────────────────────────────────────
       # Always proceed to FinalAggregation — it handles partial results gracefully
-      # by only downloading from successful chunks. TotalFailure remains reachable
-      # from other failure paths (e.g. future conditions) but is not on the happy path.
+      # by only downloading from successful chunks. ToleratedFailurePercentage=100
+      # on the Map state ensures we always reach this state regardless of chunk failures.
       CheckResults = {
         Type    = "Pass"
         Comment = "Always proceed to aggregation — handles partial results gracefully"
@@ -392,24 +392,6 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
             "stage"   = "FinalAggregation"
           }
           Subject = "SDR Pipeline — Final Aggregation Failed"
-        }
-        ResultPath = null
-        Next       = "FailExecution"
-      }
-
-      # ── 9. TotalFailure ────────────────────────────────────────────────────
-      TotalFailure = {
-        Type     = "Task"
-        Comment  = "All chunks failed — publish to SNS and fail the execution"
-        Resource = "arn:aws:states:::aws-sdk:sns:publish"
-        Parameters = {
-          TopicArn = var.sns_topic_arn
-          Message = {
-            "input.$"         = "$$.Execution.Input"
-            "chunk_results.$" = "$.chunk_results"
-            "stage"           = "TotalFailure"
-          }
-          Subject = "SDR Pipeline — All Chunks Failed"
         }
         ResultPath = null
         Next       = "FailExecution"

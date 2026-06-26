@@ -277,7 +277,9 @@ class CartopyRenderer:
         mbbox = bbox.with_margin(self.MARGIN_DEG)
         center_lat, center_lon = bbox.center()
 
-        projection = ccrs.PlateCarree(central_longitude=center_lon)
+        # Use PlateCarree without central_longitude offset — avoids coordinate
+        # shift between the map projection and the data extent.
+        projection = ccrs.PlateCarree()
         data_crs = ccrs.PlateCarree()
 
         # Bug fix 1 — figure size matches geographic aspect ratio so the image

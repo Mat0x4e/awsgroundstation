@@ -165,6 +165,19 @@ resource "aws_iam_policy" "codebuild_service" {
         ]
         Resource = "arn:aws:ecr:*:${var.account_id}:repository/${var.project_name}-viirs-*"
       },
+      # ECR — push the visualization Docker image (docker build + push)
+      {
+        Sid    = "ECRPushImage"
+        Effect = "Allow"
+        Action = [
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage",
+          "ecr:BatchCheckLayerAvailability",
+        ]
+        Resource = "arn:aws:ecr:*:${var.account_id}:repository/${var.project_name}-viirs-*"
+      },
     ]
   })
 

@@ -94,3 +94,91 @@ resource "aws_codebuild_project" "viirs_visualization" {
 
   tags = var.tags
 }
+
+# ─────────────────────────────────────────────
+# Docker image build project
+# ─────────────────────────────────────────────
+#
+# Builds the viirs-visualization Docker image from the GitHub repository
+# and pushes it to ECR. Run this project once after initial deployment,
+# and whenever the Dockerfile or scripts/ change.
+#
+# Trigger manually via the AWS Console or:
+#   aws codebuild start-build --project-name <project-name>-viirs-docker-build
+
+resource "aws_codebuild_project" "viirs_docker_build" {
+  name          = "${var.project_name}-viirs-docker-build"
+  description   = "Builds the viirs-visualization Docker image from GitHub and pushes to ECR"
+  build_timeout = 15
+  service_role  = aws_iam_role.codebuild_service.arn
+
+  artifacts {
+    type = "NO_ARTIFACTS"
+  }
+
+  cache {
+    type = "NO_CACHE"
+  }
+
+  environment {
+    compute_type                = "BUILD_GENERAL1_MEDIUM"
+    image                       = "aws/codebuild/standard:7.0"
+    type                        = "LINUX_CONTAINER"
+    image_pull_credentials_type = "CODEBUILD"
+    privileged_mode             = true # required for docker build
+
+    environment_variable {
+      name  = "ECR_REPO_URL"
+      value = aws_ecr_repository.visualization.repository_url
+      type  = "PLAINTEXT"
+    }
+
+    environment_variable {
+      name  = "ACCOUNT_ID"
+      value = var.account_id
+      type  = "PLAINTEXT"
+    }
+  }
+
+  source {
+    type            = "GITHUB"
+    location        = "https://github.com/Mat0x4e/awsgroundstation.git"
+    git_clone_depth = 1
+    buildspec       = <<-EOT
+      version: 0.2
+      phases:
+        pre_build:
+          commands:
+            - echo Logging in to ECR...
+            - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+        build:
+          commands:
+            - echo Building Docker image...
+            - docker build -t $ECR_REPO_URL:latest -f docker/viirs-visualization/Dockerfile .
+        post_build:
+          commands:
+            - echo Pushing to ECR...
+            - docker push $ECR_REPO_URL:latest
+            - echo Done.
+    EOT
+  }
+
+  source_version = "main"
+
+  # Encrypt build logs with the project KMS CMK.
+  encryption_key = var.kms_key_arn
+
+  logs_config {
+    cloudwatch_logs {
+      group_name  = "/aws/codebuild/${var.project_name}-viirs-docker-build"
+      stream_name = "build"
+      status      = "ENABLED"
+    }
+
+    s3_logs {
+      status = "DISABLED"
+    }
+  }
+
+  tags = var.tags
+}

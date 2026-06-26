@@ -25,6 +25,6 @@ RUN python -c "import cartopy; cartopy.io.shapereader.natural_earth(resolution='
 
 # Pipeline scripts
 COPY scripts/ /opt/scripts/
-RUN chmod +x /opt/scripts/*.py
+RUN find /opt/scripts -name "*.py" -exec chmod +x {} \;
 
 ENV MPLBACKEND=Agg

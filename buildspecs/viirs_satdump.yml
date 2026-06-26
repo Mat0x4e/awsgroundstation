@@ -1,0 +1,32 @@
+version: 0.2
+
+env:
+  variables:
+    ENABLE_GEOTIFF: "true"
+    MPLBACKEND: "Agg"
+
+phases:
+  pre_build:
+    commands:
+      - echo "Downloading SatDump outputs from S3..."
+      - mkdir -p /tmp/input /tmp/output
+      - aws s3 sync "s3://${INPUT_BUCKET}/${INPUT_PREFIX}/satdump/" /tmp/input/satdump/ --exclude "*" --include "*.png" --include "*.cbor" --include "*.georef"
+      - aws s3 sync "s3://${INPUT_BUCKET}/${INPUT_PREFIX}/coordinates/" /tmp/input/coordinates/
+
+  build:
+    commands:
+      - echo "Running SatDump visualization pipeline..."
+      - python3 /opt/scripts/viirs/visualize_satdump.py
+          --input-dir /tmp/input/satdump
+          --coordinates-dir /tmp/input/coordinates
+          --output-dir /tmp/output
+          --contact-id "${CONTACT_ID}"
+          --contact-date "${CONTACT_DATE}"
+          --enable-geotiff "${ENABLE_GEOTIFF}"
+
+  post_build:
+    commands:
+      - echo "Uploading products to S3..."
+      - aws s3 sync /tmp/output/ "s3://${INPUT_BUCKET}/products/${CONTACT_DATE}/${CONTACT_ID}/"
+          --sse aws:kms --sse-kms-key-id "${KMS_KEY_ID}"
+      - echo "Visualization complete"

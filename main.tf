@@ -73,7 +73,7 @@ module "contact_scheduler" {
   environment         = var.environment
   lambda_role_arn     = module.security.scheduler_role_arn
   mission_profile_arn = var.ground_station_enabled ? module.mission_profile[0].mission_profile_arn : ""
-  satellite_arn       = "arn:aws:groundstation::${data.aws_caller_identity.current.account_id}:satellite/${var.satellite_norad_id}"
+  satellite_arn       = "arn:aws:groundstation::${data.aws_caller_identity.current.account_id}:satellite/${var.satellite_id}"
   sns_topic_arn       = module.security.sns_topic_arn
   tags                = local.common_tags
 }
@@ -90,6 +90,32 @@ module "processing_pipeline" {
   kms_key_arn           = module.security.kms_key_arn
   lambda_role_arn       = module.security.processor_role_arn
   tags                  = local.common_tags
+}
+
+module "sdr_pipeline" {
+  count  = var.enable_sdr_pipeline ? 1 : 0
+  source = "./modules/sdr_pipeline"
+
+  project_name      = var.project_name
+  account_id        = data.aws_caller_identity.current.account_id
+  input_bucket_name = module.s3_delivery.bucket_name
+  kms_key_arn       = module.security.kms_key_arn
+  sns_topic_arn     = module.security.sns_topic_arn
+  tags              = local.common_tags
+}
+
+module "viirs_visualization" {
+  count  = var.enable_sdr_pipeline ? 1 : 0
+  source = "./modules/viirs_visualization"
+
+  project_name           = var.project_name
+  account_id             = data.aws_caller_identity.current.account_id
+  sdr_output_bucket_name = module.sdr_pipeline[0].output_bucket_name
+  sdr_output_bucket_arn  = module.sdr_pipeline[0].output_bucket_arn
+  kms_key_arn            = module.security.kms_key_arn
+  kms_key_id             = module.security.kms_key_id
+  sns_topic_arn          = module.security.sns_topic_arn
+  tags                   = local.common_tags
 }
 
 module "observability" {

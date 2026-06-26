@@ -302,8 +302,8 @@ class CartopyRenderer:
         if is_thermal:
             # Single-band float32 → pseudo-colour
             band = data[:, :, 0] if data.ndim == 3 else data
-            # Bug fix 2 — flip N/S: SatDump descending pass stores south at top.
-            band = band[::-1, :]
+            # SatDump descending pass: south at top → flipud; east-west scan inverted → fliplr
+            band = band[::-1, ::-1]
             im = ax.imshow(
                 band,
                 origin="upper",
@@ -327,8 +327,8 @@ class CartopyRenderer:
                 rgb = data
             # Clip to [0, 1] defensively
             rgb = np.clip(rgb, 0.0, 1.0)
-            # Bug fix 2 — flip N/S: SatDump descending pass stores south at top.
-            rgb = rgb[::-1, :, :]
+            # SatDump descending pass: south at top → flipud; east-west scan inverted → fliplr
+            rgb = rgb[::-1, ::-1, :]
             ax.imshow(
                 rgb,
                 origin="upper",

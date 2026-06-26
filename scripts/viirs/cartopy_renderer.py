@@ -280,7 +280,14 @@ class CartopyRenderer:
         projection = ccrs.PlateCarree(central_longitude=center_lon)
         data_crs = ccrs.PlateCarree()
 
-        fig = plt.figure(figsize=(10, 8), dpi=self.DPI)
+        # Bug fix 1 — figure size matches geographic aspect ratio so the image
+        # fills the extent without pixel-aspect distortion.
+        lon_span = mbbox.lon_max - mbbox.lon_min
+        lat_span = mbbox.lat_max - mbbox.lat_min
+        fig_width = 12
+        fig_height = fig_width * (lat_span / lon_span)
+        fig = plt.figure(figsize=(fig_width, fig_height), dpi=self.DPI)
+
         ax = fig.add_subplot(1, 1, 1, projection=projection)
         ax.set_extent(
             [mbbox.lon_min, mbbox.lon_max, mbbox.lat_min, mbbox.lat_max],
@@ -293,6 +300,8 @@ class CartopyRenderer:
         if is_thermal:
             # Single-band float32 → pseudo-colour
             band = data[:, :, 0] if data.ndim == 3 else data
+            # Bug fix 2 — flip N/S: SatDump descending pass stores south at top.
+            band = band[::-1, :]
             im = ax.imshow(
                 band,
                 origin="upper",
@@ -316,6 +325,8 @@ class CartopyRenderer:
                 rgb = data
             # Clip to [0, 1] defensively
             rgb = np.clip(rgb, 0.0, 1.0)
+            # Bug fix 2 — flip N/S: SatDump descending pass stores south at top.
+            rgb = rgb[::-1, :, :]
             ax.imshow(
                 rgb,
                 origin="upper",

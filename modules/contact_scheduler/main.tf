@@ -41,6 +41,7 @@ resource "aws_cloudwatch_event_rule" "scheduler_cron" {
   name                = "${var.project_name}-${var.environment}-scheduler-cron"
   description         = "Trigger contact scheduler at 06:00 UTC on weekdays"
   schedule_expression = "cron(0 6 ? * MON-FRI *)"
+  state               = "DISABLED"
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-${var.environment}-scheduler-cron"

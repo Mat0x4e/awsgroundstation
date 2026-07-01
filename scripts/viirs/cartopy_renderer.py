@@ -19,6 +19,7 @@ from pathlib import Path
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
+import cartopy.io.shapereader as shpreader
 
 from .models import BoundingBox, CBORMetadata, NASAMetadata
 
@@ -233,6 +234,76 @@ class CartopyRenderer:
                 )
 
     # -----------------------------------------------------------------------
+    # Pixel-space helpers
+    # -----------------------------------------------------------------------
+
+    def _geo_to_pixel(
+        self,
+        lat: float,
+        lon: float,
+        bbox: BoundingBox,
+        img_width: int,
+        img_height: int,
+    ) -> tuple[float, float]:
+        """Map geographic (lat, lon) → image pixel (x, y).
+
+        Linear mapping:
+          lon → x pixel column (left = lon_min, right = lon_max)
+          lat → y pixel row   (bottom = lat_min = row 0 in 'lower' origin)
+
+        The figure uses ``origin='lower'`` so row 0 is the bottom of the
+        displayed image — no y-flip is needed here; the flip is already
+        handled before imshow.
+        """
+        x = (lon - bbox.lon_min) / (bbox.lon_max - bbox.lon_min) * img_width
+        y = (lat - bbox.lat_min) / (bbox.lat_max - bbox.lat_min) * img_height
+        return x, y
+
+    def _draw_shapefile_lines(
+        self,
+        ax,
+        shapefile_path: str,
+        bbox: BoundingBox,
+        img_width: int,
+        img_height: int,
+        color: str,
+        linewidth: float,
+        linestyle: str = "-",
+        zorder: int = 5,
+    ) -> None:
+        """Draw Natural Earth line geometries projected to pixel coordinates."""
+        try:
+            reader = shpreader.Reader(shapefile_path)
+        except Exception:
+            return
+
+        for geom in reader.geometries():
+            lines = list(geom.geoms) if hasattr(geom, "geoms") else [geom]
+            for line in lines:
+                try:
+                    coords = list(line.coords)
+                except Exception:
+                    continue
+                if len(coords) < 2:
+                    continue
+                pixels = [
+                    self._geo_to_pixel(lat, lon, bbox, img_width, img_height)
+                    for lon, lat in coords
+                ]
+                xs = [p[0] for p in pixels]
+                ys = [p[1] for p in pixels]
+                ax.plot(
+                    xs,
+                    ys,
+                    color=color,
+                    linewidth=linewidth,
+                    linestyle=linestyle,
+                    zorder=zorder,
+                    solid_capstyle="round",
+                    solid_joinstyle="round",
+                )
+
+    # -----------------------------------------------------------------------
     # Public rendering methods
     # -----------------------------------------------------------------------
 
@@ -244,14 +315,22 @@ class CartopyRenderer:
         metadata: CBORMetadata,
         output_path: Path,
     ) -> Path:
-        """Render a SatDump composite with Cartopy overlays.
+        """Render a SatDump composite by overlaying map features onto the
+        native-resolution image in pixel space.
+
+        Approach: instead of placing the image into Cartopy's coordinate
+        system (which stretches/distorts it), the image is displayed at its
+        native pixel dimensions and coastlines/borders/grid/POIs are drawn
+        by converting geographic coordinates → pixel coordinates via a
+        simple linear mapping over the swath bounding box.
 
         Parameters
         ----------
         data:
             Float32 array — (H, W) for thermal, (H, W, 3) for colour.
         bbox:
-            Geographic extent of the data in WGS84 degrees.
+            Swath geographic extent (WGS84 degrees) — used for the
+            geo → pixel mapping.
         composite_type:
             Human-readable name, e.g. "True Color", "Thermal IR".
         metadata:
@@ -267,90 +346,194 @@ class CartopyRenderer:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        mbbox = bbox.with_margin(self.MARGIN_DEG)
-        center_lat, center_lon = bbox.center()
-
-        # Use PlateCarree without central_longitude offset — avoids coordinate
-        # shift between the map projection and the data extent.
-        projection = ccrs.PlateCarree()
-        data_crs = ccrs.PlateCarree()
-
-        # Figure size is driven by the GEOGRAPHIC extent of the map area (bbox +
-        # margin), not the image pixel ratio.  This ensures coastlines and grid
-        # appear at a correct cartographic scale.  The swath image is placed at
-        # its true geographic extent inside the axes — Cartopy leaves black
-        # margins wherever the axes extend beyond the image, matching the
-        # "DR image" approach: image sits inside a larger map area.
-        geo_lon_span = mbbox.span_lon()
-        geo_lat_span = mbbox.span_lat()
-        fig_width = 20.0  # inches
-        fig_height = max(4.0, fig_width * (geo_lat_span / max(geo_lon_span, 0.01)))
-        fig = plt.figure(figsize=(fig_width, fig_height), dpi=self.DPI)
-
-        ax = fig.add_subplot(1, 1, 1, projection=projection)
-        ax.set_extent(
-            [mbbox.lon_min, mbbox.lon_max, mbbox.lat_min, mbbox.lat_max],
-            crs=data_crs,
-        )
-        # Do NOT call set_aspect('auto') — let Cartopy use its geographic aspect
-        # ratio.  The image is smaller than the axes extent so black margins
-        # appear naturally above/below (or left/right) the swath.
-        ax.set_facecolor("black")
-
         is_thermal = any(kw in composite_type.lower() for kw in self._THERMAL_KEYWORDS)
 
+        # ── 1. Prepare image data ──────────────────────────────────────────
         if is_thermal:
-            # Single-band float32 → pseudo-colour
             band = data[:, :, 0] if data.ndim == 3 else data
-            # SatDump descending pass: south at top → flipud; east-west scan inverted → fliplr
-            band = band[::-1, ::-1]
+            # SatDump descending pass: south at top → flipud; scan inverted → fliplr
+            display_data = np.flipud(np.fliplr(band))
+        else:
+            if data.ndim == 2:
+                rgb = np.stack([data, data, data], axis=-1)
+            else:
+                rgb = data
+            rgb = np.clip(rgb, 0.0, 1.0)
+            # SatDump descending pass correction
+            display_data = np.flipud(np.fliplr(rgb))
+
+        H, W = display_data.shape[:2]
+
+        # ── 2. Figure at native pixel dimensions ──────────────────────────
+        fig = plt.figure(figsize=(W / self.DPI, H / self.DPI), dpi=self.DPI)
+        # Fill the figure entirely — no matplotlib margins
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.set_xlim(0, W)
+        ax.set_ylim(0, H)
+        ax.set_aspect("equal")
+        ax.axis("off")
+        ax.set_facecolor("black")
+        fig.patch.set_facecolor("black")
+
+        # ── 3. Display image at native resolution ─────────────────────────
+        if is_thermal:
             im = ax.imshow(
-                band,
-                origin="upper",
-                extent=[bbox.lon_min, bbox.lon_max, bbox.lat_min, bbox.lat_max],
-                transform=data_crs,
+                display_data,
+                extent=[0, W, 0, H],
+                origin="lower",
                 cmap=self.THERMAL_CMAP,
                 vmin=0.0,
                 vmax=1.0,
                 interpolation="bilinear",
                 zorder=1,
+                aspect="auto",
             )
-            cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.04, shrink=0.8)
-            cbar.set_label(self.THERMAL_COLORBAR_LABEL, fontsize=7, color="white")
-            cbar.ax.yaxis.set_tick_params(color="white", labelsize=6)
-            plt.setp(cbar.ax.yaxis.get_ticklabels(), color="white")
         else:
-            # RGB or single-band colour
-            if data.ndim == 2:
-                rgb = np.stack([data, data, data], axis=-1)
-            else:
-                rgb = data
-            # Clip to [0, 1] defensively
-            rgb = np.clip(rgb, 0.0, 1.0)
-            # SatDump descending pass: south at top → flipud; east-west scan inverted → fliplr
-            rgb = rgb[::-1, ::-1, :]
             ax.imshow(
-                rgb,
-                origin="upper",
-                extent=[bbox.lon_min, bbox.lon_max, bbox.lat_min, bbox.lat_max],
-                transform=data_crs,
+                display_data,
+                extent=[0, W, 0, H],
+                origin="lower",
                 interpolation="bilinear",
-                zorder=1,
+                zorder=2,
+                aspect="auto",
             )
 
-        self._add_overlays(ax, bbox)
-        self._add_poi_labels(ax, bbox)
+        # ── 4. Coastlines (white) ─────────────────────────────────────────
+        coastline_shp = shpreader.natural_earth(
+            resolution=self.COASTLINE_RESOLUTION,
+            category="physical",
+            name="coastline",
+        )
+        self._draw_shapefile_lines(
+            ax,
+            coastline_shp,
+            bbox,
+            W,
+            H,
+            color=self.COASTLINE_COLOR,
+            linewidth=self.COASTLINE_WIDTH,
+            zorder=10,
+        )
 
-        # Title
+        # ── 5. Country borders (yellow dashed) ────────────────────────────
+        borders_shp = shpreader.natural_earth(
+            resolution=self.COASTLINE_RESOLUTION,
+            category="cultural",
+            name="admin_0_boundary_lines_land",
+        )
+        self._draw_shapefile_lines(
+            ax,
+            borders_shp,
+            bbox,
+            W,
+            H,
+            color=self.BORDER_COLOR,
+            linewidth=self.BORDER_WIDTH,
+            linestyle=self.BORDER_STYLE,
+            zorder=11,
+        )
+
+        # ── 6. Lat/lon grid ───────────────────────────────────────────────
+        step = self._auto_grid_step(bbox)
+        lon_ticks = np.arange(
+            _round_to(bbox.lon_min, step), bbox.lon_max + step, step
+        )
+        lat_ticks = np.arange(
+            _round_to(bbox.lat_min, step), bbox.lat_max + step, step
+        )
+
+        for lon in lon_ticks:
+            if bbox.lon_min <= lon <= bbox.lon_max:
+                x, _ = self._geo_to_pixel(bbox.lat_min, lon, bbox, W, H)
+                ax.axvline(
+                    x=x,
+                    color=self.GRID_COLOR,
+                    linewidth=0.4,
+                    alpha=self.GRID_ALPHA,
+                    linestyle=self.GRID_STYLE,
+                    zorder=12,
+                )
+                ax.text(
+                    x,
+                    H * 0.02,
+                    f"{abs(lon):.0f}°{'E' if lon >= 0 else 'W'}",
+                    color=self.GRID_COLOR,
+                    fontsize=5,
+                    ha="center",
+                    va="bottom",
+                    zorder=13,
+                )
+
+        for lat in lat_ticks:
+            if bbox.lat_min <= lat <= bbox.lat_max:
+                _, y = self._geo_to_pixel(lat, bbox.lon_min, bbox, W, H)
+                ax.axhline(
+                    y=y,
+                    color=self.GRID_COLOR,
+                    linewidth=0.4,
+                    alpha=self.GRID_ALPHA,
+                    linestyle=self.GRID_STYLE,
+                    zorder=12,
+                )
+                ax.text(
+                    W * 0.01,
+                    y,
+                    f"{abs(lat):.0f}°{'N' if lat >= 0 else 'S'}",
+                    color=self.GRID_COLOR,
+                    fontsize=5,
+                    ha="left",
+                    va="center",
+                    zorder=13,
+                )
+
+        # ── 7. POI labels ─────────────────────────────────────────────────
+        for poi_lat, poi_lon, name in _POI_LIST:
+            if (
+                bbox.lat_min <= poi_lat <= bbox.lat_max
+                and bbox.lon_min <= poi_lon <= bbox.lon_max
+            ):
+                px, py = self._geo_to_pixel(poi_lat, poi_lon, bbox, W, H)
+                ax.text(
+                    px,
+                    py,
+                    name,
+                    fontsize=5,
+                    color="white",
+                    ha="left",
+                    va="bottom",
+                    zorder=20,
+                    bbox=dict(
+                        boxstyle="round,pad=0.2",
+                        facecolor="black",
+                        alpha=self.POI_BG_ALPHA,
+                        edgecolor="none",
+                    ),
+                )
+
+        # ── 8. Title as text annotation at top of image ───────────────────
         datetime_str = _format_cbor_datetime(metadata)
         satellite = metadata.satellite or "NOAA-20"
         title_line1 = f"{composite_type} — {datetime_str} — {satellite}"
         title_line2 = "Calibration communautaire SatDump — non certifiée NOAA"
-        ax.set_title(f"{title_line1}\n{title_line2}", fontsize=7, color="white", pad=4)
+        ax.text(
+            W / 2,
+            H - H * 0.01,
+            f"{title_line1}\n{title_line2}",
+            fontsize=6,
+            color="white",
+            ha="center",
+            va="top",
+            zorder=25,
+            bbox=dict(
+                boxstyle="round,pad=0.3",
+                facecolor="black",
+                alpha=0.6,
+                edgecolor="none",
+            ),
+        )
 
-        fig.patch.set_facecolor("black")
-        fig.tight_layout(pad=0.5)
-        fig.savefig(output_path, dpi=self.DPI, facecolor="black")
+        # ── 9. Save at native resolution ──────────────────────────────────
+        fig.savefig(output_path, dpi=self.DPI, pad_inches=0)
         plt.close(fig)
 
         return output_path

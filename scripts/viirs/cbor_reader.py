@@ -71,11 +71,16 @@ class CBORReader:
             # _parse_cbor already logged the warning
             return CBORMetadata()
 
+        ephemeris, scan_angle, image_width, projection_cfg = self._extract_projection_cfg(raw)
+
         return CBORMetadata(
             timestamp=self._extract_timestamp(raw),
             satellite=self._extract_satellite(raw),
-            projection_coords=self._extract_projection(raw),
+            projection_coords=projection_cfg or self._extract_projection(raw),
             raw_data=raw,
+            ephemeris=ephemeris,
+            scan_angle=scan_angle,
+            image_width=image_width,
         )
 
     # ------------------------------------------------------------------
@@ -195,6 +200,56 @@ class CBORReader:
             self.DEFAULT_SATELLITE,
         )
         return self.DEFAULT_SATELLITE
+
+    def _extract_projection_cfg(
+        self, raw: dict
+    ) -> tuple[list[dict] | None, float, int, dict | None]:
+        """Extract ephemeris, scan_angle, image_width and the full projection_cfg dict.
+
+        Returns
+        -------
+        (ephemeris, scan_angle, image_width, projection_cfg)
+        where each element falls back to its default when absent or unparseable.
+        """
+        proj_cfg = raw.get("projection_cfg")
+        if proj_cfg is None:
+            return None, 112.0, 6400, None
+
+        # SatDump sometimes stores projection_cfg as a string repr of a dict
+        if isinstance(proj_cfg, str):
+            import ast
+            try:
+                proj_cfg = ast.literal_eval(proj_cfg)
+            except (ValueError, SyntaxError) as exc:
+                logger.warning(
+                    "CBORReader: could not parse projection_cfg string: %s", exc
+                )
+                return None, 112.0, 6400, None
+
+        if not isinstance(proj_cfg, dict):
+            logger.warning(
+                "CBORReader: projection_cfg is not a dict (got %s) — ignoring",
+                type(proj_cfg).__name__,
+            )
+            return None, 112.0, 6400, None
+
+        ephemeris = proj_cfg.get("ephemeris")
+        if not isinstance(ephemeris, list) or len(ephemeris) == 0:
+            ephemeris = None
+
+        scan_angle = proj_cfg.get("scan_angle", 112.0)
+        try:
+            scan_angle = float(scan_angle)
+        except (TypeError, ValueError):
+            scan_angle = 112.0
+
+        image_width = proj_cfg.get("image_width", 6400)
+        try:
+            image_width = int(image_width)
+        except (TypeError, ValueError):
+            image_width = 6400
+
+        return ephemeris, scan_angle, image_width, proj_cfg
 
     def _extract_projection(self, raw: dict) -> dict | None:
         """Extract projection coordinates from *raw*, returning ``None`` if absent."""

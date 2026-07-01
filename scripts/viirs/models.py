@@ -67,6 +67,10 @@ class CBORMetadata:
     satellite: str = "NOAA-20"
     projection_coords: dict | None = None
     raw_data: dict = field(default_factory=dict)
+    # Ephemeris-based georeferencing (from projection_cfg)
+    ephemeris: list[dict] | None = None  # list of {x, y, z, timestamp, vx, vy, vz}
+    scan_angle: float = 112.0  # total scan angle in degrees (±56° for VIIRS)
+    image_width: int = 6400  # native pixel width from CBOR
 
 
 @dataclass

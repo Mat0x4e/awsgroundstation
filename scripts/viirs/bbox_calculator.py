@@ -75,13 +75,21 @@ class BBoxCalculator:
         """Return a BoundingBox using the highest-priority available source.
 
         Priority:
-          1. Any *.georef file found in *folder*
-          2. CBOR projection_coords from *cbor_meta*
-          3. TLE/sgp4 propagation from cbor_meta.timestamp
+          1. Ephemeris from CBOR projection_cfg (ECI positions)
+          2. Any *.georef file found in *folder*
+          3. CBOR projection_coords from *cbor_meta*
+          4. TLE/sgp4 propagation from cbor_meta.timestamp
 
-        Raises NoBBoxSourceError if none of the three sources can produce a result.
+        Raises NoBBoxSourceError if none of the four sources can produce a result.
         """
-        # 1. .georef file
+        # 1. Ephemeris from CBOR projection_cfg
+        if cbor_meta.ephemeris:
+            try:
+                return self._from_ephemeris(cbor_meta.ephemeris, cbor_meta.scan_angle)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to compute bbox from ephemeris: %s", exc)
+
+        # 2. .georef file
         georef_files = list(folder.glob("*.georef"))
         if georef_files:
             try:
@@ -89,14 +97,14 @@ class BBoxCalculator:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to read .georef file %s: %s", georef_files[0], exc)
 
-        # 2. CBOR projection coordinates
+        # 3. CBOR projection coordinates
         if cbor_meta.projection_coords:
             try:
                 return self._from_cbor_projection(cbor_meta.projection_coords)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to extract bbox from CBOR projection: %s", exc)
 
-        # 3. TLE propagation
+        # 4. TLE propagation
         if cbor_meta.timestamp is not None:
             try:
                 return self._from_tle(cbor_meta.timestamp)
@@ -104,8 +112,91 @@ class BBoxCalculator:
                 logger.warning("Failed to compute bbox from TLE: %s", exc)
 
         raise NoBBoxSourceError(
-            "No bounding box source available: no .georef file, no CBOR projection "
-            "coordinates, and no valid timestamp for TLE propagation."
+            "No bounding box source available: no ephemeris, no .georef file, no CBOR "
+            "projection coordinates, and no valid timestamp for TLE propagation."
+        )
+
+    # ------------------------------------------------------------------
+    # Source 0: Ephemeris from CBOR projection_cfg (ECI positions)
+    # ------------------------------------------------------------------
+
+    def _from_ephemeris(
+        self, ephemeris: list[dict], scan_angle: float = 112.0
+    ) -> BoundingBox:
+        """Compute swath bounding box from ECI ephemeris positions.
+
+        Algorithm
+        ---------
+        For each point in the ephemeris list:
+          - lat = degrees(asin(z / r))   — exact (ECI z = geographic z)
+          - lon = degrees(atan2(y, x))   — ECI inertial longitude; error is
+            Earth rotation × elapsed time.  For a ~30 s pass the drift is
+            ~0.12° — negligible for bbox purposes.
+
+        The nadir track is then extended by the cross-track half-swath width:
+          cross_track_km = altitude_km × tan(scan_angle / 2)
+          cross_track_deg ≈ cross_track_km / 111.0
+
+        Parameters
+        ----------
+        ephemeris:
+            List of dicts with at minimum keys ``x``, ``y``, ``z`` (km, ECI).
+        scan_angle:
+            Total scan angle in degrees (default 112° = ±56° for VIIRS M-band).
+
+        Returns
+        -------
+        BoundingBox
+            WGS84 bounding box covering the full swath.
+
+        Raises
+        ------
+        ValueError
+            If ephemeris contains no valid ECI positions.
+        """
+        lats: list[float] = []
+        lons: list[float] = []
+        altitudes: list[float] = []
+
+        for point in ephemeris:
+            try:
+                x = float(point["x"])
+                y = float(point["y"])
+                z = float(point["z"])
+            except (KeyError, TypeError, ValueError):
+                continue
+
+            r = math.sqrt(x * x + y * y + z * z)
+            if r < 1.0:
+                # Degenerate position — skip
+                continue
+
+            lat = math.degrees(math.asin(max(-1.0, min(1.0, z / r))))
+            lon = math.degrees(math.atan2(y, x))
+            altitude_km = r - EARTH_RADIUS_KM
+
+            lats.append(lat)
+            lons.append(lon)
+            altitudes.append(altitude_km)
+
+        if not lats:
+            raise ValueError(
+                "_from_ephemeris: no valid ECI positions found in ephemeris list"
+            )
+
+        nadir_bbox = _make_bbox(lats, lons)
+
+        # Cross-track swath extension
+        mean_altitude = sum(altitudes) / len(altitudes) if altitudes else SATELLITE_ALTITUDE_KM
+        half_angle_rad = math.radians(scan_angle / 2.0)
+        cross_track_km = mean_altitude * math.tan(half_angle_rad)
+        cross_track_deg = cross_track_km / 111.0
+
+        return BoundingBox(
+            lat_min=max(-90.0, nadir_bbox.lat_min - cross_track_deg),
+            lat_max=min(90.0, nadir_bbox.lat_max + cross_track_deg),
+            lon_min=max(-180.0, nadir_bbox.lon_min - cross_track_deg),
+            lon_max=min(180.0, nadir_bbox.lon_max + cross_track_deg),
         )
 
     # ------------------------------------------------------------------

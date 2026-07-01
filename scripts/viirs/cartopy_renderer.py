@@ -275,12 +275,15 @@ class CartopyRenderer:
         projection = ccrs.PlateCarree()
         data_crs = ccrs.PlateCarree()
 
-        # Bug fix 1 — figure size matches geographic aspect ratio so the image
-        # fills the extent without pixel-aspect distortion.
-        lon_span = mbbox.lon_max - mbbox.lon_min
-        lat_span = mbbox.lat_max - mbbox.lat_min
-        fig_width = 12
-        fig_height = fig_width * (lat_span / lon_span)
+        # Compute figure dimensions from image pixel aspect ratio so the rendered
+        # PNG proportions match the input swath (e.g. a 3200×272 swath becomes a
+        # wide strip rather than a square).
+        img_height = data.shape[0]
+        img_width = data.shape[1]
+        fig_width = 14.0  # inches
+        fig_height = fig_width * (img_height / img_width)
+        # Keep title and colorbar readable on very wide/thin swaths
+        fig_height = max(fig_height, 3.0)
         fig = plt.figure(figsize=(fig_width, fig_height), dpi=self.DPI)
 
         ax = fig.add_subplot(1, 1, 1, projection=projection)

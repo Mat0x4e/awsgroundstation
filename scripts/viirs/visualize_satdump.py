@@ -104,6 +104,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Contact date in YYYY/MM/DD format.",
     )
     parser.add_argument(
+        "--contact-time",
+        required=False,
+        default=None,
+        help="Contact start time in HH:MM:SS UTC format (improves geolocation accuracy).",
+    )
+    parser.add_argument(
         "--enable-geotiff",
         required=True,
         choices=["true", "false"],
@@ -213,15 +219,19 @@ def main(argv: list[str] | None = None) -> int:
     if cbor_meta.timestamp is None:
         try:
             from datetime import datetime, timezone
-            # contact_date is YYYY/MM/DD
-            contact_dt = datetime.strptime(args.contact_date, "%Y/%m/%d")
+            date_str = args.contact_date  # "YYYY/MM/DD"
+            if args.contact_time:
+                dt_str = f"{date_str} {args.contact_time}"
+                contact_dt = datetime.strptime(dt_str, "%Y/%m/%d %H:%M:%S")
+            else:
+                contact_dt = datetime.strptime(date_str, "%Y/%m/%d")
             cbor_meta.timestamp = contact_dt.replace(tzinfo=timezone.utc)
             logger.info(
                 "CBOR timestamp was None — synthesised from --contact-date: %s",
                 cbor_meta.timestamp,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Could not parse --contact-date '%s': %s", args.contact_date, exc)
+            logger.warning("Could not parse contact datetime: %s", exc)
 
     bbox_calc = BBoxCalculator()
     try:

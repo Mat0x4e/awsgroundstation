@@ -23,7 +23,7 @@ resource "aws_codebuild_project" "viirs_visualization" {
 
   environment {
     compute_type                = "BUILD_GENERAL1_MEDIUM"
-    image                       = aws_ecr_repository.visualization.repository_url
+    image                       = "${aws_ecr_repository.visualization.repository_url}:latest"
     type                        = "LINUX_CONTAINER"
     image_pull_credentials_type = "SERVICE_ROLE"
     privileged_mode             = false

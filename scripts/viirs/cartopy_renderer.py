@@ -350,7 +350,7 @@ class CartopyRenderer:
 
         fig.patch.set_facecolor("black")
         fig.tight_layout(pad=0.5)
-        fig.savefig(output_path, dpi=self.DPI, bbox_inches="tight", facecolor="black")
+        fig.savefig(output_path, dpi=self.DPI, facecolor="black")
         plt.close(fig)
 
         return output_path

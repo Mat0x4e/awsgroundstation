@@ -280,10 +280,9 @@ class CartopyRenderer:
         # wide strip rather than a square).
         img_height = data.shape[0]
         img_width = data.shape[1]
-        fig_width = 14.0  # inches
-        fig_height = fig_width * (img_height / img_width)
-        # Keep title and colorbar readable on very wide/thin swaths
-        fig_height = max(fig_height, 3.0)
+        pixel_ratio = img_width / max(img_height, 1)
+        fig_width = 20.0  # inches — wide enough for detail at 300 DPI
+        fig_height = fig_width / pixel_ratio
         fig = plt.figure(figsize=(fig_width, fig_height), dpi=self.DPI)
 
         ax = fig.add_subplot(1, 1, 1, projection=projection)

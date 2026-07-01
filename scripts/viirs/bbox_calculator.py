@@ -75,7 +75,6 @@ class BBoxCalculator:
         self,
         cbor_meta: CBORMetadata,
         folder: Path,
-        image_shape: tuple[int, int] | None = None,
     ) -> BoundingBox:
         """Return a BoundingBox using the highest-priority available source.
 
@@ -91,20 +90,13 @@ class BBoxCalculator:
             Metadata extracted from the SatDump product.cbor file.
         folder:
             Directory to scan for *.georef files (source 2).
-        image_shape:
-            Optional ``(height, width)`` of the composite image in pixels.
-            When provided, the ephemeris path computes lon_span from the pixel
-            aspect ratio so that ``imshow(extent=bbox)`` renders without
-            distortion.
 
         Raises NoBBoxSourceError if none of the four sources can produce a result.
         """
         # 1. Ephemeris from CBOR projection_cfg
         if cbor_meta.ephemeris:
             try:
-                return self._from_ephemeris(
-                    cbor_meta.ephemeris, cbor_meta.scan_angle, image_shape=image_shape
-                )
+                return self._from_ephemeris(cbor_meta.ephemeris, cbor_meta.scan_angle)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to compute bbox from ephemeris: %s", exc)
 
@@ -143,7 +135,6 @@ class BBoxCalculator:
         self,
         ephemeris: list[dict],
         scan_angle: float = 112.0,
-        image_shape: tuple[int, int] | None = None,
     ) -> BoundingBox:
         """Compute swath bounding box from ECI ephemeris positions.
 
@@ -155,19 +146,9 @@ class BBoxCalculator:
             Earth rotation × elapsed time.  For a ~30 s pass the drift is
             ~0.12° — negligible for bbox purposes.
 
-        **When image_shape is provided** (height, width), the lon_span is
-        derived from the image pixel aspect ratio so that
-        ``imshow(extent=[lon_min, lon_max, lat_min, lat_max])`` fills the axes
-        without stretching the image:
-
-            pixel_ratio = width / height
-            lon_span    = lat_span * pixel_ratio
-            lon_min     = center_lon - lon_span / 2
-            lon_max     = center_lon + lon_span / 2
-
-        **When image_shape is None**, the legacy cross-track extension is used
-        (altitude × tan(scan_angle/2)), which is correct for .georef-less
-        fallback paths.
+        The nadir ground track is extended laterally by the physical cross-track
+        half-swath width (altitude × tan(scan_angle/2)).  This gives the true
+        geographic swath extent regardless of the image pixel dimensions.
 
         Parameters
         ----------
@@ -175,10 +156,6 @@ class BBoxCalculator:
             List of dicts with at minimum keys ``x``, ``y``, ``z`` (km, ECI).
         scan_angle:
             Total scan angle in degrees (default 112° = ±56° for VIIRS M-band).
-            Only used in the fallback (no image_shape) path.
-        image_shape:
-            Optional ``(height, width)`` of the composite image in pixels.
-            When provided, the bbox lon_span is computed from the pixel ratio.
 
         Returns
         -------
@@ -221,38 +198,20 @@ class BBoxCalculator:
             )
 
         nadir_bbox = _make_bbox(lats, lons)
-        lat_span = nadir_bbox.lat_max - nadir_bbox.lat_min
 
-        if image_shape is not None:
-            img_height, img_width = image_shape
-            if img_height > 0 and img_width > 0:
-                # Derive lon_span from pixel ratio so imshow won't distort the image
-                pixel_ratio = img_width / img_height
-                lon_span = lat_span * pixel_ratio
-                center_lon = sum(lons) / len(lons)
-                logger.debug(
-                    "_from_ephemeris: pixel_ratio=%.3f lat_span=%.3f° → lon_span=%.3f° "
-                    "centre_lon=%.3f°",
-                    pixel_ratio, lat_span, lon_span, center_lon,
-                )
-                return BoundingBox(
-                    lat_min=max(-90.0, nadir_bbox.lat_min),
-                    lat_max=min(90.0, nadir_bbox.lat_max),
-                    lon_min=max(-180.0, center_lon - lon_span / 2.0),
-                    lon_max=min(180.0, center_lon + lon_span / 2.0),
-                )
-            else:
-                logger.warning(
-                    "_from_ephemeris: image_shape %s has zero dimension — "
-                    "falling back to cross-track extension",
-                    image_shape,
-                )
-
-        # Fallback: extend lat AND lon by the physical cross-track half-swath
+        # Extend lat AND lon by the physical cross-track half-swath
         mean_altitude = sum(altitudes) / len(altitudes) if altitudes else SATELLITE_ALTITUDE_KM
         half_angle_rad = math.radians(scan_angle / 2.0)
         cross_track_km = mean_altitude * math.tan(half_angle_rad)
         cross_track_deg = cross_track_km / 111.0
+
+        logger.debug(
+            "_from_ephemeris: mean_alt=%.1f km cross_track=%.1f km (%.3f°) "
+            "nadir=[%.3f,%.3f]×[%.3f,%.3f]",
+            mean_altitude, cross_track_km, cross_track_deg,
+            nadir_bbox.lat_min, nadir_bbox.lat_max,
+            nadir_bbox.lon_min, nadir_bbox.lon_max,
+        )
 
         return BoundingBox(
             lat_min=max(-90.0, nadir_bbox.lat_min - cross_track_deg),

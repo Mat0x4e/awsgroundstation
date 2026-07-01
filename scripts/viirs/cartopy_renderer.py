@@ -275,14 +275,16 @@ class CartopyRenderer:
         projection = ccrs.PlateCarree()
         data_crs = ccrs.PlateCarree()
 
-        # Compute figure dimensions from image pixel aspect ratio so the rendered
-        # PNG proportions match the input swath (e.g. a 3200×272 swath becomes a
-        # wide strip rather than a square).
-        img_height = data.shape[0]
-        img_width = data.shape[1]
-        pixel_ratio = img_width / max(img_height, 1)
-        fig_width = 20.0  # inches — wide enough for detail at 300 DPI
-        fig_height = fig_width / pixel_ratio
+        # Figure size is driven by the GEOGRAPHIC extent of the map area (bbox +
+        # margin), not the image pixel ratio.  This ensures coastlines and grid
+        # appear at a correct cartographic scale.  The swath image is placed at
+        # its true geographic extent inside the axes — Cartopy leaves black
+        # margins wherever the axes extend beyond the image, matching the
+        # "DR image" approach: image sits inside a larger map area.
+        geo_lon_span = mbbox.span_lon()
+        geo_lat_span = mbbox.span_lat()
+        fig_width = 20.0  # inches
+        fig_height = max(4.0, fig_width * (geo_lat_span / max(geo_lon_span, 0.01)))
         fig = plt.figure(figsize=(fig_width, fig_height), dpi=self.DPI)
 
         ax = fig.add_subplot(1, 1, 1, projection=projection)
@@ -290,10 +292,9 @@ class CartopyRenderer:
             [mbbox.lon_min, mbbox.lon_max, mbbox.lat_min, mbbox.lat_max],
             crs=data_crs,
         )
-        # Fill axes to match the figure shape (set from image pixel ratio above).
-        # Without this, Cartopy enforces a 1:1 lat/lon aspect ratio, which distorts a
-        # 3200×272 swath — the bbox is ~30°×2° but the pixel ratio is ~12:1, not 15:1.
-        ax.set_aspect("auto")
+        # Do NOT call set_aspect('auto') — let Cartopy use its geographic aspect
+        # ratio.  The image is smaller than the axes extent so black margins
+        # appear naturally above/below (or left/right) the swath.
         ax.set_facecolor("black")
 
         is_thermal = any(kw in composite_type.lower() for kw in self._THERMAL_KEYWORDS)

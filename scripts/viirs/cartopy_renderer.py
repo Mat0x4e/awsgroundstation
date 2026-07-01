@@ -291,6 +291,10 @@ class CartopyRenderer:
             [mbbox.lon_min, mbbox.lon_max, mbbox.lat_min, mbbox.lat_max],
             crs=data_crs,
         )
+        # Fill axes to match the figure shape (set from image pixel ratio above).
+        # Without this, Cartopy enforces a 1:1 lat/lon aspect ratio, which distorts a
+        # 3200×272 swath — the bbox is ~30°×2° but the pixel ratio is ~12:1, not 15:1.
+        ax.set_aspect("auto")
         ax.set_facecolor("black")
 
         is_thermal = any(kw in composite_type.lower() for kw in self._THERMAL_KEYWORDS)

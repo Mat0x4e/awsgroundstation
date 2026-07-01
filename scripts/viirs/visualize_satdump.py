@@ -233,6 +233,14 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not parse contact datetime: %s", exc)
 
+    # When --contact-time is provided, prefer TLE over ephemeris because the
+    # CBOR ephemeris positions are in ECI (inertial frame) without GMST
+    # rotation — their longitude is wrong. TLE + sgp4 produces correct
+    # geographic coordinates when given a proper UTC timestamp.
+    if args.contact_time and cbor_meta.timestamp:
+        logger.info("--contact-time provided — forcing TLE path (ephemeris ECI lacks GMST)")
+        cbor_meta.ephemeris = None
+
     bbox_calc = BBoxCalculator()
     try:
         bbox = _resolve_bbox(cbor_meta, input_dir, coordinates_dir, bbox_calc)

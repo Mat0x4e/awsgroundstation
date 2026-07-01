@@ -121,6 +121,7 @@ def _resolve_bbox(
     input_dir: Path,
     coordinates_dir: Path | None,
     bbox_calc: BBoxCalculator,
+    image_shape: tuple[int, int] | None = None,
 ):
     """Resolve bounding box, trying coordinates-dir first if provided.
 
@@ -129,6 +130,10 @@ def _resolve_bbox(
       2. .georef file in input_dir  (standard BBoxCalculator priority 1)
       3. CBOR projection_coords     (standard BBoxCalculator priority 2)
       4. TLE propagation            (standard BBoxCalculator priority 3)
+
+    When *image_shape* ``(height, width)`` is provided it is forwarded to
+    ``BBoxCalculator.compute()`` so that the ephemeris path can compute a
+    lon_span that matches the pixel aspect ratio — preventing imshow distortion.
 
     Raises NoBBoxSourceError if none of the sources yield a result.
     """
@@ -148,7 +153,7 @@ def _resolve_bbox(
                 )
 
     # Fall through to standard priority chain (input_dir .georef → CBOR → TLE)
-    return bbox_calc.compute(cbor_meta, input_dir)
+    return bbox_calc.compute(cbor_meta, input_dir, image_shape=image_shape)
 
 
 # ---------------------------------------------------------------------------
@@ -194,11 +199,42 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # -----------------------------------------------------------------------
-    # Step 2 — Compute bounding box (Req 3.1)
+    # Step 2 — Discover composites (Req 1.1, 4.1) — done BEFORE bbox so that
+    # the image shape is available for aspect-ratio-correct bbox computation.
+    # -----------------------------------------------------------------------
+    visualizer = SatDumpVisualizer()
+    try:
+        composites = visualizer.discover_composites(input_dir)
+    except NoCompositesError as exc:
+        logger.error("No composites found — aborting: %s", exc)
+        return 1
+
+    logger.info("Discovered %d composite(s): %s", len(composites), [c.composite_type for c in composites])
+
+    # Load the first composite to get the image shape for bbox aspect-ratio fix.
+    # We re-use the loaded data later in the per-composite loop.
+    first_data = None
+    image_shape: tuple[int, int] | None = None
+    try:
+        first_data = visualizer.load_and_normalize(composites[0])
+        # data shape is (H, W) for greyscale or (H, W, C) for colour
+        image_shape = (first_data.shape[0], first_data.shape[1])
+        logger.info(
+            "Image shape for bbox aspect ratio: %dx%d px (h×w)",
+            image_shape[0], image_shape[1],
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Could not load first composite for image shape — bbox will use "
+            "cross-track extension fallback: %s", exc
+        )
+
+    # -----------------------------------------------------------------------
+    # Step 3 — Compute bounding box (Req 3.1)
     # -----------------------------------------------------------------------
     bbox_calc = BBoxCalculator()
     try:
-        bbox = _resolve_bbox(cbor_meta, input_dir, coordinates_dir, bbox_calc)
+        bbox = _resolve_bbox(cbor_meta, input_dir, coordinates_dir, bbox_calc, image_shape)
     except NoBBoxSourceError as exc:
         logger.error("Cannot compute bounding box — aborting: %s", exc)
         return 1
@@ -210,18 +246,6 @@ def main(argv: list[str] | None = None) -> int:
         bbox.lon_min,
         bbox.lon_max,
     )
-
-    # -----------------------------------------------------------------------
-    # Step 3 — Discover composites (Req 1.1, 4.1)
-    # -----------------------------------------------------------------------
-    visualizer = SatDumpVisualizer()
-    try:
-        composites = visualizer.discover_composites(input_dir)
-    except NoCompositesError as exc:
-        logger.error("No composites found — aborting: %s", exc)
-        return 1
-
-    logger.info("Discovered %d composite(s): %s", len(composites), [c.composite_type for c in composites])
 
     # -----------------------------------------------------------------------
     # Shared component instances
@@ -245,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     success_count = 0
     failure_count = 0
 
-    for composite in composites:
+    for i, composite in enumerate(composites):
         slug = _composite_slug(composite.composite_type)
         # Req 13.2–13.4: output filenames
         png_name  = f"viirs_satdump_{slug}_{contact_id}.png"
@@ -258,8 +282,11 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Processing composite: %s → %s", composite.composite_type, png_name)
 
         try:
-            # 4a. Load and normalize (Req 1.1)
-            data = visualizer.load_and_normalize(composite)
+            # 4a. Load and normalize (Req 1.1) — reuse pre-loaded data for first composite
+            if i == 0 and first_data is not None:
+                data = first_data
+            else:
+                data = visualizer.load_and_normalize(composite)
             logger.debug(
                 "  Loaded %s — shape=%s dtype=%s",
                 composite.path.name,

@@ -135,7 +135,7 @@ class RTSTPSProcessor:
             Process exit code (0 = success).
         """
         batch_sh = Path(self.RTSTPS_HOME) / "bin" / "batch.sh"
-        config_xml = Path(self.RTSTPS_HOME) / "config" / "npp.xml"
+        config_xml = Path(self.RTSTPS_HOME) / "config" / "jpss1.xml"
 
         # RT-STPS npp.xml writes RDR files to a relative path "../data" from
         # its working directory.  Ensure that directory exists.

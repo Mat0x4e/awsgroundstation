@@ -53,12 +53,13 @@ The SatDump path produces composites without per-pixel geolocation. The overlay 
 4. ✅ RT-STPS output path → `batch.sh` cd's to its own dir (`/opt/rt-stps/`), so `../data` resolves to `/opt/rt-stps/data/` (not relative to caller cwd). Fixed in aggregation buildspec.
 
 **Remaining issue:**
-- ❌ `.cadu` files are NOT being uploaded to S3 by the per-chunk builds. The `aws s3 sync /tmp/output/satdump/` command should include them (we removed `--exclude '*.cadu'`), but they don't appear in S3. Hypothesis: SatDump might produce the `.cadu` in a different location than `/tmp/output/satdump/`, or the file is named differently, or it's cleaned up before sync runs.
+- ❌ RT-STPS processes the combined 1.3 GB CADU but produces 0 RDR files. Root cause: SatDump's `.cadu` output format is likely incompatible with RT-STPS expectations. SatDump performs frame sync, PN removal, Viterbi decoding, and RS decoding internally — the `.cadu` file contains **post-decoded frames** (no ASM sync marker, no RS parity, no PN encoding). RT-STPS `jpss1.xml` is configured with `PnEncoded="true"` and `reed_solomon` processing, meaning it expects **raw receiver output** with these layers still intact.
 
-**Next step to investigate:**
-1. Add `ls -la /tmp/output/satdump/ && find /tmp/output/ -name '*.cadu' -ls` to the per-chunk buildspec AFTER SatDump runs, BEFORE the S3 sync — this will reveal where the .cadu file actually is
-2. Once found, add an explicit `aws s3 cp` for the .cadu file
-3. Then re-run the full pipeline with CADU concatenation in the aggregation step
+**Next steps to resolve:**
+1. Check SatDump `.cadu` frame size: if 892 bytes/frame → RS already stripped; if 1020 bytes → RS intact but no ASM; if 1024 → full CADU with ASM
+2. If SatDump strips RS/ASM: look for a SatDump option to output raw frames (`--dump_cadu` or pipeline config to stop before RS decode)
+3. Alternative: configure RT-STPS to skip frame_sync and reed_solomon (accept pre-decoded VCDUs directly) — but this may require custom XML config modifications
+4. Alternative: use SatDump's TCP frame output feature (nng socket) to stream CADU frames to RT-STPS in real-time format
 
 **Architecture (target):**
 ```
@@ -108,3 +109,6 @@ aws sso login --profile AWSAdminAccess-471112743408
 9. RT-STPS `batch.sh` cd's to its own directory — `../data` resolves to `/opt/rt-stps/data/`, not caller cwd
 10. A single 30-second CADU chunk has insufficient data for RT-STPS to form a VIIRS granule (~85s needed) — concatenation of all chunks before RT-STPS is required
 11. SatDump `.cadu` output location needs verification — the file may not be where `aws s3 sync` expects it
+12. Parentheses in echo messages cause `/bin/sh` syntax errors in CodeBuild — never use `()` in inline buildspec echo text
+13. RT-STPS resolves `../data` relative to its cwd — when cwd is `/opt/rt-stps`, output goes to `/opt/data` (not `/opt/rt-stps/data`)
+14. SatDump `.cadu` files ARE raw CADU frames but likely pre-decoded (no ASM, no RS parity) — RT-STPS expects undecoded frames with full CCSDS framing intact

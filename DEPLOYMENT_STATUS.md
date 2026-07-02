@@ -42,14 +42,35 @@ The SatDump path produces composites without per-pixel geolocation. The overlay 
 
 ## What needs fixing (prioritized)
 
-### 1. RT-STPS exit code 254 (critical for NASA path)
+### 1. RT-STPS — CADU concatenation needed (critical for NASA path)
 
-RT-STPS 7.0+P1 fails with exit code 254 on all chunks from contacts #3 and #4. Same issue as contacts #1 and #2. Without RT-STPS → no RDR → no CSPP SDR → no per-pixel geolocation.
+**Status**: Root causes identified, partially fixed. One remaining issue.
 
-Potential causes:
-- CADU frame format mismatch (SatDump 1.2.2 output vs RT-STPS 7.0 expectations)
-- Missing ancillary data (leap seconds file, platform config)
-- Java heap space (unlikely — 16 GB available)
+**Root causes found and fixed:**
+1. ✅ `../data` directory missing → RT-STPS npp.xml writes to `../data` relative to its cwd. Fixed by adding `mkdir -p /opt/rt-stps/data` in buildspec.
+2. ✅ Wrong XML config → `npp.xml` (S-NPP) was used but NOAA-20 is JPSS-1. Fixed: now uses `jpss1.xml`.
+3. ✅ Single chunk too short → A 30-second chunk doesn't produce a complete VIIRS granule (~85s needed). Fix: concatenate all chunks' CADU files into one stream before feeding to RT-STPS. Implemented in the aggregation buildspec.
+4. ✅ RT-STPS output path → `batch.sh` cd's to its own dir (`/opt/rt-stps/`), so `../data` resolves to `/opt/rt-stps/data/` (not relative to caller cwd). Fixed in aggregation buildspec.
+
+**Remaining issue:**
+- ❌ `.cadu` files are NOT being uploaded to S3 by the per-chunk builds. The `aws s3 sync /tmp/output/satdump/` command should include them (we removed `--exclude '*.cadu'`), but they don't appear in S3. Hypothesis: SatDump might produce the `.cadu` in a different location than `/tmp/output/satdump/`, or the file is named differently, or it's cleaned up before sync runs.
+
+**Next step to investigate:**
+1. Add `ls -la /tmp/output/satdump/ && find /tmp/output/ -name '*.cadu' -ls` to the per-chunk buildspec AFTER SatDump runs, BEFORE the S3 sync — this will reveal where the .cadu file actually is
+2. Once found, add an explicit `aws s3 cp` for the .cadu file
+3. Then re-run the full pipeline with CADU concatenation in the aggregation step
+
+**Architecture (target):**
+```
+Per chunk (parallel, 25×):
+  .pcap → I/Q extract → .cs8 → SatDump npp_hrd → composites + .cadu → upload ALL to S3
+
+Aggregation (single):
+  Download all .cadu from S3 → cat chunk_0/*.cadu chunk_1/*.cadu ... > combined.cadu
+  → RT-STPS (jpss1.xml) combined.cadu → RDR HDF5 in /opt/rt-stps/data/
+  → CSPP SDR → SDR + GEO HDF5 (per-pixel lat/lon!)
+  → Upload SDR/GEO/RDR to S3
+```
 
 ### 2. Visualization geolocation accuracy (quality of life)
 
@@ -71,7 +92,7 @@ aws sso login --profile AWSAdminAccess-471112743408
 
 - Contact #1: c14d25d6-run1 through c14d25d6-run9 (used)
 - Contact #2: 7903eb3f-run1 through 7903eb3f-run6 (used)
-- Contact #3: 1ae80d1d-run1 through 1ae80d1d-run3 (used)
+- Contact #3: 1ae80d1d-run1 through 1ae80d1d-run3 (used), 1ae80d1d-rtstps-fix-test, 1ae80d1d-rtstps-jpss1-test, 1ae80d1d-jpss1-config-v2, 1ae80d1d-cadu-concat-v1 (used)
 - Contact #4: 69c8c149-run1 through 69c8c149-run3 (used)
 
 ## Key learnings from this session
@@ -83,3 +104,7 @@ aws sso login --profile AWSAdminAccess-471112743408
 5. ECI ephemeris from SatDump CBOR gives correct latitude but wrong longitude (no GMST rotation without knowing the UTC time)
 6. The geo→pixel linear mapping is only approximate for VIIRS (curvilinear scan geometry)
 7. Per-pixel geolocation (NASA path / CSPP SDR GMODO files) is the only way to get sub-km overlay alignment
+8. RT-STPS `npp.xml` is for S-NPP — NOAA-20 (JPSS-1) requires `jpss1.xml`
+9. RT-STPS `batch.sh` cd's to its own directory — `../data` resolves to `/opt/rt-stps/data/`, not caller cwd
+10. A single 30-second CADU chunk has insufficient data for RT-STPS to form a VIIRS granule (~85s needed) — concatenation of all chunks before RT-STPS is required
+11. SatDump `.cadu` output location needs verification — the file may not be where `aws s3 sync` expects it

@@ -7,17 +7,21 @@ Pipeline de traitement automatisé convertissant les fichiers DigIF bruts (VITA-
 ### Chaîne de traitement complète
 
 ```
-.pcap (VITA-49 DigIF) → Extraction I/Q (.cs8) → SatDump npp_hrd (.cadu + composites PNG)
-                                                          │
-                                          ┌───────────────┼───────────────┐
-                                          ▼                               ▼
-                                  Upload composites PNG         RT-STPS (.cadu → RDR HDF5)
-                                  + product.cbor to S3                    │
-                                  (always succeeds)            CSPP SDR (RDR → SDR + GEO HDF5 Level 1)
-                                                                          │
-                                                               Upload SDR/GEO to S3
-                                                               (fails if RT-STPS broken)
+Per chunk (parallel):
+  .pcap (VITA-49 DigIF) → Extraction I/Q (.cs8) → SatDump npp_hrd (.cadu + composites PNG)
+  → Upload composites + CADU to S3
+
+Aggregation (single, after all chunks):
+  Download all .cadu → Concatenate → RT-STPS 7.0 (jpss1.xml) → RDR HDF5
+  → CSPP SDR 4.1.1 → SDR + GEO HDF5 Level 1
 ```
+
+### Key Fixes Applied
+
+- **`jpss1.xml` (not `npp.xml`) for NOAA-20** — `npp.xml` is for S-NPP satellite. NOAA-20 is JPSS-1 and requires `jpss1.xml` configuration.
+- **`/opt/rt-stps/data/` is the actual RDR output path** — `batch.sh` cd's to its own directory (`/opt/rt-stps/`), so the `../data` relative path in the XML config resolves to `/opt/rt-stps/data/`, not relative to the caller's cwd.
+- **CADU concatenation required** — A single 30-second chunk produces insufficient data for RT-STPS to form a complete VIIRS granule (~85 seconds of data needed). All chunks' `.cadu` files must be concatenated into a single stream before feeding to RT-STPS.
+- **`.cadu` files must be uploaded to S3 per-chunk** — The aggregation step downloads and concatenates them. The per-chunk buildspec must NOT exclude `.cadu` from the S3 sync.
 
 ### Décisions de conception clés
 

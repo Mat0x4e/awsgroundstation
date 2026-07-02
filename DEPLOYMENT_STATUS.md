@@ -1,4 +1,4 @@
-# Deployment Status — 2026-07-01
+# Deployment Status — 2026-07-02
 
 ## What's done
 
@@ -7,12 +7,13 @@
 - Docker image rebuilt and pushed to ECR (`latest` tag) with:
   - SatDump 1.2.2 (.deb)
   - RT-STPS 7.0 + Patch 1
-  - CSPP SDR 4.1 + 4.1.1 patch
+  - CSPP SDR 4.1 + 4.1.1 patch (base only — missing J01 supplementary data)
   - AWS CLI v2
   - libtiff5 + libfftw3 + libnng1 + libjemalloc2 + libhdf5
-- Pipeline confirmed working: I/Q extraction + SatDump + S3 upload succeeds per-chunk
+- Pipeline confirmed working: I/Q extraction + SatDump + S3 upload succeeds per-chunk (25/25 ✅)
+- **RT-STPS is OPERATIONAL** — produces 5 RDR HDF5 files (VIIRS 344 MB + CrIS 226 MB + ATMS 3.5 MB + 2× OMPS) from 1.3 GB concatenated CADU
 - **VIIRS Visualization module deployed** (Lambda + CodeBuild + ECR + EventBridge)
-- **Forked architecture** — SatDump composites upload to S3 immediately after SatDump completes, before RT-STPS (which still fails). RT-STPS/CSPP failures are non-fatal.
+- **Forked architecture** — SatDump composites + .cadu upload to S3 immediately after SatDump completes. RT-STPS/CSPP failures are non-fatal per-chunk.
 - **Contact scheduler DISABLED** in Terraform (`state = "DISABLED"`) to prevent unintended contacts
 - Contacts #3 (Oregon) and #4 (Stockholm) processed — composites in S3
 
@@ -42,46 +43,61 @@ The SatDump path produces composites without per-pixel geolocation. The overlay 
 
 ## What needs fixing (prioritized)
 
-### 1. RT-STPS — CADU concatenation needed (critical for NASA path)
+### 1. CSPP SDR — Missing J01 supplementary data packages (BLOCKER for NASA path)
 
-**Status**: Root causes identified, partially fixed. One remaining issue.
+**Status**: RT-STPS works. CSPP SDR finds `viirs_sdr.sh` and starts but fails installation check.
 
-**Root causes found and fixed:**
-1. ✅ `../data` directory missing → RT-STPS npp.xml writes to `../data` relative to its cwd. Fixed by adding `mkdir -p /opt/rt-stps/data` in buildspec.
-2. ✅ Wrong XML config → `npp.xml` (S-NPP) was used but NOAA-20 is JPSS-1. Fixed: now uses `jpss1.xml`.
-3. ✅ Single chunk too short → A 30-second chunk doesn't produce a complete VIIRS granule (~85s needed). Fix: concatenate all chunks' CADU files into one stream before feeding to RT-STPS. Implemented in the aggregation buildspec.
-4. ✅ RT-STPS output path → `batch.sh` cd's to its own dir (`/opt/rt-stps/`), so `../data` resolves to `/opt/rt-stps/data/` (not relative to caller cwd). Fixed in aggregation buildspec.
+**Error messages from CSPP `sdr_config_paths.py`:**
+```
+WARNING: Installation missing files for J01 support. Please install the tarballs.tar.gz
+WARNING: Missing from installation *shipped_luts*.tar.gz
+WARNING: Missing from installation *ecotiles*.tar.gz  
+WARNING: Missing from installation *stray_light_luts*.tar.gz
+ERROR: Installation problem /opt/scripts/anc/static/SDR_4_1_DB/package needs to exist
+```
 
-**Remaining issue:**
-- ❌ **CSPP SDR fails at installation check** — the Docker image is missing JPSS-1 support data:
-  - `shipped_luts*.tar.gz` (lookup tables for VIIRS calibration)
-  - `ecotiles*.tar.gz` (terrain data for geolocation)
-  - `stray_light_luts*.tar.gz` (stray light correction)
-  - Static ancillary database at `{CSPP_SDR_HOME}/anc/static/SDR_4_1_DB/package`
-  
-  These are separate downloads from CIMSS that need to be added to the Dockerfile.
+**Files to download from CIMSS** (https://cimss.ssec.wisc.edu/cspp/jpss_sdr_v4.1.1.shtml):
 
-**RT-STPS is now WORKING ✅** — produces 5 RDR HDF5 files (344 MB VIIRS + CrIS + ATMS + OMPS) from 1.3 GB concatenated CADU.
+| Tarball | CSPP error name | Purpose |
+|---------|----------------|---------|
+| `CSPP_SDR_V4.1_straylight_luts_j01.tar.gz` | `*shipped_luts*` + `*stray_light_luts*` | Stray light correction LUTs for JPSS-1/NOAA-20 |
+| `CSPP_SDR_V4.1_static_tiles.tar.gz` | `*ecotiles*` | Static terrain/land cover tiles for geolocation |
 
-**Fix applied:** `PnEncoded="false"` + removed `pn` node from link chain via runtime `sed` in buildspec.
+**The "SDR_4_1_DB/package" error** likely resolves once the static_tiles tarball is extracted into the correct location (`$CSPP_SDR_HOME/anc/static/`).
 
-**Next step to complete the full chain:**
-1. Download CSPP J01 support tarballs from CIMSS: https://cimss.ssec.wisc.edu/cspp/jpss_sdr_v4.1.1.shtml
-2. Add them to the Docker build context and extract in Dockerfile
-3. Set `CSPP_SDR_HOME=/opt/SDR_4_1` in the Dockerfile ENV
-4. Rebuild + push Docker image
-5. Re-run aggregation — should produce SDR + GEO HDF5 (per-pixel lat/lon)
-6. Then the VIIRS visualization NASA path will have sub-km geolocation accuracy
+**Action required:**
+1. Place tarballs in `docker/sdr-pipeline/`
+2. Add extract steps to Dockerfile after CSPP SDR base extraction
+3. Set `ENV CSPP_SDR_HOME=/opt/SDR_4_1` in Dockerfile
+4. Rebuild + push Docker image (`./build.sh`)
+5. Re-run aggregation
 
-**Architecture (target):**
+**RT-STPS root causes (all resolved):**
+1. ✅ `../data` directory missing → fixed with `mkdir -p /opt/data`
+2. ✅ Wrong XML config → `npp.xml` (S-NPP) → now uses `jpss1.xml` (JPSS-1)
+3. ✅ Single chunk too short → concatenation of all 25 chunks' CADU → 1.3 GB combined
+4. ✅ RT-STPS output path → `cd /opt/rt-stps` before invoking `batch.sh`, output goes to `/opt/data`
+5. ✅ PN encoding mismatch → SatDump outputs PN-decoded frames, set `PnEncoded="false"` + remove `pn` link node
+6. ✅ `.cadu` not uploaded to S3 → fixed buildspec echo parentheses bug + added `aws s3 sync` after SatDump
+
+**SatDump .cadu frame analysis (confirmed 2026-07-02):**
+- File size: 56,184,832 bytes = 54,868 × 1024 bytes/frame (exact division)
+- Frame structure: `1A CF FC 1D` (ASM) + 1020 bytes CADU payload
+- SCID: 159 (JPSS-1 ✅), VCID: 16 (VIIRS ✅)
+- RS parity: intact (non-zero bytes in parity region)
+- PN encoding: already removed by SatDump (identical headers across frames)
+
+**Architecture (working):**
 ```
 Per chunk (parallel, 25×):
   .pcap → I/Q extract → .cs8 → SatDump npp_hrd → composites + .cadu → upload ALL to S3
+  ↕ RT-STPS/CSPP non-fatal per-chunk (best-effort)
 
 Aggregation (single):
-  Download all .cadu from S3 → cat chunk_0/*.cadu chunk_1/*.cadu ... > combined.cadu
-  → RT-STPS (jpss1.xml) combined.cadu → RDR HDF5 in /opt/rt-stps/data/
-  → CSPP SDR → SDR + GEO HDF5 (per-pixel lat/lon!)
+  Download all .cadu from S3 → cat chunk_0/*.cadu ... chunk_24/*.cadu > combined.cadu (1.3 GB)
+  → sed PnEncoded=false + remove pn link in jpss1.xml
+  → cd /opt/rt-stps && bin/batch.sh config/jpss1.xml combined.cadu → 5 RDR HDF5 in /opt/data/ ✅
+  → CSPP SDR viirs_sdr.sh → SDR + GEO HDF5 (BLOCKED — missing J01 data)
   → Upload SDR/GEO/RDR to S3
 ```
 
@@ -105,10 +121,12 @@ aws sso login --profile AWSAdminAccess-471112743408
 
 - Contact #1: c14d25d6-run1 through c14d25d6-run9 (used)
 - Contact #2: 7903eb3f-run1 through 7903eb3f-run6 (used)
-- Contact #3: 1ae80d1d-run1 through 1ae80d1d-run3 (used), 1ae80d1d-rtstps-fix-test, 1ae80d1d-rtstps-jpss1-test, 1ae80d1d-jpss1-config-v2, 1ae80d1d-cadu-concat-v1 (used)
+- Contact #3: 1ae80d1d-run1 through 1ae80d1d-run3 (used), 1ae80d1d-rtstps-fix-test, 1ae80d1d-rtstps-jpss1-test, 1ae80d1d-jpss1-config-v2, 1ae80d1d-cadu-concat-v1, 1ae80d1d-cadu-upload-fix, 1ae80d1d-cadu-upload-v2, 1ae80d1d-cadu-upload-v3, 1ae80d1d-full-25chunks, 1ae80d1d-full-v2, 1ae80d1d-pn-false, 1ae80d1d-pn-nolink, 1ae80d1d-rtstps-optdata, 1ae80d1d-cspp-fix, 1ae80d1d-cspp-path-fix, 1ae80d1d-cspp-home, 1ae80d1d-cspp-bin-fix (all used)
 - Contact #4: 69c8c149-run1 through 69c8c149-run3 (used)
 
-## Key learnings from this session
+## Key learnings
+
+### Signal chain (sessions 1-3)
 
 1. SatDump composites must be uploaded to S3 BEFORE RT-STPS (forked architecture) — otherwise they're lost when RT-STPS fails
 2. CodeBuild ECR image reference MUST include `:latest` tag — without it, the image is cached indefinitely
@@ -118,12 +136,15 @@ aws sso login --profile AWSAdminAccess-471112743408
 6. The geo→pixel linear mapping is only approximate for VIIRS (curvilinear scan geometry)
 7. Per-pixel geolocation (NASA path / CSPP SDR GMODO files) is the only way to get sub-km overlay alignment
 8. RT-STPS `npp.xml` is for S-NPP — NOAA-20 (JPSS-1) requires `jpss1.xml`
-9. RT-STPS `batch.sh` cd's to its own directory — `../data` resolves to `/opt/rt-stps/data/`, not caller cwd
+9. RT-STPS `batch.sh` cd's to its own directory — `../data` resolves relative to cwd, not relative to batch.sh location
 10. A single 30-second CADU chunk has insufficient data for RT-STPS to form a VIIRS granule (~85s needed) — concatenation of all chunks before RT-STPS is required
-11. SatDump `.cadu` output location needs verification — the file may not be where `aws s3 sync` expects it
-12. Parentheses in echo messages cause `/bin/sh` syntax errors in CodeBuild — never use `()` in inline buildspec echo text
-13. RT-STPS resolves `../data` relative to its cwd — when cwd is `/opt/rt-stps`, output goes to `/opt/data` (not `/opt/rt-stps/data`)
-14. SatDump `.cadu` files ARE standard 1024-byte CADUs with ASM (0x1ACFFC1D) + RS parity intact, but PN already removed
-15. RT-STPS with PnEncoded=true corrupts already-decoded frames — must use PnEncoded=false + remove pn node from link chain
-16. CSPP SDR 4.1 installs to /opt/SDR_4_1/ (not /opt/cspp-sdr/), viirs_sdr.sh is in bin/ not viirs/
-17. CSPP requires CSPP_SDR_HOME env var + J01 support tarballs (shipped_luts, ecotiles, stray_light_luts) + static ancillary DB
+
+### Session 2026-07-02 — CADU upload + RT-STPS operational
+
+11. **Parentheses in echo messages cause `/bin/sh` syntax errors in CodeBuild** — never use `()` in inline buildspec echo text. CodeBuild uses `/bin/sh` not bash.
+12. **RT-STPS `../data` resolves from cwd `/opt/rt-stps` to `/opt/data`** — not `/opt/rt-stps/data`. The `mkdir` must create `/opt/data`.
+13. **SatDump `.cadu` = standard 1024-byte CADUs** — ASM (`0x1ACFFC1D`) + RS parity intact, but PN already removed by SatDump's demodulator.
+14. **RT-STPS PnEncoded=true corrupts already-decoded frames** — XORs clean data with PN sequence → RS fails → all frames silently discarded → 0 output. Fix: `PnEncoded="false"` + remove `pn` node from `<links>` chain.
+15. **CSPP SDR 4.1 installs to `/opt/SDR_4_1/`** — not `/opt/cspp-sdr/`. Script is at `bin/viirs_sdr.sh`, not `viirs/viirs_sdr.sh`. Requires `CSPP_SDR_HOME` env var.
+16. **CSPP needs supplementary J01 data** — `CSPP_SDR_V4.1_straylight_luts_j01.tar.gz` + `CSPP_SDR_V4.1_static_tiles.tar.gz` must be extracted into `$CSPP_SDR_HOME/` for the installation check to pass.
+17. **Terraform `jsonencode` + inline buildspec = opaque state** — `terraform plan` shows "no changes" even when the live resource differs, because state file and .tf both have the same value. Use `terraform taint` to force replacement.

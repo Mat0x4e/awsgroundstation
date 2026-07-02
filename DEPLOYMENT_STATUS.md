@@ -53,13 +53,25 @@ The SatDump path produces composites without per-pixel geolocation. The overlay 
 4. ✅ RT-STPS output path → `batch.sh` cd's to its own dir (`/opt/rt-stps/`), so `../data` resolves to `/opt/rt-stps/data/` (not relative to caller cwd). Fixed in aggregation buildspec.
 
 **Remaining issue:**
-- ❌ RT-STPS processes the combined 1.3 GB CADU but produces 0 RDR files. Root cause: SatDump's `.cadu` output format is likely incompatible with RT-STPS expectations. SatDump performs frame sync, PN removal, Viterbi decoding, and RS decoding internally — the `.cadu` file contains **post-decoded frames** (no ASM sync marker, no RS parity, no PN encoding). RT-STPS `jpss1.xml` is configured with `PnEncoded="true"` and `reed_solomon` processing, meaning it expects **raw receiver output** with these layers still intact.
+- ❌ **CSPP SDR fails at installation check** — the Docker image is missing JPSS-1 support data:
+  - `shipped_luts*.tar.gz` (lookup tables for VIIRS calibration)
+  - `ecotiles*.tar.gz` (terrain data for geolocation)
+  - `stray_light_luts*.tar.gz` (stray light correction)
+  - Static ancillary database at `{CSPP_SDR_HOME}/anc/static/SDR_4_1_DB/package`
+  
+  These are separate downloads from CIMSS that need to be added to the Dockerfile.
 
-**Next steps to resolve:**
-1. Check SatDump `.cadu` frame size: if 892 bytes/frame → RS already stripped; if 1020 bytes → RS intact but no ASM; if 1024 → full CADU with ASM
-2. If SatDump strips RS/ASM: look for a SatDump option to output raw frames (`--dump_cadu` or pipeline config to stop before RS decode)
-3. Alternative: configure RT-STPS to skip frame_sync and reed_solomon (accept pre-decoded VCDUs directly) — but this may require custom XML config modifications
-4. Alternative: use SatDump's TCP frame output feature (nng socket) to stream CADU frames to RT-STPS in real-time format
+**RT-STPS is now WORKING ✅** — produces 5 RDR HDF5 files (344 MB VIIRS + CrIS + ATMS + OMPS) from 1.3 GB concatenated CADU.
+
+**Fix applied:** `PnEncoded="false"` + removed `pn` node from link chain via runtime `sed` in buildspec.
+
+**Next step to complete the full chain:**
+1. Download CSPP J01 support tarballs from CIMSS: https://cimss.ssec.wisc.edu/cspp/jpss_sdr_v4.1.1.shtml
+2. Add them to the Docker build context and extract in Dockerfile
+3. Set `CSPP_SDR_HOME=/opt/SDR_4_1` in the Dockerfile ENV
+4. Rebuild + push Docker image
+5. Re-run aggregation — should produce SDR + GEO HDF5 (per-pixel lat/lon)
+6. Then the VIIRS visualization NASA path will have sub-km geolocation accuracy
 
 **Architecture (target):**
 ```
@@ -111,4 +123,7 @@ aws sso login --profile AWSAdminAccess-471112743408
 11. SatDump `.cadu` output location needs verification — the file may not be where `aws s3 sync` expects it
 12. Parentheses in echo messages cause `/bin/sh` syntax errors in CodeBuild — never use `()` in inline buildspec echo text
 13. RT-STPS resolves `../data` relative to its cwd — when cwd is `/opt/rt-stps`, output goes to `/opt/data` (not `/opt/rt-stps/data`)
-14. SatDump `.cadu` files ARE raw CADU frames but likely pre-decoded (no ASM, no RS parity) — RT-STPS expects undecoded frames with full CCSDS framing intact
+14. SatDump `.cadu` files ARE standard 1024-byte CADUs with ASM (0x1ACFFC1D) + RS parity intact, but PN already removed
+15. RT-STPS with PnEncoded=true corrupts already-decoded frames — must use PnEncoded=false + remove pn node from link chain
+16. CSPP SDR 4.1 installs to /opt/SDR_4_1/ (not /opt/cspp-sdr/), viirs_sdr.sh is in bin/ not viirs/
+17. CSPP requires CSPP_SDR_HOME env var + J01 support tarballs (shipped_luts, ecotiles, stray_light_luts) + static ancillary DB

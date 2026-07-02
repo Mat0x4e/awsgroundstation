@@ -1,0 +1,48 @@
+version: 0.2
+
+env:
+  variables:
+    SATDUMP_VERSION: "1.2.0"
+    RTSTPS_HOME: "/opt/rt-stps"
+    CSPP_HOME: "/opt/cspp-sdr"
+
+phases:
+  pre_build:
+    commands:
+      - echo "Downloading chunk from S3..."
+      - aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_KEY}" /tmp/input.pcap
+      - mkdir -p /tmp/output/{iq,satdump,rtstps,cspp}
+
+  build:
+    commands:
+      # Step 1: I/Q Extraction
+      - echo "Step 1: Extracting I/Q from VITA-49..."
+      - python3 /opt/scripts/iq_extract.py /tmp/input.pcap /tmp/output/iq/baseband.cs8
+      - echo "I/Q extraction complete"
+
+      # Step 2: SatDump demodulation
+      - echo "Step 2: SatDump npp_hrd processing..."
+      - /opt/scripts/satdump_process.sh /tmp/output/iq/baseband.cs8 /tmp/output/satdump
+      - echo "SatDump complete — listing .cadu locations:"
+      - find /tmp/output/ -name '*.cadu' -ls
+      - ls -la /tmp/output/satdump/
+
+      # Step 2b: Upload SatDump outputs (composites + .cadu) immediately — forked architecture
+      - echo "Uploading SatDump outputs (composites + CADU)..."
+      - aws s3 sync /tmp/output/satdump/ "s3://${OUTPUT_BUCKET}/${CONTACT_ID}/${CHUNK_ID}/satdump/" --sse aws:kms --sse-kms-key-id "${KMS_KEY_ID}"
+      - echo "SatDump S3 upload complete"
+
+      # Step 3: RT-STPS CADU → RDR (non-fatal — single chunk has insufficient data for full granule)
+      - echo "Step 3: RT-STPS processing (best-effort per chunk)..."
+      - python3 /opt/scripts/rtstps_process.py /tmp/output/satdump/*.cadu /tmp/output/rtstps || echo "[WARNING] RT-STPS failed on this chunk (expected — single chunk is too short for full VIIRS granule)"
+
+      # Step 4: CSPP SDR calibration (non-fatal — depends on RT-STPS success)
+      - echo "Step 4: CSPP SDR processing (best-effort)..."
+      - python3 /opt/scripts/cspp_process.py /tmp/output/rtstps /tmp/output/cspp || echo "[WARNING] CSPP failed (expected if RT-STPS produced no output)"
+
+  post_build:
+    commands:
+      - echo "Uploading results to S3..."
+      - aws s3 sync /tmp/output/cspp/ "s3://${OUTPUT_BUCKET}/${CONTACT_ID}/${CHUNK_ID}/" --sse aws:kms --sse-kms-key-id "${KMS_KEY_ID}"
+      - aws s3 cp /tmp/output/satdump/dataset.json "s3://${OUTPUT_BUCKET}/${CONTACT_ID}/${CHUNK_ID}/dataset.json" --sse aws:kms --sse-kms-key-id "${KMS_KEY_ID}"
+      - echo "Upload complete"

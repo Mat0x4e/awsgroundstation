@@ -194,6 +194,8 @@ class CSPPProcessor:
         with tempfile.TemporaryDirectory(prefix="cspp_workdir_") as workdir:
             env = os.environ.copy()
             env["CSPP_WORKDIR"] = workdir
+            env["CSPP_SDR_HOME"] = str(Path(self.CSPP_HOME))
+            env["CSPP_RT_HOME"] = str(Path(self.CSPP_HOME))
 
             logger.info("Invoking CSPP SDR: %s", " ".join(cmd))
             completed = subprocess.run(

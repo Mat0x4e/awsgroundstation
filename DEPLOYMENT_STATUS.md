@@ -65,12 +65,14 @@ ERROR: Installation problem /opt/scripts/anc/static/SDR_4_1_DB/package needs to 
 
 **The "SDR_4_1_DB/package" error** likely resolves once the static_tiles tarball is extracted into the correct location (`$CSPP_SDR_HOME/anc/static/`).
 
-**Action required:**
-1. Place tarballs in `docker/sdr-pipeline/`
-2. Add extract steps to Dockerfile after CSPP SDR base extraction
-3. Set `ENV CSPP_SDR_HOME=/opt/SDR_4_1` in Dockerfile
-4. Rebuild + push Docker image (`./build.sh`)
-5. Re-run aggregation
+**Action taken (2026-07-07):**
+1. ✅ Uploaded tarballs to `s3://groundstation-noaa20-sdr-output-471112743408/docker-build/`
+2. ✅ Dockerfile updated with extract steps + `sdr_luts.sh --spacecraft j01` for DB creation
+3. ✅ `ENV CSPP_SDR_HOME=/opt/SDR_4_1` set in Dockerfile
+4. ✅ Docker rebuild via CodeBuild (all in AWS — no local Docker needed)
+5. ⏳ Pending: Docker build with LUT download (build `bc32af5b`, 60 min timeout)
+
+**Remaining CSPP issue**: `SDR_4_1_DB/package` — this is the LUT database created by `sdr_luts.sh`. Added to Dockerfile build step. If the LUT download from `jpssdb.ssec.wisc.edu` fails during build (network/timeout), an alternative is to pre-download the LUTs and upload to S3.
 
 **RT-STPS root causes (all resolved):**
 1. ✅ `../data` directory missing → fixed with `mkdir -p /opt/data`

@@ -85,6 +85,11 @@ RUN tar xzf /opt/CSPP_SDR_V4.1.tar.gz -C /opt/ && \
        /opt/CSPP_SDR_V4.1_straylight_luts_j01.tar.gz \
        /opt/CSPP_SDR_V4.1_static_tiles.tar.gz
 
+# Download and install CSPP LUTs — creates SDR_4_1_DB database required at runtime
+ENV CSPP_SDR_HOME="/opt/SDR_4_1"
+RUN /opt/SDR_4_1/bin/sdr_luts.sh --spacecraft j01 || \
+    echo "WARNING: sdr_luts.sh failed — SDR_4_1_DB may not be created"
+
 # -------------------------------------------------------------------
 # Pipeline scripts
 # -------------------------------------------------------------------

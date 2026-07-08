@@ -29,7 +29,7 @@ resource "aws_codebuild_project" "sdr_pipeline" {
   }
 
   environment {
-    compute_type                = "BUILD_GENERAL1_LARGE"
+    compute_type                = "BUILD_GENERAL1_2XLARGE"
     image                       = "${aws_ecr_repository.sdr_pipeline.repository_url}:latest"
     type                        = "LINUX_CONTAINER"
     image_pull_credentials_type = "SERVICE_ROLE"

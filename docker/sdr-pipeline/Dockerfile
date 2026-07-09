@@ -85,10 +85,12 @@ RUN tar xzf /opt/CSPP_SDR_V4.1.tar.gz -C /opt/ && \
        /opt/CSPP_SDR_V4.1_straylight_luts_j01.tar.gz \
        /opt/CSPP_SDR_V4.1_static_tiles.tar.gz
 
-# Download and install CSPP LUTs — creates SDR_4_1_DB database required at runtime
+# Initialize CSPP LUT cache database — required at runtime
+# viirs_sdr.sh needs this DB; sdr_luts.sh creates it
 ENV CSPP_SDR_HOME="/opt/SDR_4_1"
-RUN /opt/SDR_4_1/bin/sdr_luts.sh -l || \
-    echo "WARNING: sdr_luts.sh failed — SDR_4_1_DB may not be created"
+ENV CSPP_RT_HOME="/opt/SDR_4_1"
+RUN cd /opt/SDR_4_1 && ./bin/sdr_luts.sh 2>&1 | tail -20 || \
+    echo "WARNING: sdr_luts.sh failed — will try runtime init"
 
 # -------------------------------------------------------------------
 # Pipeline scripts

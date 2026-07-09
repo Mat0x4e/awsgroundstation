@@ -96,7 +96,8 @@ RUN cd /opt/SDR_4_1 && ./bin/sdr_luts.sh 2>&1 | tail -20 || \
 # Pipeline scripts
 # -------------------------------------------------------------------
 COPY scripts/ /opt/scripts/
-RUN chmod +x /opt/scripts/*.py /opt/scripts/*.sh 2>/dev/null || true
+RUN chmod +x /opt/scripts/*.py /opt/scripts/*.sh 2>/dev/null || true && \
+    ln -sf /opt/SDR_4_1/anc /opt/scripts/anc
 
 # -------------------------------------------------------------------
 # Environment variables

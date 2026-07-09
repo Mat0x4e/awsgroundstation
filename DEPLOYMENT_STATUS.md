@@ -72,7 +72,11 @@ ERROR: Installation problem /opt/scripts/anc/static/SDR_4_1_DB/package needs to 
 4. ✅ Docker rebuild via CodeBuild (all in AWS — no local Docker needed)
 5. ⏳ Pending: Docker build with LUT download (build `bc32af5b`, 60 min timeout)
 
-**Remaining CSPP issue**: `SDR_4_1_DB/package` — this is the LUT database created by `sdr_luts.sh`. Added to Dockerfile build step. If the LUT download from `jpssdb.ssec.wisc.edu` fails during build (network/timeout), an alternative is to pre-download the LUTs and upload to S3.
+**Remaining CSPP issue**: `SDR_4_1_DB/package` — this is the LUT database created by `sdr_luts.sh`. Previous attempts:
+- `sdr_luts.sh --spacecraft j01` → `unrecognized arguments`
+- `sdr_luts.sh -l` → failed silently
+- Fake `mkdir -p SDR_4_1_DB/package` → passes check_installation but causes infinite hang: "wait for cache db initialization" (CSPP thinks another process is initializing)
+- Current attempt: `cd /opt/SDR_4_1 && ./bin/sdr_luts.sh` (no args, from CSPP root, on 2XLARGE build)
 
 **RT-STPS root causes (all resolved):**
 1. ✅ `../data` directory missing → fixed with `mkdir -p /opt/data`

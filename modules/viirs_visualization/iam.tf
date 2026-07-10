@@ -123,9 +123,9 @@ resource "aws_iam_policy" "codebuild_service" {
     Statement = [
       # S3 — read inputs and write rendered products to the SDR output bucket
       {
-        Sid    = "S3ListBucket"
-        Effect = "Allow"
-        Action = "s3:ListBucket"
+        Sid      = "S3ListBucket"
+        Effect   = "Allow"
+        Action   = "s3:ListBucket"
         Resource = var.sdr_output_bucket_arn
       },
       {

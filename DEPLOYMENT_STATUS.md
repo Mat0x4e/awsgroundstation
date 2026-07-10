@@ -107,11 +107,23 @@ Aggregation (single):
   → Upload SDR/GEO/RDR to S3
 ```
 
-### 2. Visualization geolocation accuracy (quality of life)
+### 2. Visualization geolocation accuracy — NEW APPROACH
 
-Current TLE approach gives ~100-300 km offset. Two improvement options:
-- **Quick fix**: add `--bbox LAT_MIN LAT_MAX LON_MIN LON_MAX` CLI override for manual calibration per contact
-- **Proper fix**: decode SatDump CBOR `projection_cfg` timestamps (J2000-based?) and apply GMST rotation for correct ECI→geographic conversion
+**Previous approach** (abandoned): CSPP SDR produces GMODO/GIGTO with per-pixel lat/lon. This requires:
+- RT-STPS → CSPP SDR chain (works for RT-STPS but CSPP has intractable DB initialization issues in CodeBuild)
+- 30+ minutes of processing on 2XLARGE compute
+
+**New approach**: Use SatDump's native projection system. SatDump already computes per-pixel geolocation internally (from CADU frame timestamps + TLE/ephemeris). It just needs to be configured to OUTPUT projected GeoTIFFs.
+
+**Implementation**: Add `"project": {"config": {"type": "equirec", "auto": true}, "img_format": ".tif"}` to the SatDump pipeline configuration. This produces equirectangular projected GeoTIFFs with correct WGS84 coordinates — no CSPP needed.
+
+**Benefits**:
+- No CSPP SDR dependency (eliminates 30+ min processing + DB issues)
+- Same data quality as current composites (SatDump calibration)  
+- Per-pixel geolocation from SatDump's internal ephemeris propagation
+- GeoTIFF output with proper affine transform + CRS
+
+**Trade-off**: SatDump's geolocation uses community TLE propagation (not NOAA's corrected ephemeris). Accuracy is ~1-5 km vs CSPP's sub-km. For a demonstrator this is acceptable — coastlines will align visually.
 
 ### 3. Contact scheduler permanently disabled ✅
 

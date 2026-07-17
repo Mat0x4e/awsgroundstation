@@ -54,10 +54,22 @@ variable "enable_processing_pipeline" {
   default     = false
 }
 
+variable "enable_sdr_pipeline" {
+  description = "Whether to create the SDR pipeline resources (NOAA-20 CADU-to-TIFF)"
+  type        = bool
+  default     = false
+}
+
 variable "satellite_norad_id" {
   description = "NORAD catalog ID for the target satellite"
   type        = number
   default     = 43013
+}
+
+variable "satellite_id" {
+  description = "AWS Ground Station satellite UUID (from aws groundstation list-satellites). Required when ground_station_enabled = true."
+  type        = string
+  default     = ""
 }
 
 variable "objective" {

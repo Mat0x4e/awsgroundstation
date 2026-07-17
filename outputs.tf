@@ -47,3 +47,18 @@ output "processing_lambda_arn" {
   description = "ARN of the data processor Lambda function (when processing pipeline is enabled)"
   value       = var.enable_processing_pipeline ? module.processing_pipeline[0].lambda_function_arn : null
 }
+
+output "aggregation_instance_id" {
+  description = "ID of the EC2 aggregation instance (when SDR pipeline is enabled)"
+  value       = var.enable_sdr_pipeline ? module.sdr_pipeline[0].aggregation_instance_id : null
+}
+
+output "aggregation_trigger_lambda_arn" {
+  description = "ARN of the aggregation Trigger Lambda function (when SDR pipeline is enabled)"
+  value       = var.enable_sdr_pipeline ? module.sdr_pipeline[0].aggregation_trigger_lambda_arn : null
+}
+
+output "aggregation_trigger_lambda_function_name" {
+  description = "Function name of the aggregation Trigger Lambda (when SDR pipeline is enabled)"
+  value       = var.enable_sdr_pipeline ? module.sdr_pipeline[0].aggregation_trigger_lambda_function_name : null
+}

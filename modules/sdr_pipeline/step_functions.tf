@@ -273,46 +273,25 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
       }
 
       # ── 6. FinalAggregation ────────────────────────────────────────────────
-      # Start an aggregation CodeBuild build using a different buildspec.
+      # Invoke the Trigger Lambda which starts the EC2 aggregation instance and
+      # issues an SSM Run Command. Returns command_id and instance_id for polling.
       FinalAggregation = {
         Type     = "Task"
-        Comment  = "Start final aggregation CodeBuild build"
-        Resource = "arn:aws:states:::aws-sdk:codebuild:startBuild"
+        Comment  = "Invoke Trigger Lambda to start EC2 aggregation and issue SSM Run Command"
+        Resource = "arn:aws:states:::lambda:invoke"
         Parameters = {
-          ProjectName       = aws_codebuild_project.sdr_pipeline.name
-          BuildspecOverride = "version: 0.2\nenv:\n  variables:\n    RTSTPS_HOME: /opt/rt-stps\n    CSPP_HOME: /opt/cspp-sdr\nphases:\n  pre_build:\n    commands:\n      - echo Downloading chunk metadata and CADU files...\n      - mkdir -p /tmp/aggregation /tmp/cadu /tmp/rdr /tmp/sdr\n      - python3 /opt/scripts/download_chunk_metadata.py $OUTPUT_BUCKET $CONTACT_ID /tmp/aggregation/\n      - echo Downloading all CADU files from S3...\n      - aws s3 sync s3://$OUTPUT_BUCKET/contacts/$CONTACT_DATE/$CONTACT_ID/satdump/ /tmp/cadu/ --exclude '*' --include '*.cadu'\n      - echo CADU files downloaded\n  build:\n    commands:\n      - echo Step 1 - Concatenate all CADU files\n      - find /tmp/cadu -name '*.cadu' | sort | xargs cat > /tmp/aggregation/combined.cadu\n      - echo Combined CADU size is $(du -h /tmp/aggregation/combined.cadu | cut -f1)\n      - echo Step 2 - RT-STPS on combined CADU with jpss1.xml\n      - mkdir -p /opt/data\n      - ls /opt/SDR_4_1/anc/static/ 2>/dev/null\n      - sed -i 's/PnEncoded=\"true\"/PnEncoded=\"false\"/' /opt/rt-stps/config/jpss1.xml\n      - sed -i 's|from=\"frame_sync\" to=\"pn\"|from=\"frame_sync\" to=\"reed_solomon\"|' /opt/rt-stps/config/jpss1.xml\n      - sed -i '/from=\"pn\" to=\"reed_solomon\"/d' /opt/rt-stps/config/jpss1.xml\n      - cd /opt/rt-stps && bin/batch.sh config/jpss1.xml /tmp/aggregation/combined.cadu || echo WARN RT-STPS failed\n      - echo RT-STPS produced $(find /opt/data -name '*.h5' | wc -l) RDR files\n      - find /opt/data -name '*.h5' -ls\n      - echo Step 3 - CSPP SDR calibration\n      - export CSPP_SDR_HOME=/opt/SDR_4_1 CSPP_RT_HOME=/opt/SDR_4_1\n      - VIIRS_RDR=$(find /opt/data -name 'RNSCA-RVIRS*.h5' | head -1)\n      - if [ -n \"$VIIRS_RDR\" ]; then /opt/SDR_4_1/bin/viirs_sdr.sh --work-dir /tmp/sdr $VIIRS_RDR; echo CSPP produced $(find /tmp/sdr -name 'SV*.h5' | wc -l) SDR files; else echo No VIIRS RDR found - skipping CSPP; fi || echo WARN CSPP failed\n      - echo Step 4 - Computing geolocation\n      - python3 /opt/scripts/geolocation.py /tmp/aggregation/ /tmp/aggregation/coordinates/\n      - echo Generating manifest\n      - python3 /opt/scripts/generate_manifest.py /tmp/aggregation/ /tmp/aggregation/manifest.json\n      - echo Publishing metrics\n      - python3 /opt/scripts/publish_metrics.py /tmp/aggregation/manifest.json\n  post_build:\n    commands:\n      - echo Uploading results...\n      - aws s3 sync /tmp/aggregation/coordinates/ s3://$OUTPUT_BUCKET/contacts/$CONTACT_DATE/$CONTACT_ID/coordinates/ --sse aws:kms --sse-kms-key-id $KMS_KEY_ID\n      - aws s3 cp /tmp/aggregation/manifest.json s3://$OUTPUT_BUCKET/contacts/$CONTACT_DATE/$CONTACT_ID/manifest.json --sse aws:kms --sse-kms-key-id $KMS_KEY_ID\n      - if [ -d /tmp/sdr ] && [ \"$(find /tmp/sdr -name '*.h5' | head -1)\" ]; then aws s3 sync /tmp/sdr/ s3://$OUTPUT_BUCKET/contacts/$CONTACT_DATE/$CONTACT_ID/sdr/ --sse aws:kms --sse-kms-key-id $KMS_KEY_ID; echo SDR upload complete; fi\n      - if [ \"$(find /opt/data -name '*.h5' | head -1)\" ]; then aws s3 sync /opt/data/ s3://$OUTPUT_BUCKET/contacts/$CONTACT_DATE/$CONTACT_ID/rdr/ --sse aws:kms --sse-kms-key-id $KMS_KEY_ID --exclude 'defs/*'; echo RDR upload complete; fi\n      - aws s3 rm s3://$OUTPUT_BUCKET/contacts/$CONTACT_ID/.processing\n      - echo Aggregation complete\n"
-          EnvironmentVariablesOverride = [
-            {
-              Name  = "OUTPUT_BUCKET"
-              Value = aws_s3_bucket.sdr_output.id
-              Type  = "PLAINTEXT"
-            },
-            {
-              Name      = "CONTACT_ID"
-              "Value.$" = "$.contact_id"
-              Type      = "PLAINTEXT"
-            },
-            {
-              Name      = "CONTACT_DATE"
-              "Value.$" = "$.contact_date"
-              Type      = "PLAINTEXT"
-            },
-            {
-              Name  = "KMS_KEY_ID"
-              Value = var.kms_key_arn
-              Type  = "PLAINTEXT"
-            },
-            {
-              Name  = "AGGREGATION_MODE"
-              Value = "true"
-              Type  = "PLAINTEXT"
-            }
-          ]
+          FunctionName = aws_lambda_function.aggregation_trigger.arn
+          Payload = {
+            "bucket.$"       = "$.bucket"
+            "contact_id.$"   = "$.contact_id"
+            "contact_date.$" = "$.contact_date"
+          }
         }
         ResultSelector = {
-          "build_id.$" = "$.Build.Id"
+          "command_id.$"  = "$.Payload.command_id"
+          "instance_id.$" = "$.Payload.instance_id"
         }
-        ResultPath = "$.aggregation_build"
+        ResultPath = "$.ssm"
         Catch = [
           {
             ErrorEquals = ["States.ALL"]
@@ -320,29 +299,30 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
             ResultPath  = "$.error"
           }
         ]
-        Next = "WaitForAggregation"
+        Next = "WaitForSSM"
       }
 
-      # Wait 30 s before polling aggregation build status
-      WaitForAggregation = {
+      # Wait 30 s before polling SSM command status
+      WaitForSSM = {
         Type    = "Wait"
         Seconds = 30
-        Next    = "CheckAggregationStatus"
+        Next    = "CheckSSMStatus"
       }
 
-      # Poll CodeBuild for aggregation build status
-      CheckAggregationStatus = {
+      # Poll SSM for the command invocation status
+      CheckSSMStatus = {
         Type     = "Task"
-        Comment  = "Poll aggregation CodeBuild build status"
-        Resource = "arn:aws:states:::aws-sdk:codebuild:batchGetBuilds"
+        Comment  = "Poll SSM Run Command status via AWS SDK integration"
+        Resource = "arn:aws:states:::aws-sdk:ssm:getCommandInvocation"
         Parameters = {
-          "Ids.$" = "States.Array($.aggregation_build.build_id)"
+          "CommandId.$"  = "$.ssm.command_id"
+          "InstanceId.$" = "$.ssm.instance_id"
         }
         ResultSelector = {
-          "build_status.$" = "$.Builds[0].BuildStatus"
+          "status.$"         = "$.Status"
+          "status_details.$" = "$.StatusDetails"
         }
-        ResultPath       = "$.aggregation_poll"
-        HeartbeatSeconds = 600
+        ResultPath = "$.ssm_poll"
         Retry = [
           {
             ErrorEquals     = ["States.TaskFailed"]
@@ -351,22 +331,27 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
             BackoffRate     = 1.5
           }
         ]
-        Next = "EvaluateAggregationStatus"
+        Next = "EvaluateSSMStatus"
       }
 
-      # Branch on aggregation build status
-      EvaluateAggregationStatus = {
+      # Branch on SSM command status
+      EvaluateSSMStatus = {
         Type    = "Choice"
-        Comment = "Route based on aggregation CodeBuild status"
+        Comment = "Route based on SSM Run Command status"
         Choices = [
           {
-            Variable     = "$.aggregation_poll.build_status"
-            StringEquals = "IN_PROGRESS"
-            Next         = "WaitForAggregation"
+            Variable     = "$.ssm_poll.status"
+            StringEquals = "InProgress"
+            Next         = "WaitForSSM"
           },
           {
-            Variable     = "$.aggregation_poll.build_status"
-            StringEquals = "SUCCEEDED"
+            Variable     = "$.ssm_poll.status"
+            StringEquals = "Pending"
+            Next         = "WaitForSSM"
+          },
+          {
+            Variable     = "$.ssm_poll.status"
+            StringEquals = "Success"
             Next         = "PipelineSucceeded"
           }
         ]

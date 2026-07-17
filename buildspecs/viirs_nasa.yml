@@ -1,0 +1,34 @@
+version: 0.2
+
+env:
+  variables:
+    ENABLE_GEOTIFF: "true"
+    ENABLE_DESTRIPE: "true"
+    MPLBACKEND: "Agg"
+
+phases:
+  pre_build:
+    commands:
+      - echo "Downloading SDR + GEO files from S3..."
+      - mkdir -p /tmp/input /tmp/output
+      - aws s3 sync "s3://${INPUT_BUCKET}/${INPUT_PREFIX}/chunks/" /tmp/input/chunks/
+          --exclude "*" --include "SVI0*.h5" --include "SVOM15*.h5"
+          --include "GIGTO*.h5" --include "GMODO*.h5"
+
+  build:
+    commands:
+      - echo "Running NASA visualization pipeline..."
+      - python3 /opt/scripts/viirs/visualize_nasa.py
+          --input-dir /tmp/input/chunks
+          --output-dir /tmp/output
+          --contact-id "${CONTACT_ID}"
+          --contact-date "${CONTACT_DATE}"
+          --enable-geotiff "${ENABLE_GEOTIFF}"
+          --enable-destripe "${ENABLE_DESTRIPE}"
+
+  post_build:
+    commands:
+      - echo "Uploading products to S3..."
+      - aws s3 sync /tmp/output/ "s3://${INPUT_BUCKET}/products/${CONTACT_DATE}/${CONTACT_ID}/"
+          --sse aws:kms --sse-kms-key-id "${KMS_KEY_ID}"
+      - echo "Visualization complete"

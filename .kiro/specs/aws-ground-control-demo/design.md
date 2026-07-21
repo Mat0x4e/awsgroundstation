@@ -1,5 +1,81 @@
 # Design Document — AWS Ground Control Demo
 
+## Operational Constraints Discovered During Deployment
+
+> **These constraints were discovered during the first live deployment (2026-06-19) and are not documented in the AWS Ground Station user guide in an obvious way. They are critical for anyone implementing this design.**
+
+### 1. S3 Bucket Naming — `aws-groundstation` Prefix Required
+
+The S3 bucket used in an `s3-recording` config **must** have a name starting with `aws-groundstation`. Without this prefix, the Ground Station service rejects the config creation with:
+
+```
+Unable to create new S3 endpoint config — bucket name is invalid.
+Must start with 'aws-groundstation' and follow s3 bucket naming rules.
+```
+
+**Impact**: The bucket name is `aws-groundstation-demo-reception-{account_id}` (not `{project_name}-{env}-reception-{account_id}` as originally designed). Keep the 63-character S3 limit in mind when choosing environment/project names.
+
+### 2. Satellite ARN Uses UUID, Not NORAD ID
+
+The `satelliteArn` used in `ListContacts` and `ReserveContact` API calls must use the AWS-assigned **satellite UUID** (from `list-satellites`), not the NORAD catalog ID:
+
+```
+✅ arn:aws:groundstation::{account}:satellite/33f035e1-73f7-47a5-9df8-fbc48636dca8
+❌ arn:aws:groundstation::{account}:satellite/43013
+```
+
+The UUID is obtained from `aws groundstation list-satellites`. It is account-specific and assigned during satellite onboarding.
+
+### 3. `ListContacts` with Status `AVAILABLE` Requires `groundStation` Parameter
+
+Unlike other statuses, querying for AVAILABLE contacts **requires** specifying which ground station to query. You must iterate over each compatible ground station and aggregate results:
+
+```python
+for gs in ["Stockholm 1", "Ohio 1", "Oregon 1", "Hawaii 1", "Cape Town 1"]:
+    paginator.paginate(
+        ...,
+        statusList=["AVAILABLE"],
+        groundStation=gs,  # REQUIRED for AVAILABLE status
+    )
+```
+
+### 4. Contact Object Field Name Is `groundStation` (Not `groundStationId`)
+
+The response from `ListContacts` and `DescribeContact` uses the field name `groundStation` (the station's display name, e.g. `"Hawaii 1"`). This same value is passed back to `ReserveContact`:
+
+```json
+{
+    "groundStation": "Hawaii 1",
+    "maximumElevation": { "unit": "DEGREE_ANGLE", "value": 60.83 }
+}
+```
+
+### 5. `antenna-downlink-demod-decode` Config Is NOT Compatible with S3 Data Delivery
+
+The `AntennaDownlinkDemodDecodeConfig` type (with QPSK demodulation/decode parameters) can only be used with **EC2 dataflow endpoints** — not with S3 recording configs. Attempting to create a mission profile with:
+
+```
+antenna-downlink-demod-decode → s3-recording
+```
+
+Fails with: `No outputType found in ARN`.
+
+**For S3 Data Delivery, use `AntennaDownlinkConfig`** (raw digitized RF — VITA-49 DigIF format):
+
+```
+antenna-downlink → s3-recording   ✅
+antenna-downlink-demod-decode → dataflow-endpoint (EC2)   ✅
+antenna-downlink-demod-decode → s3-recording   ❌
+```
+
+**Consequence**: Data delivered to S3 is **raw DigIF** (VITA-49 Signal/IP format), NOT pre-demodulated CADU frames. Demodulation and decoding must be performed offline after download. See the [MathWorks tutorial](https://www.mathworks.com/help/satcom/ug/capture-satellite-data-using-aws-ground-station.html) for processing examples.
+
+### 6. Cross-Region Data Delivery Works Transparently
+
+Contacts are scheduled from `eu-central-1` but execute on ground stations in other regions (e.g. Hawaii 1 in `us-west-2`). S3 Data Delivery handles the cross-region transfer automatically — the data arrives in the configured S3 bucket in `eu-central-1` regardless of which antenna captured it.
+
+---
+
 ## Overview
 
 Ce document décrit l'architecture de haut niveau du démonstrateur AWS Ground Station pour la réception de données NOAA-20 (JPSS-1). Le système est entièrement défini en Infrastructure as Code (Terraform) et déploie une chaîne complète : réception S3 Data Delivery → planification automatique des contacts → pipeline de traitement optionnel → observabilité et sécurité.
@@ -503,3 +579,64 @@ Tests prioritaires :
 - Les Lambda functions sont déployées et invocables
 - Le CloudWatch Dashboard est accessible
 
+
+
+## Operational Scripts
+
+### Processing Pipeline (validated 2026-06-19)
+
+The following scripts implement the complete DigIF → Imagery pipeline, proven operational on the first contact:
+
+| Script | Purpose | Runtime |
+|--------|---------|---------|
+| `scripts/vita49_pcap_extract.py` | Extract raw I/Q from VITA-49 pcap files | Python 3.12 + boto3 |
+| `scripts/vita49_analyze.py` | Deep analysis of VITA-49 packet structure | Python 3.12 + boto3 |
+| `scripts/vita49_context_parse.py` | Parse context packets for signal metadata | Python 3.12 |
+| `scripts/compute_coordinates.py` | Calculate geographic coordinates from timestamps + TLE | Python 3.12 + pyorbital |
+| `processing/extract_iq.py` | Lightweight I/Q extractor for CodeBuild/ECS | Python 3.12 |
+| `processing/buildspec.yml` | CodeBuild spec for SatDump processing | YAML |
+
+### Geolocation — `compute_coordinates.py`
+
+Calculates the satellite ground track and image bounding box using:
+1. **Input**: Scan line timestamps from SatDump's `product.cbor` output
+2. **TLE source**: CelesTrak GP API (`CATNR=43013&FORMAT=3LE`) with fallback to hardcoded TLE
+3. **Propagation**: pyorbital SGP4 model
+4. **Output**: `coordinates.json` with bounding box, ground track, and swath extent
+
+```bash
+# From product.cbor (automated)
+python scripts/compute_coordinates.py output/viirs/product.cbor
+
+# Standalone (uses hardcoded timestamps from first contact)
+python scripts/compute_coordinates.py
+```
+
+**Output format** (`coordinates.json`):
+```json
+{
+  "satellite": "NOAA-20 (JPSS-1)",
+  "norad_id": 43013,
+  "bounding_box": { "north": 37.027, "south": 35.362, "east": -149.781, "west": -150.295 },
+  "swath_extent": { "west": -163.8, "east": -136.3 },
+  "ground_track": [{ "lat": 37.027, "lon": -149.781 }, ...],
+  "acquisition": { "start_utc": "2026-06-19T11:54:35Z", "end_utc": "2026-06-19T11:55:04Z", "duration_s": 28.6 },
+  "altitude_km": 831.7
+}
+```
+
+### SatDump Processing via CodeBuild
+
+**Project**: `satdump-noaa20-processing`  
+**Compute**: `BUILD_GENERAL1_LARGE` (8 vCPU, 15 GB RAM)  
+**Runtime**: ~10 minutes per 2.18 GB chunk  
+
+Invocation:
+```bash
+aws codebuild start-build --project-name satdump-noaa20-processing --region eu-central-1
+```
+
+The buildspec environment variables control which chunk to process:
+- `INPUT_KEY`: S3 key of the .pcap file
+- `CONTACT_ID`: Contact identifier for output organization
+- `SAMPLE_RATE`: 34312500 (34.3125 MSps)

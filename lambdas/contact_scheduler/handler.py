@@ -115,7 +115,7 @@ def handler(event, context):
                 "max_elevation": best_contact.get("maximumElevation", {}).get(
                     "value", 0
                 ),
-                "ground_station_id": best_contact.get("groundStationId", ""),
+                "ground_station_name": best_contact.get("groundStation", ""),
             }
         )
     )
@@ -126,7 +126,7 @@ def handler(event, context):
             satellite_arn,
             best_contact["startTime"],
             best_contact["endTime"],
-            best_contact.get("groundStationId", ""),
+            best_contact.get("groundStation", ""),
         )
     except ClientError as e:
         logger.error(
@@ -162,20 +162,44 @@ def handler(event, context):
 
 
 def list_available_contacts(mission_profile_arn, satellite_arn, start_time, end_time):
-    """Query Ground Station for available contacts in the time window."""
+    """Query Ground Station for available contacts in the time window.
+    
+    ListContacts with status=AVAILABLE requires a groundStation parameter.
+    We query each ground station that supports the satellite and aggregate results.
+    """
+    # Ground stations supporting NOAA-20 (from list-satellites API)
+    ground_stations = os.environ.get(
+        "GROUND_STATIONS", "Stockholm 1,Ohio 1,Oregon 1,Hawaii 1,Cape Town 1"
+    ).split(",")
+    
     contacts = []
     paginator = groundstation_client.get_paginator("list_contacts")
 
-    page_iterator = paginator.paginate(
-        missionProfileArn=mission_profile_arn,
-        satelliteArn=satellite_arn,
-        startTime=start_time,
-        endTime=end_time,
-        statusList=["AVAILABLE"],
-    )
+    for gs in ground_stations:
+        gs = gs.strip()
+        try:
+            page_iterator = paginator.paginate(
+                missionProfileArn=mission_profile_arn,
+                satelliteArn=satellite_arn,
+                startTime=start_time,
+                endTime=end_time,
+                statusList=["AVAILABLE"],
+                groundStation=gs,
+            )
 
-    for page in page_iterator:
-        contacts.extend(page.get("contactList", []))
+            for page in page_iterator:
+                contacts.extend(page.get("contactList", []))
+        except ClientError as e:
+            # Some stations may not be accessible from this region — skip silently
+            logger.warning(
+                json.dumps(
+                    {
+                        "action": "list_contacts_station_error",
+                        "ground_station": gs,
+                        "error": str(e),
+                    }
+                )
+            )
 
     return contacts
 
@@ -202,6 +226,16 @@ def reserve_contact(
     mission_profile_arn, satellite_arn, start_time, end_time, ground_station_id
 ):
     """Reserve a contact slot with Ground Station."""
+    logger.info(
+        json.dumps(
+            {
+                "action": "reserve_contact_attempt",
+                "ground_station_id": ground_station_id,
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+            }
+        )
+    )
     response = groundstation_client.reserve_contact(
         missionProfileArn=mission_profile_arn,
         satelliteArn=satellite_arn,

@@ -1,0 +1,49 @@
+version: 0.2
+
+env:
+  variables:
+    INPUT_BUCKET: "aws-groundstation-demo-reception-471112743408"
+    OUTPUT_BUCKET: "aws-groundstation-demo-reception-471112743408"
+    CONTACT_ID: "c14d25d6-d69c-4d9f-a255-85908ab17c13"
+    INPUT_KEY: "year=2026/month=06/day=19/satellite=33f035e1-73f7-47a5-9df8-fbc48636dca8/c14d25d6-d69c-4d9f-a255-85908ab17c13_20260619T114459Z_c6b27c0f-bf52-4bd9-b163-edda2afd83c2.pcap"
+    SAMPLE_RATE: "34312500"
+    AWS_DEFAULT_REGION: "eu-central-1"
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - echo "Installing SatDump from .deb release..."
+      - apt-get update -qq && apt-get install -y wget ocl-icd-libopencl1 opencl-headers
+      - wget -q "https://github.com/SatDump/SatDump/releases/download/1.2.2/satdump_1.2.2_amd64.deb" -O /tmp/satdump.deb || wget -q "https://github.com/SatDump/SatDump/releases/download/1.2.0/satdump_1.2.0_amd64.deb" -O /tmp/satdump.deb || echo "Trying alternative URL"
+      - dpkg -i /tmp/satdump.deb || apt-get install -f -y
+      - which satdump && satdump --help 2>&1 | head -3 || echo "Checking satdump installation"
+      - pip3 install boto3
+
+  pre_build:
+    commands:
+      - echo "Downloading pcap from S3..."
+      - mkdir -p /tmp/processing/input /tmp/processing/baseband /tmp/processing/output
+      - aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_KEY}" /tmp/processing/input/chunk.pcap
+      - ls -lh /tmp/processing/input/chunk.pcap
+
+  build:
+    commands:
+      - echo "=== Step 1 - Extracting IQ from VITA-49 ==="
+      - python3 extract_iq.py /tmp/processing/input/chunk.pcap /tmp/processing/baseband/chunk.cs8
+      - rm -f /tmp/processing/input/chunk.pcap
+      - ls -lh /tmp/processing/baseband/chunk.cs8
+      - echo "=== Step 2 - Running SatDump npp_hrd ==="
+      - satdump npp_hrd baseband /tmp/processing/baseband/chunk.cs8 /tmp/processing/output --samplerate ${SAMPLE_RATE} --baseband_format cs8 2>&1 | tail -80 || true
+      - echo "=== SatDump output ==="
+      - find /tmp/processing/output -type f | sort | head -50
+      - du -sh /tmp/processing/output
+      - rm -f /tmp/processing/baseband/chunk.cs8
+
+  post_build:
+    commands:
+      - echo "Uploading results to S3..."
+      - aws s3 sync /tmp/processing/output "s3://${OUTPUT_BUCKET}/imagery/${CONTACT_ID}/chunk_001/" --region eu-central-1
+      - echo "=== DONE ==="
+      - echo "Results at s3://${OUTPUT_BUCKET}/imagery/${CONTACT_ID}/chunk_001/"

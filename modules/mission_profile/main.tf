@@ -24,16 +24,17 @@ resource "awscc_groundstation_config" "tracking" {
   ]
 }
 
-# Antenna downlink demod/decode configuration for X-band HRD
-# NOAA-20 HRD: 7812 MHz center, 30 MHz bandwidth, QPSK demodulation, RHCP polarization
-# DemodulationConfig and DecodeConfig use UnvalidatedJSON per the CloudFormation schema.
-# QPSK demodulation is specified in the unvalidated_json field.
-# DecodeConfig is set to a passthrough (empty object) for raw CADU frame delivery to S3.
-resource "awscc_groundstation_config" "antenna_downlink_demod_decode" {
-  name = "${var.project_name}-${var.environment}-antenna-downlink-demod-decode"
+# Antenna downlink configuration for X-band HRD (DigIF S3 Data Delivery)
+# NOAA-20 HRD: 7812 MHz center, 30 MHz bandwidth, RHCP polarization
+# For S3 Data Delivery, we use antenna_downlink_config (not demod_decode).
+# The data is captured as digitized RF (VITA-49 DigIF) and stored in S3 for
+# offline demodulation/decoding (e.g. with MathWorks SDR or GNU Radio).
+# See: https://docs.aws.amazon.com/ground-station/latest/ug/examples.pbs-to-s3.html
+resource "awscc_groundstation_config" "antenna_downlink" {
+  name = "${var.project_name}-${var.environment}-antenna-downlink"
 
   config_data = {
-    antenna_downlink_demod_decode_config = {
+    antenna_downlink_config = {
       spectrum_config = {
         bandwidth = {
           units = "MHz"
@@ -45,23 +46,13 @@ resource "awscc_groundstation_config" "antenna_downlink_demod_decode" {
         }
         polarization = "RIGHT_HAND"
       }
-      demodulation_config = {
-        unvalidated_json = jsonencode({
-          type = "QPSK"
-        })
-      }
-      decode_config = {
-        unvalidated_json = jsonencode({
-          type = "PASSTHROUGH"
-        })
-      }
     }
   }
 
   tags = [
     {
       key   = "Name"
-      value = "${var.project_name}-${var.environment}-antenna-downlink-demod-decode"
+      value = "${var.project_name}-${var.environment}-antenna-downlink"
     },
     {
       key   = "Frequency"
@@ -70,10 +61,6 @@ resource "awscc_groundstation_config" "antenna_downlink_demod_decode" {
     {
       key   = "Bandwidth"
       value = "30MHz"
-    },
-    {
-      key   = "Modulation"
-      value = "QPSK"
     },
     {
       key   = "Polarization"
@@ -115,7 +102,7 @@ resource "awscc_groundstation_mission_profile" "noaa20_hrd" {
 
   dataflow_edges = [
     {
-      source      = awscc_groundstation_config.antenna_downlink_demod_decode.arn
+      source      = awscc_groundstation_config.antenna_downlink.arn
       destination = awscc_groundstation_config.s3_recording.arn
     }
   ]
@@ -158,12 +145,12 @@ resource "awscc_groundstation_mission_profile" "noaa20_hrd" {
       value = "30MHz"
     },
     {
-      key   = "Modulation"
-      value = "QPSK"
-    },
-    {
       key   = "Polarization"
       value = "RHCP"
+    },
+    {
+      key   = "DataFormat"
+      value = "DigIF-VITA49"
     },
     {
       key   = "MinElevation"

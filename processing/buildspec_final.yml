@@ -1,0 +1,44 @@
+version: 0.2
+
+env:
+  variables:
+    INPUT_BUCKET: "aws-groundstation-demo-reception-471112743408"
+    OUTPUT_BUCKET: "aws-groundstation-demo-reception-471112743408"
+    CONTACT_ID: "c14d25d6-d69c-4d9f-a255-85908ab17c13"
+    SAMPLE_RATE: "34312500"
+
+phases:
+  install:
+    commands:
+      - apt-get update -qq
+      - add-apt-repository -y ppa:altillimity/satdump
+      - apt-get update -qq
+      - apt-get install -y satdump
+      - pip3 install boto3
+
+  pre_build:
+    commands:
+      - mkdir -p /tmp/work/output
+      - INPUT_KEY="year=2026/month=06/day=19/satellite=33f035e1-73f7-47a5-9df8-fbc48636dca8/c14d25d6-d69c-4d9f-a255-85908ab17c13_20260619T114459Z_c6b27c0f-bf52-4bd9-b163-edda2afd83c2.pcap"
+      - echo "Downloading $INPUT_KEY..."
+      - aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_KEY}" /tmp/work/chunk.pcap
+      - ls -lh /tmp/work/chunk.pcap
+
+  build:
+    commands:
+      - echo "=== Extracting IQ from VITA-49 pcap ==="
+      - aws s3 cp s3://aws-groundstation-demo-reception-471112743408/codebuild/extract_iq.py /tmp/extract.py && python3 /tmp/extract.py
+      - ls -lh /tmp/work/chunk.cs8
+      - rm -f /tmp/work/chunk.pcap
+      - echo "=== Running SatDump npp_hrd ==="
+      - satdump npp_hrd /tmp/work/output --source file --input_file /tmp/work/chunk.cs8 --samplerate ${SAMPLE_RATE} --baseband_format cs8 2>&1 | tail -100 || true
+      - echo "=== SatDump output files ==="
+      - find /tmp/work/output -type f | sort
+      - du -sh /tmp/work/output
+
+  post_build:
+    commands:
+      - echo "Uploading results..."
+      - aws s3 sync /tmp/work/output "s3://${OUTPUT_BUCKET}/imagery/${CONTACT_ID}/chunk_001/"
+      - echo "=== COMPLETE ==="
+

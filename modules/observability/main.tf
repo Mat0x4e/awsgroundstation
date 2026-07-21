@@ -34,7 +34,7 @@ resource "aws_cloudwatch_event_target" "contact_failure_sns" {
   arn  = aws_sns_topic.contact_failures.arn
 }
 
-# SNS topic policy to allow EventBridge to publish
+# SNS topic policy to allow EventBridge and S3 to publish
 resource "aws_sns_topic_policy" "contact_failures" {
   arn = aws_sns_topic.contact_failures.arn
 
@@ -49,6 +49,20 @@ resource "aws_sns_topic_policy" "contact_failures" {
         }
         Action   = "sns:Publish"
         Resource = aws_sns_topic.contact_failures.arn
+      },
+      {
+        Sid    = "AllowS3Publish"
+        Effect = "Allow"
+        Principal = {
+          Service = "s3.amazonaws.com"
+        }
+        Action   = "sns:Publish"
+        Resource = aws_sns_topic.contact_failures.arn
+        Condition = {
+          ArnLike = {
+            "aws:SourceArn" = "arn:aws:s3:::aws-groundstation-*"
+          }
+        }
       }
     ]
   })
@@ -231,4 +245,50 @@ resource "aws_cloudwatch_dashboard" "groundstation" {
       }
     ]
   })
+}
+
+
+# EventBridge rule for Ground Station contact COMPLETED (notify operator when data arrives)
+resource "aws_cloudwatch_event_rule" "contact_completed" {
+  name        = "${var.project_name}-${var.environment}-contact-completed"
+  description = "Notify when a Ground Station contact completes successfully"
+
+  event_pattern = jsonencode({
+    source      = ["aws.groundstation"]
+    detail-type = ["Ground Station Contact State Change"]
+    detail = {
+      contactStatus = ["COMPLETED"]
+    }
+  })
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-contact-completed"
+  })
+}
+
+resource "aws_cloudwatch_event_target" "contact_completed_sns" {
+  rule = aws_cloudwatch_event_rule.contact_completed.name
+  arn  = aws_sns_topic.contact_failures.arn
+
+  input_transformer {
+    input_paths = {
+      contactId     = "$.detail.contactId"
+      status        = "$.detail.contactStatus"
+      groundStation = "$.detail.groundStation"
+    }
+    input_template = "\"Ground Station contact <contactId> COMPLETED on <groundStation>. Data has been delivered to S3.\""
+  }
+}
+
+# S3 event notification for new objects in the reception bucket → SNS
+resource "aws_s3_bucket_notification" "reception_notify" {
+  bucket = var.reception_bucket_name
+
+  topic {
+    topic_arn     = aws_sns_topic.contact_failures.arn
+    events        = ["s3:ObjectCreated:*"]
+    filter_suffix = ".pcap"
+  }
+
+  depends_on = [aws_sns_topic_policy.contact_failures]
 }

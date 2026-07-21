@@ -3,6 +3,7 @@
 *.tfstate
 *.tfstate.backup
 *.tfstate.*.backup
+*.tfplan
 crash.log
 override.tf
 override.tf.json
@@ -11,3 +12,29 @@ override.tf.json
 
 # Build artifacts
 .build/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.hypothesis/
+test_env/
+*.egg-info/
+
+# Licensed software (not in git — download separately)
+nasa_software/
+
+# Local satellite data output
+output/
+
+# Temporary execution files
+contact*_input.json
+response.json
+
+# Node (unused)
+node_modules/
+
+# IDE
+.vscode/
+.idea/

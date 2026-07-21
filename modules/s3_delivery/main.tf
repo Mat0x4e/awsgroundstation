@@ -2,8 +2,9 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 # S3 bucket for CADU reception data
+# Bucket name MUST start with "aws-groundstation" per Ground Station S3 Data Delivery requirements
 resource "aws_s3_bucket" "reception" {
-  bucket = "${var.project_name}-${var.environment}-reception-${data.aws_caller_identity.current.account_id}"
+  bucket = "aws-groundstation-${var.environment}-reception-${data.aws_caller_identity.current.account_id}"
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-${var.environment}-reception"
@@ -85,7 +86,7 @@ resource "aws_s3_bucket_policy" "reception" {
 
 # Server access logging bucket
 resource "aws_s3_bucket" "logging" {
-  bucket = "${var.project_name}-${var.environment}-access-logs-${data.aws_caller_identity.current.account_id}"
+  bucket = "aws-groundstation-${var.environment}-access-logs-${data.aws_caller_identity.current.account_id}"
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-${var.environment}-access-logs"

@@ -59,6 +59,26 @@ resource "aws_kms_key" "groundstation" {
           "kms:Decrypt"
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "AllowCloudWatchLogsEncryption"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.${data.aws_region.current.name}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+          "kms:ReEncrypt*"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:*"
+          }
+        }
       }
     ]
   })

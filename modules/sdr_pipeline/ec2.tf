@@ -129,6 +129,23 @@ resource "aws_iam_role_policy" "aggregation_ec2" {
         ]
         Resource = var.kms_key_arn
       },
+      {
+        Sid    = "ECRPull"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRPullImage"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+        ]
+        Resource = aws_ecr_repository.sdr_pipeline.arn
+      },
     ]
   })
 }
@@ -158,6 +175,11 @@ resource "aws_iam_instance_profile" "aggregation_ec2" {
 resource "aws_instance" "aggregation" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "r6i.xlarge"
+
+  root_block_device {
+    volume_size = 300
+    volume_type = "gp3"
+  }
   subnet_id              = data.aws_subnets.default.ids[0]
   vpc_security_group_ids = [aws_security_group.aggregation_ec2.id]
   iam_instance_profile   = aws_iam_instance_profile.aggregation_ec2.name

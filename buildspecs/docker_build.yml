@@ -1,0 +1,37 @@
+version: 0.2
+
+env:
+  variables:
+    AWS_REGION: "eu-central-1"
+    ECR_REPO_NAME: "groundstation-noaa20-sdr-pipeline"
+    SOURCE_BUCKET: "aws-groundstation-demo-reception-471112743408"
+    SOURCE_PREFIX: "docker-build"
+
+phases:
+  pre_build:
+    commands:
+      - echo "Downloading build artifacts from S3..."
+      - mkdir -p /tmp/docker-context/scripts
+      - aws s3 cp "s3://${SOURCE_BUCKET}/${SOURCE_PREFIX}/Dockerfile" /tmp/docker-context/
+      - aws s3 sync "s3://${SOURCE_BUCKET}/${SOURCE_PREFIX}/nasa_software/" /tmp/docker-context/
+      - aws s3 sync "s3://${SOURCE_BUCKET}/${SOURCE_PREFIX}/scripts/" /tmp/docker-context/scripts/
+      - echo "Logging in to ECR..."
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}"
+      - aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+      - echo "ECR URI = ${ECR_URI}"
+
+  build:
+    commands:
+      - echo "Building Docker image..."
+      - cd /tmp/docker-context
+      - ls -la
+      - docker build -t ${ECR_URI}:latest -t ${ECR_URI}:build-${CODEBUILD_BUILD_NUMBER} .
+      - echo "Build complete"
+
+  post_build:
+    commands:
+      - echo "Pushing image to ECR..."
+      - docker push ${ECR_URI}:latest
+      - docker push ${ECR_URI}:build-${CODEBUILD_BUILD_NUMBER}
+      - echo "Image pushed successfully as ${ECR_URI}:latest"

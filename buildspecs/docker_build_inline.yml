@@ -1,0 +1,51 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo "Downloading build artifacts from S3..."
+      - mkdir -p /tmp/docker-context/scripts
+      - aws s3 cp "s3://aws-groundstation-demo-reception-471112743408/docker-build/Dockerfile" /tmp/docker-context/
+      - aws s3 cp "s3://aws-groundstation-demo-reception-471112743408/docker-build/satdump_1.2.2_ubuntu_22.04_amd64.deb" /tmp/docker-context/
+      - aws s3 cp "s3://aws-groundstation-demo-reception-471112743408/docker-build/RT-STPS_7.0.tar.gz" /tmp/docker-context/
+      - aws s3 cp "s3://aws-groundstation-demo-reception-471112743408/docker-build/RT-STPS_7.0_PATCH_1.tar.gz" /tmp/docker-context/
+      - aws s3 cp "s3://aws-groundstation-demo-reception-471112743408/docker-build/nasa_software/CSPP_SDR_V4.1.tar.gz" /tmp/docker-context/
+      - aws s3 cp "s3://aws-groundstation-demo-reception-471112743408/docker-build/CSPP_SDR_V4.1.1_patch.tar.gz" /tmp/docker-context/
+      - aws s3 sync "s3://aws-groundstation-demo-reception-471112743408/docker-build/scripts/" /tmp/docker-context/scripts/
+      - echo "Files downloaded:"
+      - ls -la /tmp/docker-context/
+      - echo "Logging in to ECR..."
+      - export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - export ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.eu-central-1.amazonaws.com/groundstation-noaa20-sdr-pipeline"
+      - aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.eu-central-1.amazonaws.com
+      - echo "ECR URI = ${ECR_URI}"
+
+  build:
+    commands:
+      - echo "=== DIAGNOSTICS ==="
+      - which satdump || echo "satdump NOT in PATH"
+      - find / -name "satdump" -type f 2>/dev/null || echo "satdump binary not found anywhere"
+      - dpkg -l | grep -i satdump || echo "satdump package not installed"
+      - ls -la /usr/bin/satdump 2>/dev/null || ls -la /usr/local/bin/satdump 2>/dev/null || echo "no satdump binary in standard locations"
+      - echo "PATH=$PATH"
+      - echo "=== END DIAGNOSTICS ==="
+      - echo "Building Docker image..."
+      - cd /tmp/docker-context
+      - export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - export ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.eu-central-1.amazonaws.com/groundstation-noaa20-sdr-pipeline"
+      - docker build -t ${ECR_URI}:latest -t ${ECR_URI}:v7 .
+      - echo "=== Checking satdump inside built image ==="
+      - docker run --rm ${ECR_URI}:latest which satdump || echo "satdump not found in image"
+      - docker run --rm ${ECR_URI}:latest satdump --help 2>&1 | head -5 || echo "satdump --help failed"
+      - docker run --rm ${ECR_URI}:latest dpkg -l | grep -i sat || echo "no satdump package"
+      - docker run --rm ${ECR_URI}:latest bash -c "find / -name satdump -type f 2>/dev/null" || echo "binary not found"
+      - echo "Build complete"
+
+  post_build:
+    commands:
+      - echo "Pushing image to ECR..."
+      - export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - export ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.eu-central-1.amazonaws.com/groundstation-noaa20-sdr-pipeline"
+      - docker push ${ECR_URI}:latest
+      - docker push ${ECR_URI}:v7
+      - echo "Image pushed successfully as ${ECR_URI}:latest and ${ECR_URI}:v7"

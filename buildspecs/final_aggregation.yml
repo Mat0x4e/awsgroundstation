@@ -1,0 +1,36 @@
+version: 0.2
+
+env:
+  variables:
+    CSPP_HOME: "/opt/cspp-sdr"
+
+phases:
+  pre_build:
+    commands:
+      - echo "Downloading chunk results metadata..."
+      - mkdir -p /tmp/aggregation
+      # Download dataset.json from each successful chunk
+      - python3 /opt/scripts/download_chunk_metadata.py "${OUTPUT_BUCKET}" "${CONTACT_ID}" /tmp/aggregation/
+
+  build:
+    commands:
+      # Step 1: Compute geolocation per chunk
+      - echo "Computing geolocation from TLE + timestamps..."
+      - python3 /opt/scripts/geolocation.py /tmp/aggregation/ /tmp/aggregation/coordinates/
+
+      # Step 2: Generate contact-level manifest
+      - echo "Generating manifest..."
+      - python3 /opt/scripts/generate_manifest.py /tmp/aggregation/ /tmp/aggregation/manifest.json
+
+      # Step 3: Publish CloudWatch metrics
+      - echo "Publishing metrics..."
+      - python3 /opt/scripts/publish_metrics.py /tmp/aggregation/manifest.json
+
+  post_build:
+    commands:
+      # Upload coordinates + manifest
+      - aws s3 sync /tmp/aggregation/coordinates/ "s3://${OUTPUT_BUCKET}/contacts/${CONTACT_DATE}/${CONTACT_ID}/coordinates/" --sse aws:kms --sse-kms-key-id "${KMS_KEY_ID}"
+      - aws s3 cp /tmp/aggregation/manifest.json "s3://${OUTPUT_BUCKET}/contacts/${CONTACT_DATE}/${CONTACT_ID}/manifest.json" --sse aws:kms --sse-kms-key-id "${KMS_KEY_ID}"
+      # Remove processing marker
+      - aws s3 rm "s3://${OUTPUT_BUCKET}/contacts/${CONTACT_ID}/.processing"
+      - echo "Aggregation complete"

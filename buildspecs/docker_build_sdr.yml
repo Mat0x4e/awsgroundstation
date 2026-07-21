@@ -1,0 +1,34 @@
+version: 0.2
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: "eu-central-1"
+    ECR_REPO: "471112743408.dkr.ecr.eu-central-1.amazonaws.com/groundstation-noaa20-sdr-pipeline"
+    S3_BUILD_PREFIX: "s3://groundstation-noaa20-sdr-output-471112743408/docker-build"
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin 471112743408.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - echo Downloading build artifacts from S3...
+      - mkdir -p /tmp/docker-build
+      - aws s3 sync $S3_BUILD_PREFIX /tmp/docker-build/
+      - echo Downloaded files
+      - ls -la /tmp/docker-build/
+
+  build:
+    commands:
+      - echo Cloning repo for Dockerfile and scripts...
+      - git clone --depth 1 https://github.com/Mat0x4e/awsgroundstation.git /tmp/repo
+      - echo Preparing build context...
+      - cp /tmp/repo/docker/sdr-pipeline/Dockerfile /tmp/docker-build/
+      - cp -r /tmp/repo/scripts /tmp/docker-build/scripts
+      - echo Building Docker image...
+      - docker build -t $ECR_REPO:latest -f /tmp/docker-build/Dockerfile /tmp/docker-build/
+
+  post_build:
+    commands:
+      - echo Pushing to ECR...
+      - docker push $ECR_REPO:latest
+      - echo Done - image pushed as $ECR_REPO:latest

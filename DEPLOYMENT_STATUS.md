@@ -1,4 +1,4 @@
-# Deployment Status — 2026-07-02
+# Deployment Status — 2026-07-22
 
 ## What's done
 
@@ -43,40 +43,74 @@ The SatDump path produces composites without per-pixel geolocation. The overlay 
 
 ## What needs fixing (prioritized)
 
-### 1. CSPP SDR — Missing J01 supplementary data packages (BLOCKER for NASA path)
+### 1. CSPP SDR — Missing J01 Instrument Starter LUTs (BLOCKER for NASA path)
 
-**Status**: RT-STPS works. CSPP SDR finds `viirs_sdr.sh` and starts but fails installation check.
+**Status**: RT-STPS 7.0+P1 works perfectly. CSPP SDR 4.1.1 fails because it's missing the J01 "shipped LUTs" package.
 
-**Error messages from CSPP `sdr_config_paths.py`:**
+**Root cause identified (2026-07-22):**
+
+CSPP SDR requires **three** supplementary data packages for J01/NOAA-20 support:
+
+| Tarball | CSPP check name | Purpose | Status |
+|---------|----------------|---------|--------|
+| `CSPP_SDR_V4.1_static_luts_j01.tar.gz` | `*shipped_luts*` | **Core VIIRS calibration LUTs** (174 MB) | ❌ MISSING — must download from CIMSS |
+| `CSPP_SDR_V4.1_straylight_luts_j01.tar.gz` | `*stray_light_luts*` | Stray light correction (4.4 GB) | ✅ In S3 + installed |
+| `CSPP_SDR_V4.1_static_tiles.tar.gz` | `*ecotiles*` | Static terrain/land cover tiles (5.0 GB) | ✅ In S3 + installed |
+
+**The `static_luts_j01` tarball is the blocker.** Without it:
+- `sdr_luts.sh` reports `J01 not supported until proper LUTS are installed!`
+- The spacecraft is detected as `'BAD'` instead of `'J01'`
+- The DMS working database can't initialize → 600-iteration wait loop → `ADL_Unpacker.exe: FATAL ERROR: Configured path does not contain a valid DMS instance`
+- Then `KeyError: 'COLLECTION_SHORT_NAME'` (consequence, not root cause)
+
+**Download from CIMSS** (requires free registration at https://cimss.ssec.wisc.edu/cspp/download/):
 ```
-WARNING: Installation missing files for J01 support. Please install the tarballs.tar.gz
-WARNING: Missing from installation *shipped_luts*.tar.gz
-WARNING: Missing from installation *ecotiles*.tar.gz  
-WARNING: Missing from installation *stray_light_luts*.tar.gz
-ERROR: Installation problem /opt/scripts/anc/static/SDR_4_1_DB/package needs to exist
+CSPP_SDR_V4.1_static_luts_j01.tar.gz   (174 MB)
 ```
 
-**Files to download from CIMSS** (https://cimss.ssec.wisc.edu/cspp/jpss_sdr_v4.1.1.shtml):
+**Once downloaded:**
+1. Save to `nasa_software/CSPP_SDR_V4.1_static_luts_j01.tar.gz`
+2. Upload to `s3://groundstation-noaa20-sdr-output-471112743408/software/`
+3. Rebuild Docker image with: `tar xzf CSPP_SDR_V4.1_static_luts_j01.tar.gz -C /opt/`
+4. Re-run `sdr_luts.sh` (should now succeed with J01 support)
+5. Re-run `viirs_sdr.sh` on contact03 RDR
 
-| Tarball | CSPP error name | Purpose |
-|---------|----------------|---------|
-| `CSPP_SDR_V4.1_straylight_luts_j01.tar.gz` | `*shipped_luts*` + `*stray_light_luts*` | Stray light correction LUTs for JPSS-1/NOAA-20 |
-| `CSPP_SDR_V4.1_static_tiles.tar.gz` | `*ecotiles*` | Static terrain/land cover tiles for geolocation |
+**Previous debugging history (2026-07-17 to 2026-07-22):**
+- ✅ RT-STPS produces 5 RDR files (VIIRS 328 MB + ATMS + CrIS + 2×OMPS) from 25 concatenated .cadu files
+- ✅ RT-STPS jpss1.xml patched: `PnEncoded=false`, `frame_sync → reed_solomon` (skip PN node)
+- ✅ RT-STPS correct invocation: `./bin/batch.sh config/jpss1.xml <cadu_file>` (not just `<cadu_file>`)
+- ✅ EC2 aggregation instance deployed (r6i.xlarge, 300 GB gp3 EBS)
+- ✅ CodeBuild can reach CIMSS (`jpssdb.ssec.wisc.edu`) — EC2 cannot
+- ✅ `sdr_luts.sh` runs successfully in CodeBuild (10 GB cache built + uploaded to S3)
+- ✅ straylight + ecotiles installed on both EC2 and CodeBuild Docker image
+- ❌ CSPP hangs on "wait for working db initialization" (600 iterations, ~50 min) then fails
+- ❌ `ADL_Unpacker.exe` can't parse RDR because DMS DB is invalid
+- ❌ `spacecraft = 'BAD'` — CSPP doesn't recognize J01 without the starter LUTs
 
-**The "SDR_4_1_DB/package" error** likely resolves once the static_tiles tarball is extracted into the correct location (`$CSPP_SDR_HOME/anc/static/`).
+### 2. EC2 Aggregation Instance — Operational Notes
 
-**Action taken (2026-07-07):**
-1. ✅ Uploaded tarballs to `s3://groundstation-noaa20-sdr-output-471112743408/docker-build/`
-2. ✅ Dockerfile updated with extract steps + `sdr_luts.sh --spacecraft j01` for DB creation
-3. ✅ `ENV CSPP_SDR_HOME=/opt/SDR_4_1` set in Dockerfile
-4. ✅ Docker rebuild via CodeBuild (all in AWS — no local Docker needed)
-5. ⏳ Pending: Docker build with LUT download (build `bc32af5b`, 60 min timeout)
+| Property | Value |
+|----------|-------|
+| Instance ID | `i-01d21ecae10f99fbb` |
+| Type | r6i.xlarge (4 vCPU, 32 GB RAM) |
+| EBS | 300 GB gp3 (resized from 100 GB on 2026-07-20) |
+| State | Stopped (self-stops after aggregation, or manually) |
+| RT-STPS | ✅ Installed + patched (jpss1.xml PnEncoded=false, PN node removed) |
+| CSPP SDR | ❌ Blocked — cannot reach CIMSS for runtime ancillary data |
+| CSPP RT_HOME | `/opt/rt-stps` (CSPP looks for `anc/static/SDR_4_1_DB/package` here) |
+| Note | EC2 can't reach `jpssdb.ssec.wisc.edu` — CSPP will only work in CodeBuild |
 
-**Remaining CSPP issue**: `SDR_4_1_DB/package` — this is the LUT database created by `sdr_luts.sh`. Previous attempts:
-- `sdr_luts.sh --spacecraft j01` → `unrecognized arguments`
-- `sdr_luts.sh -l` → failed silently
-- Fake `mkdir -p SDR_4_1_DB/package` → passes check_installation but causes infinite hang: "wait for cache db initialization" (CSPP thinks another process is initializing)
-- Current attempt: `cd /opt/SDR_4_1 && ./bin/sdr_luts.sh` (no args, from CSPP root, on 2XLARGE build)
+### 3. NASA Visualization Path — Code Complete, Awaiting SDR Data
+
+All code for the NASA visualization path is implemented and tested:
+- `scripts/viirs/sdr_reader.py` — HDF5 SDR calibration (reflectance + radiance)
+- `scripts/viirs/geo_reader.py` — per-pixel lat/lon from GIGTO/GMODO
+- `scripts/viirs/bt_converter.py` — inverse Planck (radiance → brightness temp)
+- `scripts/viirs/image_renderer.py` — contrast stretch, gamma, destripe, RGB assembly
+- `scripts/viirs/visualize_nasa.py` — end-to-end pipeline (True Color + Thermal)
+- `buildspecs/viirs_nasa.yml` — CodeBuild buildspec
+
+**Will work immediately** once CSPP produces SDR/GEO HDF5 files.
 
 **RT-STPS root causes (all resolved):**
 1. ✅ `../data` directory missing → fixed with `mkdir -p /opt/data`

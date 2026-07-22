@@ -117,8 +117,11 @@
 | Property | Value |
 |----------|-------|
 | Execution name | `1ae80d1d-run3` |
-| Status | SatDump composites uploaded ✅ — RT-STPS failed (exit 254) |
+| Status | SatDump composites uploaded ✅ — RT-STPS succeeded ✅ — CSPP SDR blocked (missing J01 starter LUTs) |
+| RT-STPS output | 5 RDR files: VIIRS (328 MB), CrIS (216 MB), ATMS (3.3 MB), 2×OMPS |
+| RT-STPS fix | `batch.sh config/jpss1.xml combined.cadu` + `PnEncoded=false` + PN node removed |
 | Composites in S3 | `contacts/2026/06/30/1ae80d1d-.../satdump/chunk_0/VIIRS/` |
+| RDR in S3 | `contacts/2026/06/30/1ae80d1d-.../chunks/chunk_0/rdr/` |
 | Pass coverage | ~68°N, descending over North Pacific → Bering Sea / Alaska |
 | Composites | True Color, Thermal IR, Day Microphysics, 13 others |
 

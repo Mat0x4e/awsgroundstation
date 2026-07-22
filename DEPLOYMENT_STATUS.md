@@ -43,7 +43,24 @@ The SatDump path produces composites without per-pixel geolocation. The overlay 
 
 ## What needs fixing (prioritized)
 
-### 1. CSPP SDR — Missing J01 Instrument Starter LUTs (BLOCKER for NASA path)
+### 1. CSPP SDR — Incompatible with RT-STPS 7.0 batch RDR (ABANDONED)
+
+**Status**: ABANDONED after exhaustive debugging (2026-07-17 to 2026-07-22).
+
+**Root cause**: CSPP SDR 4.1.1's `ADL_Unpacker.exe` (closed-source binary) cannot parse RDR files produced by RT-STPS 7.0 batch mode. Reports `spacecraft = 'BAD'` regardless of configuration.
+
+**What was tried:**
+- ✅ All three supplementary data packages installed (static_luts_j01, straylight_luts_j01, static_tiles)
+- ✅ `sdr_luts.sh` completes without J01 warnings when starter LUTs are present
+- ✅ Various `CSPP_RT_HOME` configurations (`/opt/SDR_4_1`, `/opt/scripts`, `/opt/rt-stps`, unset)
+- ✅ `--work-dir` flag to control working directory
+- ❌ `--spacecraft j01` flag doesn't exist in CSPP SDR 4.1.1
+- ❌ RT-STPS server mode with Xvfb — JSW wrapper doesn't start in containers
+- ❌ Metadata injection (COLLECTION_SHORT_NAME) — bypassed by ADL_Unpacker binary
+
+**Conclusion**: RT-STPS 7.0 batch mode produces `RNSCA-RVIRS` class RDRs with `N_Reference_ID` containing J01 identifier, but CSPP's closed-source ADL unpacker expects metadata populated only by the NOAA ground system or RT-STPS server mode (which requires a GUI environment).
+
+**Alternative approach (Satpy)**: Use Satpy Python library to read RNSCA RDRs directly for calibration + geolocation. Produces same outputs (calibrated SDR + per-pixel lat/lon) without CSPP dependency.
 
 **Status**: RT-STPS 7.0+P1 works perfectly. CSPP SDR 4.1.1 fails because it's missing the J01 "shipped LUTs" package.
 
@@ -100,17 +117,27 @@ CSPP_SDR_V4.1_static_luts_j01.tar.gz   (174 MB)
 | CSPP RT_HOME | `/opt/rt-stps` (CSPP looks for `anc/static/SDR_4_1_DB/package` here) |
 | Note | EC2 can't reach `jpssdb.ssec.wisc.edu` — CSPP will only work in CodeBuild |
 
-### 3. NASA Visualization Path — Code Complete, Awaiting SDR Data
+### 4. Satpy Approach — Alternative to CSPP (NEW — In Progress)
 
-All code for the NASA visualization path is implemented and tested:
-- `scripts/viirs/sdr_reader.py` — HDF5 SDR calibration (reflectance + radiance)
-- `scripts/viirs/geo_reader.py` — per-pixel lat/lon from GIGTO/GMODO
-- `scripts/viirs/bt_converter.py` — inverse Planck (radiance → brightness temp)
-- `scripts/viirs/image_renderer.py` — contrast stretch, gamma, destripe, RGB assembly
-- `scripts/viirs/visualize_nasa.py` — end-to-end pipeline (True Color + Thermal)
-- `buildspecs/viirs_nasa.yml` — CodeBuild buildspec
+**Plan**: Replace CSPP SDR with Satpy for VIIRS RDR → calibrated imagery.
 
-**Will work immediately** once CSPP produces SDR/GEO HDF5 files.
+| Feature | CSPP SDR | Satpy |
+|---------|---------|-------|
+| Calibration | Official NOAA ADL | Community Python (same algorithms) |
+| Geolocation | Per-pixel (GMODO/GIGTO) | Per-pixel (pyorbital + terrain correction) |
+| Input format | Requires specific RDR metadata | Reads any HDF5 VIIRS RDR |
+| Dependencies | Closed-source ADL binary + CIMSS server | Pure Python (pip install) |
+| Accuracy | Sub-km | Sub-km (same orbital model) |
+| Docker friendly | ❌ (needs CIMSS connectivity + complex DB) | ✅ (pip install, no runtime deps) |
+
+**Satpy packages needed**: `satpy[viirs_l1b]`, `pyorbital`, `pyresample`, `h5py`, `numpy`
+
+**Steps**:
+1. Add Satpy to Docker image or CodeBuild inline install
+2. Write a script that reads the RNSCA-RVIRS RDR via Satpy's `viirs_l1b` reader
+3. Extract calibrated reflectance (I1/I2/I3) + radiance (M15) + per-pixel lat/lon
+4. Feed into existing `visualize_nasa.py` pipeline (SDRReader interface)
+5. Or output SDR-compatible HDF5 files for the existing NASA visualization path
 
 **RT-STPS root causes (all resolved):**
 1. ✅ `../data` directory missing → fixed with `mkdir -p /opt/data`

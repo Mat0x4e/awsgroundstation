@@ -1,0 +1,26 @@
+version: 0.2
+phases:
+  build:
+    commands:
+      - aws s3 cp s3://groundstation-noaa20-sdr-output-471112743408/contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/chunks/chunk_0/rdr/RNSCA-RVIRS_j01_d20260630_t0956451_e1003519_b00001_c20260717141814195000_drlu_ops.h5 /tmp/viirs_rdr.h5
+      - |
+        /opt/SDR_4_1/libexec/python_runtime/bin/python3 -c "
+        import h5py
+        f = h5py.File('/tmp/viirs_rdr.h5', 'r')
+        print('=== Top attrs ===')
+        for k, v in f.attrs.items():
+            print(f'  {k} = {v}')
+        print('=== Groups ===')
+        def show(g, indent=0):
+            for k in list(g.keys())[:10]:
+                item = g[k]
+                prefix = '  ' * indent
+                if hasattr(item, 'keys'):
+                    print(f'{prefix}{k}/ ({len(item.keys())} children)')
+                    if indent < 2:
+                        show(item, indent+1)
+                else:
+                    print(f'{prefix}{k} shape={item.shape} dtype={item.dtype}')
+        show(f)
+        f.close()
+        "

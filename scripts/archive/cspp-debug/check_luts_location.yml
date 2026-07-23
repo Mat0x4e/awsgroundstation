@@ -1,0 +1,18 @@
+version: 0.2
+phases:
+  build:
+    commands:
+      - echo "=== Install starter LUTs ==="
+      - aws s3 cp s3://groundstation-noaa20-sdr-output-471112743408/software/CSPP_SDR_V4.1_static_luts_j01.tar.gz /tmp/static_luts.tar.gz
+      - echo "=== List tarball contents ==="
+      - tar tzf /tmp/static_luts.tar.gz | head -20
+      - echo "=== Extract to /opt/ ==="
+      - tar xzf /tmp/static_luts.tar.gz -C /opt/
+      - echo "=== Find where shipped_luts landed ==="
+      - find /opt -name '*shipped*' -o -name '*static_luts*' 2>/dev/null | head -10
+      - find /opt -path '*/anc/static/*' -name '*.h5' 2>/dev/null | head -5
+      - find /opt/SDR_4_1/anc/static -type d 2>/dev/null | head -10
+      - echo "=== Check sdr_config_paths detection ==="
+      - export CSPP_SDR_HOME=/opt/SDR_4_1
+      - export CSPP_RT_HOME=/opt/SDR_4_1
+      - /opt/SDR_4_1/libexec/python_runtime/bin/python3 -c "import sys; sys.path.insert(0,'/opt/SDR_4_1/libexec/scripts'); from common.sdr_config_paths import check_installation; check_installation('/opt/SDR_4_1', check_static=True, silent=False)" 2>&1 | tail -20

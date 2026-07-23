@@ -1,0 +1,38 @@
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - mkdir -p /opt/SDR_4_1/anc/static/SDR_4_1_DB/package /opt/scripts/anc/static/SDR_4_1_DB/package
+      - export CSPP_SDR_HOME=/opt/SDR_4_1
+      - export CSPP_RT_HOME=/opt/SDR_4_1
+      - echo "=== Init LUTs ==="
+      - cd /opt/SDR_4_1 && timeout 1200 ./bin/sdr_luts.sh 2>&1 | tail -5
+      - echo "=== Download RDR ==="
+      - aws s3 cp s3://groundstation-noaa20-sdr-output-471112743408/contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/chunks/chunk_0/rdr/RNSCA-RVIRS_j01_d20260630_t0956451_e1003519_b00001_c20260717141814195000_drlu_ops.h5 /tmp/viirs_rdr.h5
+  build:
+    commands:
+      - export CSPP_SDR_HOME=/opt/SDR_4_1
+      - export CSPP_RT_HOME=/opt/SDR_4_1
+      - echo "=== Creating fresh work dir ==="
+      - rm -rf /tmp/sdr_work
+      - mkdir -p /tmp/sdr_work
+      - cd /tmp/sdr_work
+      - echo "=== Running CSPP with explicit work-dir ==="
+      - /opt/SDR_4_1/bin/viirs_sdr.sh --work-dir /tmp/sdr_work /tmp/viirs_rdr.h5 2>&1 | tail -50
+      - echo "=== Check output ==="
+      - find /tmp/sdr_work -name '*.h5' -type f | sort | head -30
+      - find /tmp/sdr_work -name 'SV*.h5' -type f | wc -l
+      - find /tmp/sdr_work -name 'G*.h5' -type f | wc -l
+  post_build:
+    commands:
+      - SDR_COUNT=$(find /tmp/sdr_work -name 'SV*.h5' -type f | wc -l)
+      - GEO_COUNT=$(find /tmp/sdr_work -name 'G*.h5' -type f | wc -l)
+      - echo "SDR=$SDR_COUNT GEO=$GEO_COUNT"
+      - |
+        if [ $SDR_COUNT -gt 0 ]; then
+          echo "UPLOADING"
+          aws s3 sync /tmp/sdr_work/ s3://groundstation-noaa20-sdr-output-471112743408/contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/chunks/chunk_0/sdr/ --exclude '*.log' --exclude '*.anc' --exclude 'db/*'
+          echo "UPLOAD_DONE"
+        else
+          echo "NO SDR FILES"
+        fi

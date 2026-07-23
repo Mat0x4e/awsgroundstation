@@ -135,5 +135,5 @@ terraform validate
 | Spec | Description | Status |
 |------|-------------|--------|
 | `aws-ground-control-demo` | Ground Station infrastructure + contact scheduling | Deployed |
-| `noaa20-cadu-to-tiff` | Automated DigIF → SDR pipeline | Deployed (SatDump path working, RT-STPS in progress) |
-| `noaa20-viirs-visualization` | SDR → georeferenced imagery | Deployed (pixel-space overlay, TLE geolocation ~100-300km offset) |
+| `noaa20-cadu-to-tiff` | Automated DigIF → SDR pipeline | Deployed — full RF→SDR chain working (SatDump + RT-STPS + **CSPP SDR**, 2026-07-23) |
+| `noaa20-viirs-visualization` | SDR → georeferenced imagery | Deployed — SatDump path ~100-300 km (TLE); **NASA/CSPP path sub-km geolocated GeoTIFFs delivered** (see DEPLOYMENT_STATUS.md) |

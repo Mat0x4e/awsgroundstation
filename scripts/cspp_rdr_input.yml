@@ -1,0 +1,47 @@
+version: 0.2
+# Corrected CSPP attempt: feed the RNSCA-RVIRS RDR *HDF5* (not the .PDS).
+# Prior Jul-22 run failed only because CSPP's ADL_Unpacker rejects .PDS ("should end with .h5?").
+# The DMS working DB now initializes (J01 static_luts + sdr_luts.sh), so this is the
+# first run combining: working DB + J01 LUTs + correct HDF5 RDR input.
+phases:
+  pre_build:
+    commands:
+      - export CSPP_SDR_HOME=/opt/SDR_4_1
+      - export CSPP_RT_HOME=/opt/SDR_4_1
+      - echo "=== Install J01 static LUTs (the DB-init enabler) ==="
+      - aws s3 cp s3://groundstation-noaa20-sdr-output-471112743408/software/CSPP_SDR_V4.1_static_luts_j01.tar.gz /tmp/static_luts.tar.gz
+      - tar xzf /tmp/static_luts.tar.gz -C /opt/
+      - rm -f /tmp/static_luts.tar.gz
+      - echo "=== Build/verify LUT cache + DMS DB ==="
+      - cd /opt/SDR_4_1 && timeout 1800 ./bin/sdr_luts.sh 2>&1 | tail -8
+      - echo "=== Download the VIIRS RDR HDF5 (RNSCA-RVIRS contains VIIRS science + S/C diary) ==="
+      - mkdir -p /tmp/rdr
+      - aws s3 cp s3://groundstation-noaa20-sdr-output-471112743408/contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/chunks/chunk_0/rdr/RNSCA-RVIRS_j01_d20260630_t0956451_e1003519_b00001_c20260717141814195000_drlu_ops.h5 /tmp/rdr/
+      - ls -lh /tmp/rdr/
+  build:
+    commands:
+      - export CSPP_SDR_HOME=/opt/SDR_4_1
+      - export CSPP_RT_HOME=/opt/SDR_4_1
+      - rm -rf /tmp/sdr_work && mkdir -p /tmp/sdr_work
+      - echo "=== Inspect RDR top-level attrs via CSPP bundled python (non-fatal) ==="
+      - |
+        h5dump -A -N Platform_Short_Name /tmp/rdr/*.h5 2>/dev/null | head -20 || echo "(h5dump not available - skipping, CSPP log will report spacecraft)"
+      - echo "=== Run CSPP viirs_sdr.sh on the HDF5 RDR ==="
+      - /opt/SDR_4_1/bin/viirs_sdr.sh --work-dir /tmp/sdr_work -v -v /tmp/rdr/RNSCA-RVIRS_j01_d20260630_t0956451_e1003519_b00001_c20260717141814195000_drlu_ops.h5 2>&1 | tail -80
+      - echo "=== Output inventory ==="
+      - echo "SVM/SVI SDR files:" $(find /tmp/sdr_work -name 'SV*.h5' | wc -l)
+      - echo "GEO files (G*TCO/GMODO/GITCO):" $(find /tmp/sdr_work -name 'G*.h5' | wc -l)
+      - find /tmp/sdr_work -maxdepth 1 -name '*.h5' | sort | head -40
+  post_build:
+    commands:
+      - SDR_COUNT=$(find /tmp/sdr_work -name 'SV*.h5' -type f | wc -l)
+      - GEO_COUNT=$(find /tmp/sdr_work -name 'G*.h5' -type f | wc -l)
+      - echo "RESULT SDR=$SDR_COUNT GEO=$GEO_COUNT"
+      - |
+        if [ $SDR_COUNT -gt 0 ]; then
+          echo "SUCCESS - uploading SDR + GEO"
+          aws s3 sync /tmp/sdr_work/ s3://groundstation-noaa20-sdr-output-471112743408/contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/chunks/chunk_0/sdr/ --exclude '*.log' --exclude '*.anc' --exclude 'db/*' --exclude '*.PDS'
+          echo "UPLOAD_DONE"
+        else
+          echo "NO SDR FILES"
+        fi

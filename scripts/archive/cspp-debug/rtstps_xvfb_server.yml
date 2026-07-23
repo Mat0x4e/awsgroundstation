@@ -1,0 +1,71 @@
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - echo "=== Install Xvfb ==="
+      - apt-get update -qq && apt-get install -y -qq xvfb 2>&1 | tail -3
+      - echo "=== Install J01 Starter LUTs ==="
+      - aws s3 cp s3://groundstation-noaa20-sdr-output-471112743408/software/CSPP_SDR_V4.1_static_luts_j01.tar.gz /tmp/static_luts.tar.gz
+      - tar xzf /tmp/static_luts.tar.gz -C /opt/
+      - rm -f /tmp/static_luts.tar.gz
+      - export CSPP_SDR_HOME=/opt/SDR_4_1
+      - export CSPP_RT_HOME=/opt/SDR_4_1
+      - cd /opt/SDR_4_1 && timeout 1200 ./bin/sdr_luts.sh 2>&1 | tail -5
+      - echo "=== Download CADU ==="
+      - mkdir -p /tmp/cadu
+      - aws s3 sync s3://groundstation-noaa20-sdr-output-471112743408/contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/satdump/ /tmp/cadu/ --exclude '*' --include '*.cadu'
+      - find /tmp/cadu -name '*.cadu' -type f | sort | xargs cat > /tmp/combined.cadu
+      - ls -lh /tmp/combined.cadu
+  build:
+    commands:
+      - echo "=== Patch jpss1.xml ==="
+      - cd /opt/rt-stps
+      - sed -i 's/PnEncoded="true"/PnEncoded="false"/' /opt/rt-stps/config/jpss1.xml 2>/dev/null || true
+      - sed -i 's|from="frame_sync" to="pn"|from="frame_sync" to="reed_solomon"|' /opt/rt-stps/config/jpss1.xml 2>/dev/null || true
+      - sed -i '/from="pn" to="reed_solomon"/d' /opt/rt-stps/config/jpss1.xml 2>/dev/null || true
+      - mkdir -p /opt/data
+      - echo "=== Start Xvfb ==="
+      - Xvfb :99 -screen 0 1024x768x24 &
+      - export DISPLAY=:99
+      - sleep 2
+      - echo "=== Start RT-STPS server ==="
+      - cd /opt/rt-stps && ./bin/server.sh config/jpss1.xml &
+      - sleep 15
+      - echo "=== Check server is running ==="
+      - ps aux | grep -i rtstps | grep -v grep || echo "No RT-STPS process"
+      - echo "=== Send data via sender.sh ==="
+      - cd /opt/rt-stps && ./bin/sender.sh /tmp/combined.cadu 2>&1 | tail -20
+      - echo "=== Wait for processing ==="
+      - sleep 60
+      - echo "=== Shutdown server ==="
+      - cd /opt/rt-stps && ./bin/shutdown.sh 2>&1 | tail -5 || true
+      - sleep 10
+      - echo "=== RDR output ==="
+      - find /opt/data -name '*.h5' -type f | sort
+      - RDR_COUNT=$(find /opt/data -name '*RVIRS*.h5' -type f | wc -l)
+      - echo "VIIRS_RDR=$RDR_COUNT"
+  post_build:
+    commands:
+      - RDR_COUNT=$(find /opt/data -name '*RVIRS*.h5' -type f | wc -l)
+      - |
+        if [ $RDR_COUNT -gt 0 ]; then
+          echo "=== RT-STPS server mode WORKED - running CSPP ==="
+          VIIRS_RDR=$(find /opt/data -name '*RVIRS*.h5' -type f | head -1)
+          echo "RDR file: $VIIRS_RDR"
+          export CSPP_SDR_HOME=/opt/SDR_4_1
+          export CSPP_RT_HOME=/opt/SDR_4_1
+          rm -rf /tmp/sdr_work && mkdir -p /tmp/sdr_work && cd /tmp/sdr_work
+          /opt/SDR_4_1/bin/viirs_sdr.sh --work-dir /tmp/sdr_work $VIIRS_RDR 2>&1 | tail -30
+          SDR_COUNT=$(find /tmp/sdr_work -name 'SV*.h5' -type f | wc -l)
+          GEO_COUNT=$(find /tmp/sdr_work -name 'G*.h5' -type f | wc -l)
+          echo "SDR=$SDR_COUNT GEO=$GEO_COUNT"
+          if [ $SDR_COUNT -gt 0 ]; then
+            echo "UPLOADING SDR FILES"
+            aws s3 sync /tmp/sdr_work/ s3://groundstation-noaa20-sdr-output-471112743408/contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/chunks/chunk_0/sdr/ --exclude '*.log' --exclude '*.anc' --exclude 'db/*'
+            echo "UPLOAD_DONE"
+          fi
+        else
+          echo "NO VIIRS RDR FROM SERVER MODE"
+          echo "Uploading batch RDR for comparison"
+          aws s3 sync /opt/data/ s3://groundstation-noaa20-sdr-output-471112743408/contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/chunks/chunk_0/rdr_server/ --include '*.h5'
+        fi

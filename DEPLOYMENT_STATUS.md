@@ -1,4 +1,46 @@
-# Deployment Status — 2026-07-22
+# Deployment Status — 2026-07-23
+
+## ⭐ Breakthrough (2026-07-23) — CSPP SDR works; full RF→geolocated-image chain complete
+
+The pipeline now runs **end to end** for the first time:
+
+```
+AWS Ground Station RF (VITA-49 .pcap) → I/Q → SatDump → CADU
+  → RT-STPS 7.0 → RDR HDF5 → CSPP SDR 4.1.1 → calibrated SDR + terrain-corrected GEO
+  → geolocated GeoTIFF (EPSG:4326, sub-km per-pixel geolocation)
+```
+
+**CSPP SDR is NOT abandoned — the earlier "DB init impossible in Docker" conclusion was wrong.**
+Two fixes, both required, never previously combined:
+
+1. **Install the J01 shipped LUTs** (`CSPP_SDR_V4.1_static_luts_j01.tar.gz`) + run `sdr_luts.sh`
+   → the DMS working database initializes. The infamous 600-iteration "wait for working db
+   initialization" hang was the *missing-LUTs* symptom, not a container limitation.
+2. **Feed `viirs_sdr.sh` the RDR HDF5** (`RNSCA-RVIRS_*.h5`), **not** the `.PDS` — CSPP's
+   ADL_Unpacker rejects PDS (`'...PDS' should end with .h5?`). Platform then reads `J01`
+   (not the `BAD` default).
+
+Working buildspec: [`scripts/cspp_rdr_input.yml`](scripts/cspp_rdr_input.yml) (run via
+`aws codebuild start-build --project-name groundstation-noaa20-sdr-pipeline --buildspec-override <content>`,
+profile `AWSAdminAccess-471112743408`, ~14 min). Superseded debugging attempts archived in
+[`scripts/archive/cspp-debug/`](scripts/archive/cspp-debug/).
+
+**Deliverables** (contact-03 Oregon, 2026-06-30 — a night pass, so thermal IR):
+`output/contact-03_oregon-1_2026-06-30/NASA-SDR/`
+- `noaa20_viirs_m15_thermal_contact03.tif` — M15 (10.76 µm) BT, 4569×1091, ~750 m, EPSG:4326
+- `noaa20_viirs_i5_thermal_contact03.tif` — I5 (11.45 µm) BT, 7655×1830, ~375 m, EPSG:4326
+
+Built by [`postprocessing/rebuild_geotiff.py`](postprocessing/rebuild_geotiff.py) from CSPP
+`BrightnessTemperature` + `G*TCO` terrain-corrected lat/lon (scipy griddata → rasterio).
+
+**Open follow-ups**: (a) full-pass mosaic — CSPP emitted GEO for 4 granules but full science
+SDR for only 1 (`t1009343`); (b) wire the deployed `scripts/viirs/visualize_nasa.py` +
+`geo_reader.py`, which glob the wrong names (`SVOM15`/`GMODO`/`GIGTO`) and read non-TC geo
+groups — real CSPP output is `SVM15`/`GMTCO`/`GITCO` with `VIIRS-*-GEO-TC_All`.
+
+---
+
+# Deployment Status — 2026-07-22 (historical — superseded above)
 
 ## What's done
 
@@ -26,8 +68,8 @@
 | CodeBuild visualization project | ✅ Working (pixel-space rendering, native resolution) |
 | CodeBuild Docker build project | ✅ Working (builds from GitHub, pushes to ECR) |
 | Composite rendering | ✅ Working — True Color, Thermal IR, Day Microphysics at 3200×272 native |
-| Cartographic overlay | ⚠️ Imprecise alignment (~100-300 km offset) — TLE-only without CPM |
-| GeoTIFF export | ✅ Working |
+| Cartographic overlay | ⚠️ SatDump path ~100-300 km offset (TLE-only). **NASA/CSPP path: sub-km per-pixel geolocation ✅ (2026-07-23)** |
+| GeoTIFF export | ✅ Working — geolocated thermal GeoTIFFs delivered (M15 750 m, I5 375 m) |
 
 ### Known limitation — Geolocation accuracy (SatDump path)
 
@@ -43,9 +85,14 @@ The SatDump path produces composites without per-pixel geolocation. The overlay 
 
 ## What needs fixing (prioritized)
 
-### 1. CSPP SDR — Incompatible with RT-STPS 7.0 batch RDR (ABANDONED)
+### 1. CSPP SDR — RESOLVED 2026-07-23 (was wrongly marked ABANDONED)
 
-**Status**: ABANDONED after exhaustive debugging (2026-07-17 to 2026-07-22).
+**Status**: ✅ WORKING. See the breakthrough section at the top of this file for the fix.
+The analysis below is retained as the (partly incorrect) debugging history — the real root
+cause was the missing J01 shipped LUTs + feeding `.PDS` instead of `.h5`, not an intractable
+Docker DB-init problem.
+
+**Status (historical)**: ABANDONED after exhaustive debugging (2026-07-17 to 2026-07-22).
 
 **Root cause**: CSPP SDR 4.1.1's `ADL_Unpacker.exe` (closed-source binary) cannot parse RDR files produced by RT-STPS 7.0 batch mode. Reports `spacecraft = 'BAD'` regardless of configuration.
 

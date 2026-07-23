@@ -1,0 +1,47 @@
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - mkdir -p /opt/SDR_4_1/anc/static/SDR_4_1_DB/package /opt/scripts/anc/static/SDR_4_1_DB/package
+      - export CSPP_SDR_HOME=/opt/SDR_4_1
+      - export CSPP_RT_HOME=/opt/SDR_4_1
+      - cd /opt/SDR_4_1 && timeout 1200 ./bin/sdr_luts.sh 2>&1 | tail -5
+      - aws s3 cp s3://groundstation-noaa20-sdr-output-471112743408/contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/chunks/chunk_0/rdr/RNSCA-RVIRS_j01_d20260630_t0956451_e1003519_b00001_c20260717141814195000_drlu_ops.h5 /tmp/viirs_rdr.h5
+      - |
+        /opt/SDR_4_1/libexec/python_runtime/bin/python3 -c "
+        import h5py, numpy as np
+        f = h5py.File('/tmp/viirs_rdr.h5', 'r+')
+        # Add missing COLLECTION_SHORT_NAME to Data_Products groups
+        for grp_name in f['Data_Products'].keys():
+            grp = f['Data_Products'][grp_name]
+            if 'COLLECTION_SHORT_NAME' not in grp.attrs:
+                grp.attrs.create('COLLECTION_SHORT_NAME', np.array([[grp_name.encode()]]), dtype=h5py.special_dtype(vlen=bytes))
+                print(f'Added COLLECTION_SHORT_NAME={grp_name} to Data_Products/{grp_name}')
+        # Also add to top-level if missing
+        if 'Distributor' not in f.attrs:
+            f.attrs.create('Distributor', np.array([[b'arch']]), dtype=h5py.special_dtype(vlen=bytes))
+            print('Added Distributor attr')
+        f.close()
+        print('RDR patched successfully')
+        "
+  build:
+    commands:
+      - export CSPP_SDR_HOME=/opt/SDR_4_1
+      - export CSPP_RT_HOME=/opt/SDR_4_1
+      - mkdir -p /tmp/sdr_output && cd /tmp/sdr_output
+      - /opt/SDR_4_1/bin/viirs_sdr.sh /tmp/viirs_rdr.h5 2>&1 | tail -40
+      - find /tmp/sdr_output -name '*.h5' | wc -l
+      - find /tmp/sdr_output -name 'SV*.h5' -o -name 'G*.h5' | sort | head -20
+  post_build:
+    commands:
+      - SDR_COUNT=$(find /tmp/sdr_output -name 'SV*.h5' -type f | wc -l)
+      - GEO_COUNT=$(find /tmp/sdr_output -name 'G*.h5' -type f | wc -l)
+      - echo "SDR=$SDR_COUNT GEO=$GEO_COUNT"
+      - |
+        if [ $SDR_COUNT -gt 0 ]; then
+          echo "UPLOADING SDR files to S3"
+          aws s3 sync /tmp/sdr_output/ s3://groundstation-noaa20-sdr-output-471112743408/contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/chunks/chunk_0/sdr/ --exclude '*.log' --exclude '*.anc' --exclude 'db/*'
+          echo "UPLOAD_DONE"
+        else
+          echo "NO SDR FILES PRODUCED"
+        fi

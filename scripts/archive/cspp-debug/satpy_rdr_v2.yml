@@ -1,0 +1,47 @@
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - echo "=== Check Python versions ==="
+      - which python3
+      - python3 --version
+      - pip3 --version 2>/dev/null || echo "no pip3"
+      - echo "=== Install Satpy via pip ==="
+      - pip3 install --quiet satpy pyorbital pyresample dask h5py numpy 2>&1 | tail -10 || pip install --quiet satpy pyorbital pyresample dask h5py numpy 2>&1 | tail -10
+      - python3 -c "import satpy; print(f'Satpy {satpy.__version__}')"
+      - echo "=== Download RDR ==="
+      - mkdir -p /tmp/rdr
+      - aws s3 cp s3://groundstation-noaa20-sdr-output-471112743408/contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/chunks/chunk_0/rdr/RNSCA-RVIRS_j01_d20260630_t0956451_e1003519_b00001_c20260717141814195000_drlu_ops.h5 /tmp/rdr/
+  build:
+    commands:
+      - echo "=== List VIIRS readers ==="
+      - python3 -c "from satpy import available_readers; print([r for r in available_readers() if 'viirs' in r.lower()])"
+      - |
+        python3 << 'PYEOF'
+        from satpy import Scene
+        import glob
+
+        rdr_files = glob.glob('/tmp/rdr/*.h5')
+        print(f"RDR files: {rdr_files}")
+
+        readers_to_try = ['viirs_l1b', 'viirs_sdr', 'viirs_compact']
+        for reader in readers_to_try:
+            print(f"\n=== Trying reader: {reader} ===")
+            try:
+                scn = Scene(filenames=rdr_files, reader=reader)
+                avail = scn.available_dataset_names()
+                print(f"Available datasets ({len(avail)}): {avail[:20]}")
+                if avail:
+                    scn.load([avail[0]])
+                    ds = scn[avail[0]]
+                    print(f"Loaded {avail[0]}: shape={ds.shape}")
+                    if hasattr(ds, 'attrs') and 'area' in ds.attrs:
+                        area = ds.attrs['area']
+                        print(f"Has geolocation area: {type(area)}")
+                    break
+            except Exception as e:
+                print(f"  Failed: {type(e).__name__}: {e}")
+        PYEOF
+  post_build:
+    commands:
+      - echo "DONE"

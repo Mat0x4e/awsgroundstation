@@ -57,8 +57,11 @@ class GEOReader:
         NASA VIIRS GEO fill values are typically -999.3 or -999.9.
     """
 
-    IBAND_GROUP: str = "VIIRS-IMG-GEO_All"
-    MBAND_GROUP: str = "VIIRS-MOD-GEO_All"
+    # CSPP emits terrain-corrected geo (GITCO/GMTCO, "*-GEO-TC_All") by default;
+    # the ellipsoid variants (GIGTO/GMODO, "*-GEO_All") are accepted as a
+    # fallback. Terrain-corrected is preferred, so it is listed first.
+    IBAND_GROUPS: tuple[str, ...] = ("VIIRS-IMG-GEO-TC_All", "VIIRS-IMG-GEO_All")
+    MBAND_GROUPS: tuple[str, ...] = ("VIIRS-MOD-GEO-TC_All", "VIIRS-MOD-GEO_All")
     INVALID_THRESHOLD: float = -900.0
 
     # ------------------------------------------------------------------ #
@@ -93,7 +96,7 @@ class GEOReader:
             If the file does not contain the ``VIIRS-IMG-GEO_All`` group
             under ``All_Data/``.
         """
-        return self._read_latlon(h5_path, self.IBAND_GROUP)
+        return self._read_latlon(h5_path, self.IBAND_GROUPS)
 
     def read_mband(
         self, h5_path: Path
@@ -123,25 +126,29 @@ class GEOReader:
             If the file does not contain the ``VIIRS-MOD-GEO_All`` group
             under ``All_Data/``.
         """
-        return self._read_latlon(h5_path, self.MBAND_GROUP)
+        return self._read_latlon(h5_path, self.MBAND_GROUPS)
 
     # ------------------------------------------------------------------ #
     # Private helpers                                                       #
     # ------------------------------------------------------------------ #
 
-    def _find_geo_group(self, h5file: h5py.File, group_name: str) -> h5py.Group:
-        """Return the HDF5 group matching *group_name* inside ``All_Data/``.
+    def _find_geo_group(
+        self, h5file: h5py.File, group_names: tuple[str, ...]
+    ) -> h5py.Group:
+        """Return the first HDF5 group matching any of *group_names* in ``All_Data/``.
 
-        Searches recursively through the file for a group whose name
-        ends with *group_name* (the CSPP convention places it under
-        ``All_Data/<group_name>``).
+        Searches recursively through the file for a group whose final path
+        component equals one of *group_names* (the CSPP convention places it
+        under ``All_Data/<group_name>``). Candidates are tried in order, so the
+        preferred (terrain-corrected) group wins when both are present.
 
         Parameters
         ----------
         h5file:
             An open ``h5py.File`` object.
-        group_name:
-            The target group name, e.g. ``"VIIRS-IMG-GEO_All"``.
+        group_names:
+            Ordered candidate group names, e.g.
+            ``("VIIRS-IMG-GEO-TC_All", "VIIRS-IMG-GEO_All")``.
 
         Returns
         -------
@@ -151,33 +158,33 @@ class GEOReader:
         Raises
         ------
         InvalidGEOFileError
-            If no group matching *group_name* is found in the file.
+            If no group matching any candidate is found in the file.
         """
-        geo_group: h5py.Group | None = None
+        found: dict[str, h5py.Group] = {}
         all_group_names: list[str] = []
 
         def _visitor(name: str, obj: h5py.HLObject) -> None:
-            nonlocal geo_group
             if isinstance(obj, h5py.Group):
                 all_group_names.append(name)
-                # Match on the final path component so "All_Data/VIIRS-IMG-GEO_All"
-                # is found whether or not there are additional path prefixes.
-                if name.split("/")[-1] == group_name and geo_group is None:
-                    geo_group = obj  # type: ignore[assignment]
+                leaf = name.split("/")[-1]
+                if leaf in group_names and leaf not in found:
+                    found[leaf] = obj  # type: ignore[assignment]
 
         h5file.visititems(_visitor)
 
-        if geo_group is None:
-            raise InvalidGEOFileError(
-                h5_path=Path(h5file.filename),
-                expected_group=group_name,
-                groups_found=all_group_names,
-            )
+        # Honour candidate priority (terrain-corrected before ellipsoid).
+        for candidate in group_names:
+            if candidate in found:
+                return found[candidate]
 
-        return geo_group
+        raise InvalidGEOFileError(
+            h5_path=Path(h5file.filename),
+            expected_group=" | ".join(group_names),
+            groups_found=all_group_names,
+        )
 
     def _read_latlon(
-        self, h5_path: Path, group_name: str
+        self, h5_path: Path, group_names: tuple[str, ...]
     ) -> tuple[np.ma.MaskedArray, np.ma.MaskedArray]:
         """Core reader: open the file, locate the GEO group, mask, return arrays.
 
@@ -185,8 +192,9 @@ class GEOReader:
         ----------
         h5_path:
             Path to the VIIRS GEO HDF5 file.
-        group_name:
-            Target HDF5 group name (``IBAND_GROUP`` or ``MBAND_GROUP``).
+        group_names:
+            Ordered candidate HDF5 group names (``IBAND_GROUPS`` or
+            ``MBAND_GROUPS``).
 
         Returns
         -------
@@ -195,7 +203,7 @@ class GEOReader:
             ``INVALID_THRESHOLD`` are masked with ``fill_value=np.nan``.
         """
         with h5py.File(h5_path, "r") as h5file:
-            geo_group = self._find_geo_group(h5file, group_name)
+            geo_group = self._find_geo_group(h5file, group_names)
 
             # Read raw arrays and cast to float32 immediately.
             lat_raw: np.ndarray = geo_group["Latitude"][()].astype(np.float32)

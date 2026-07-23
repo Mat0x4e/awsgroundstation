@@ -66,25 +66,30 @@ logger = logging.getLogger(__name__)
 # File-discovery helpers
 # ---------------------------------------------------------------------------
 
-def _find_hdf5_files(input_dir: Path, prefix: str) -> list[Path]:
-    """Return all HDF5 files under *input_dir* (recursively) matching *prefix*.
+def _find_hdf5_files(input_dir: Path, *prefixes: str) -> list[Path]:
+    """Return all HDF5 files under *input_dir* (recursively) matching any *prefix*.
 
     Searches both the top-level directory and any ``chunk_XXX`` subdirectories
-    that the upstream pipeline may have created.
+    that the upstream pipeline may have created. Multiple prefixes let a single
+    product be matched under either of its CSPP names (e.g. terrain-corrected
+    ``GITCO`` or ellipsoid ``GIGTO``).
 
     Parameters
     ----------
     input_dir:
         Root directory to scan.
-    prefix:
-        Filename prefix to match, e.g. ``"SVI01"``.
+    *prefixes:
+        One or more filename prefixes to match, e.g. ``"SVM15"``, ``"SVOM15"``.
 
     Returns
     -------
     list[Path]
-        Sorted list of matching ``.h5`` file paths.
+        Sorted, de-duplicated list of matching ``.h5`` file paths.
     """
-    return sorted(input_dir.rglob(f"{prefix}_*.h5"))
+    matches: set[Path] = set()
+    for prefix in prefixes:
+        matches.update(input_dir.rglob(f"{prefix}_*.h5"))
+    return sorted(matches)
 
 
 # ---------------------------------------------------------------------------
@@ -255,12 +260,14 @@ def main(argv: list[str] | None = None) -> int:
     # -----------------------------------------------------------------------
     # Step 1 — Scan input directory for HDF5 files by product prefix
     # -----------------------------------------------------------------------
+    # CSPP produces SVM15 / GITCO / GMTCO (terrain-corrected); older/ellipsoid
+    # names (SVOM15 / GIGTO / GMODO) are accepted too for forward-compatibility.
     i1_files = _find_hdf5_files(input_dir, "SVI01")
     i2_files = _find_hdf5_files(input_dir, "SVI02")
     i3_files = _find_hdf5_files(input_dir, "SVI03")
-    m15_files = _find_hdf5_files(input_dir, "SVOM15")
-    igeo_files = _find_hdf5_files(input_dir, "GIGTO")
-    mgeo_files = _find_hdf5_files(input_dir, "GMODO")
+    m15_files = _find_hdf5_files(input_dir, "SVM15", "SVOM15")
+    igeo_files = _find_hdf5_files(input_dir, "GITCO", "GIGTO")
+    mgeo_files = _find_hdf5_files(input_dir, "GMTCO", "GMODO")
 
     logger.info(
         "HDF5 files found — I1:%d I2:%d I3:%d M15:%d IGEO:%d MGEO:%d",

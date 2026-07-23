@@ -26,6 +26,7 @@ class GeoTIFFExporter:
 
     TARGET_CRS = "EPSG:4326"
     NASA_RESOLUTION_DEG = 0.0067  # ~750 m
+    QUERY_BUDGET = 500_000  # max grid points evaluated per strip (memory bound)
 
     # ------------------------------------------------------------------ #
     # Public API                                                           #
@@ -122,7 +123,10 @@ class GeoTIFFExporter:
         Path
             The *output_path* that was written.
         """
-        from scipy.interpolate import griddata  # optional heavy dep — import lazily
+        # LinearNDInterpolator lets us build the triangulation once and evaluate
+        # the target grid in strips, bounding peak memory — a single full-grid
+        # query can allocate multiple GiB and OOM on modest containers.
+        from scipy.interpolate import LinearNDInterpolator  # heavy dep — import lazily
 
         output_path = Path(output_path)
         data_flat = np.asarray(data, dtype=np.float32).ravel()
@@ -144,14 +148,17 @@ class GeoTIFFExporter:
         width = len(grid_lon)
         height = len(grid_lat)
 
-        grid_lon_2d, grid_lat_2d = np.meshgrid(grid_lon, grid_lat)
+        interp = LinearNDInterpolator(
+            np.column_stack((lon_flat, lat_flat)), data_flat
+        )
 
-        gridded = griddata(
-            points=(lon_flat, lat_flat),
-            values=data_flat,
-            xi=(grid_lon_2d, grid_lat_2d),
-            method="linear",
-        ).astype(np.float32)
+        # Evaluate in row-strips of at most ~QUERY_BUDGET points to cap memory.
+        gridded = np.empty((height, width), dtype=np.float32)
+        rows_per_strip = max(1, min(height, self.QUERY_BUDGET // max(width, 1)))
+        for r0 in range(0, height, rows_per_strip):
+            r1 = min(r0 + rows_per_strip, height)
+            gx, gy = np.meshgrid(grid_lon, grid_lat[r0:r1])
+            gridded[r0:r1, :] = interp(gx, gy).astype(np.float32)
 
         # rasterio north-up: first row = northernmost latitude
         gridded = np.flipud(gridded)

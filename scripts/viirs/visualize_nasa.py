@@ -383,17 +383,22 @@ def main(argv: list[str] | None = None) -> int:
         meta_gen.save(tc_meta_dict, tc_png)
         logger.info("True Color JSON written: %s", tc_png.with_suffix(".json"))
 
-        if geotiff_enabled and geotiff_exp is not None:
-            logger.info("True Color — exporting GeoTIFF → %s", tc_tif)
-            geotiff_exp.export_nasa(
-                data=rgb_data,
-                lat=lat_i.filled(np.nan),
-                lon=lon_i.filled(np.nan),
-                output_path=tc_tif,
-            )
-            logger.info("True Color TIF written: %s", tc_tif)
-
+        # PNG + JSON are the primary product — count success now so a later
+        # (optional) GeoTIFF failure cannot discard a good render.
         success_count += 1
+
+        if geotiff_enabled and geotiff_exp is not None:
+            try:
+                logger.info("True Color — exporting GeoTIFF → %s", tc_tif)
+                geotiff_exp.export_nasa(
+                    data=rgb_data,
+                    lat=lat_i.filled(np.nan),
+                    lon=lon_i.filled(np.nan),
+                    output_path=tc_tif,
+                )
+                logger.info("True Color TIF written: %s", tc_tif)
+            except Exception as exc:  # noqa: BLE001 — GeoTIFF is best-effort
+                logger.error("True Color GeoTIFF export failed: %s", exc, exc_info=True)
 
     except Exception as exc:  # noqa: BLE001
         logger.error("True Color rendering failed: %s", exc, exc_info=True)
@@ -452,17 +457,22 @@ def main(argv: list[str] | None = None) -> int:
         meta_gen.save(th_meta_dict, th_png)
         logger.info("Thermal JSON written: %s", th_png.with_suffix(".json"))
 
-        if geotiff_enabled and geotiff_exp is not None:
-            logger.info("Thermal — exporting GeoTIFF → %s", th_tif)
-            geotiff_exp.export_nasa(
-                data=bt_data.filled(np.nan),
-                lat=lat_m.filled(np.nan),
-                lon=lon_m.filled(np.nan),
-                output_path=th_tif,
-            )
-            logger.info("Thermal TIF written: %s", th_tif)
-
+        # PNG + JSON are the primary product — count success now so a later
+        # (optional) GeoTIFF failure cannot discard a good render.
         success_count += 1
+
+        if geotiff_enabled and geotiff_exp is not None:
+            try:
+                logger.info("Thermal — exporting GeoTIFF → %s", th_tif)
+                geotiff_exp.export_nasa(
+                    data=bt_data.filled(np.nan),
+                    lat=lat_m.filled(np.nan),
+                    lon=lon_m.filled(np.nan),
+                    output_path=th_tif,
+                )
+                logger.info("Thermal TIF written: %s", th_tif)
+            except Exception as exc:  # noqa: BLE001 — GeoTIFF is best-effort
+                logger.error("Thermal GeoTIFF export failed: %s", exc, exc_info=True)
 
     except Exception as exc:  # noqa: BLE001
         logger.error("Thermal rendering failed: %s", exc, exc_info=True)

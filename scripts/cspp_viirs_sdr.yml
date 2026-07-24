@@ -1,0 +1,39 @@
+version: 0.2
+# REAL root cause: viirs_sdr parses the spacecraft from the RDR FILENAME (_j01_).
+# Every diagnostic run renamed it to rvirs.h5 -> spacecraft BAD. The one success
+# kept the name. Test: preserve the original RNSCA-RVIRS_j01_... filename.
+env:
+  variables:
+    BKT: "groundstation-noaa20-sdr-output-471112743408"
+    SDRPFX: "contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/chunks/chunk_0/sdr"
+    RDRDIR: "contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/chunks/chunk_0/rdr"
+    RDRNAME: "RNSCA-RVIRS_j01_d20260630_t0956451_e1003519_b00001_c20260717141814195000_drlu_ops.h5"
+phases:
+  pre_build:
+    commands:
+      - export CSPP_SDR_HOME=/opt/SDR_4_1 CSPP_RT_HOME=/opt/SDR_4_1
+      - aws s3 cp "s3://$BKT/software/CSPP_SDR_V4.1_static_luts_j01.tar.gz" /tmp/a.tgz && tar xzf /tmp/a.tgz -C /opt/ && rm -f /tmp/a.tgz
+      - cd /opt/SDR_4_1 && timeout 2400 ./bin/sdr_luts.sh > /tmp/luts.log 2>&1; echo "sdr_luts exit $?"; tail -3 /tmp/luts.log
+      - mkdir -p /tmp/rdr /tmp/sdrwork
+      - echo "=== download RDR keeping ORIGINAL filename ==="
+      - aws s3 cp "s3://$BKT/$RDRDIR/$RDRNAME" /tmp/rdr/
+      - ls /tmp/rdr/
+  build:
+    commands:
+      - export CSPP_SDR_HOME=/opt/SDR_4_1 CSPP_RT_HOME=/opt/SDR_4_1
+      - /opt/SDR_4_1/bin/viirs_sdr.sh --work-dir /tmp/sdrwork -p 4 "/tmp/rdr/$RDRNAME" > /tmp/sdr.log 2>&1 || echo "viirs_sdr exit $?"
+      - grep -aE "_spacecraft|Required shortname|Found no granules|Total Science" /tmp/sdr.log | head
+      - echo "COUNTS SVM15" $(find /tmp/sdrwork -name 'SVM15*.h5'|wc -l) "SVIall" $(find /tmp/sdrwork -name 'SVI0*.h5'|wc -l) "GITCO" $(find /tmp/sdrwork -name 'GITCO*.h5'|wc -l) "GMTCO" $(find /tmp/sdrwork -name 'GMTCO*.h5'|wc -l)
+  post_build:
+    commands:
+      - N=$(find /tmp/sdrwork -name 'SVM15*.h5'|wc -l)
+      - echo "RESULT SVM15_COUNT=$N"
+      - |
+        if [ "$N" -gt 0 ]; then
+          echo "=== CSPP WORKS DETERMINISTICALLY (filename fix) — $N SVM15 granules ==="
+          aws s3 sync /tmp/sdrwork/ "s3://$BKT/$SDRPFX/" --exclude '*.log' --exclude '*.anc' --exclude 'db/*' --exclude '*.PDS'
+          echo "SDR_UPLOADED"
+        else
+          echo "STILL FAILING"
+        fi
+      - aws s3 cp /tmp/sdr.log "s3://$BKT/contacts/2026/06/30/1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b/chunks/chunk_0/cspp_diag/realfix_sdr.log"

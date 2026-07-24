@@ -10,19 +10,28 @@ AWS Ground Station RF (VITA-49 .pcap) → I/Q → SatDump → CADU
   → geolocated GeoTIFF (EPSG:4326, sub-km per-pixel geolocation)
 ```
 
-**CSPP SDR is NOT abandoned — the earlier "DB init impossible in Docker" conclusion was wrong.**
-Two fixes, both required, never previously combined:
+**CSPP SDR works DETERMINISTICALLY. See [`CSPP_SOLVED.md`](CSPP_SOLVED.md) for the authoritative
+"solid & required" record.** The multi-week "impossible/non-deterministic" saga had one true
+root cause plus supporting requirements:
 
-1. **Install the J01 shipped LUTs** (`CSPP_SDR_V4.1_static_luts_j01.tar.gz`) + run `sdr_luts.sh`
-   → the DMS working database initializes. The infamous 600-iteration "wait for working db
-   initialization" hang was the *missing-LUTs* symptom, not a container limitation.
-2. **Feed `viirs_sdr.sh` the RDR HDF5** (`RNSCA-RVIRS_*.h5`), **not** the `.PDS` — CSPP's
-   ADL_Unpacker rejects PDS (`'...PDS' should end with .h5?`). Platform then reads `J01`
-   (not the `BAD` default).
+1. **⭐ Preserve the original RDR filename** — `viirs_sdr.sh` parses the spacecraft from the
+   `_j01_` token in the filename. A renamed file (`rvirs.h5`) → `_spacecraft='BAD'` →
+   `Total Science RDRs: 0`. **This single detail caused the whole saga** (every failed
+   diagnostic had renamed the RDR; the one success kept the name).
+2. **Install the J01 shipped LUTs** (`CSPP_SDR_V4.1_static_luts_j01.tar.gz`) — do NOT
+   re-extract straylight/ecotiles (already in the image; the redundant 10 GB breaks the build).
+3. **Run `sdr_luts.sh` ONLINE** — needs `jpssdb.ssec.wisc.edu`. CodeBuild reaches it; the EC2
+   aggregation instance does NOT (offline → partial cache → "Required shortname missing").
+   **⇒ run CSPP in CodeBuild.**
+4. **Feed the `.h5` RDR, not `.PDS`.**
 
-Working buildspec: [`scripts/cspp_rdr_input.yml`](scripts/cspp_rdr_input.yml) (run via
+Red herrings that were NOT the cause: the `SDR_DB→SDR_4_1_DB` symlink, cache clear/rebuild,
+warm-vs-cold containers, `CSPP_DB_VER` overrides, DB snapshots.
+
+Working buildspec: `scripts/cspp_viirs_sdr.yml` (also the original lucky
+[`scripts/cspp_rdr_input.yml`](scripts/cspp_rdr_input.yml)). Run via
 `aws codebuild start-build --project-name groundstation-noaa20-sdr-pipeline --buildspec-override <content>`,
-profile `AWSAdminAccess-471112743408`, ~14 min). Superseded debugging attempts archived in
+profile `AWSAdminAccess-471112743408`, ~15 min. Superseded debugging attempts archived in
 [`scripts/archive/cspp-debug/`](scripts/archive/cspp-debug/).
 
 **Deliverables** (contact-03 Oregon, 2026-06-30 — a night pass, so thermal IR):
@@ -33,10 +42,28 @@ profile `AWSAdminAccess-471112743408`, ~14 min). Superseded debugging attempts a
 Built by [`postprocessing/rebuild_geotiff.py`](postprocessing/rebuild_geotiff.py) from CSPP
 `BrightnessTemperature` + `G*TCO` terrain-corrected lat/lon (scipy griddata → rasterio).
 
-**Open follow-ups**: (a) full-pass mosaic — CSPP emitted GEO for 4 granules but full science
-SDR for only 1 (`t1009343`); (b) wire the deployed `scripts/viirs/visualize_nasa.py` +
-`geo_reader.py`, which glob the wrong names (`SVOM15`/`GMODO`/`GIGTO`) and read non-TC geo
-groups — real CSPP output is `SVM15`/`GMTCO`/`GITCO` with `VIIRS-*-GEO-TC_All`.
+**Status of earlier follow-ups**: (a) full-pass mosaic — **data-limited, not fixable**: the RDR
+holds ~14 science granules but only ~1 is complete enough to calibrate (rest partial from RF
+packet loss); (b) deployed `scripts/viirs/visualize_nasa.py` + `geo_reader.py` — **DONE**
+(committed): now glob `SVM15`/`GITCO`/`GMTCO` and read terrain-corrected `VIIRS-*-GEO-TC_All`
+groups, with memory-safe GeoTIFF export.
+
+**DELIVERED (2026-07-24) — contact-02 daytime sub-km true color.** First full end-to-end run of
+the deterministic CSPP recipe on a fresh pass (Ohio antenna, North-America→Caribbean daytime
+swath): 27-chunk front-end → RT-STPS aggregation (863 MB `RNSCA-RVIRS_j01` RDR) → CSPP →
+**10 daytime granules** (SVI/SVM full reflectance + `GITCO`/`GMTCO` terrain-corrected GEO) →
+clean full-pass **true-color GeoTIFF + coastline overlay** with **sub-km alignment** (Great
+Lakes, Florida, Cuba, Bahamas land exactly on their coastlines). Deliverables:
+`output/contact-02_ohio-1_2026-06-23/NASA-SDR/noaa20_viirs_truecolor_contact02.{tif,png}` +
+`..._overlay_...png`; builder `postprocessing/rebuild_truecolor.py` (concat granules → cKDTree
+nearest resample to WGS84 → gamma-stretched RGB). Contrast with contact-03 (night, 1 thermal
+granule): this daytime pass yielded 10 full true-color granules.
+
+Notes for the deployed pipeline (see "wire the fixes"): (1) the aggregation Lambda timed out
+starting the stopped EC2 instance — needs a longer wait / auto-start-and-retry; (2)
+`scripts/aggregation.sh` still uses the OLD CSPP paths (`/opt/cspp-sdr`, `viirs/viirs_sdr.sh`,
+no static_luts/sdr_luts) — replace with the `CSPP_SOLVED.md` recipe (it already preserves the
+`_j01_` RDR filename, so that part is fine).
 
 ---
 

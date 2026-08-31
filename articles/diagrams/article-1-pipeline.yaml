@@ -1,0 +1,161 @@
+Diagram:
+  DefinitionFiles:
+    - Type: URL
+      Url: "https://raw.githubusercontent.com/awslabs/diagram-as-code/main/definitions/definition-for-aws-icons-light.yaml"
+
+  Resources:
+    Canvas:
+      Type: AWS::Diagram::Canvas
+      Direction: vertical
+      Children:
+        - Title
+        - Body
+
+    Title:
+      Type: AWS::Diagram::Resource
+      Title: "Part 1 — raw RF to VIIRS composites · contact #2, 2026-06-23 · 58.7 GB, ~10 min"
+      Align: center
+
+    Body:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - Satellite
+        - AWSCloud
+
+    Satellite:
+      Type: AWS::Diagram::Resource
+      Preset: "Satellite"
+      Title: "NOAA-20 (JPSS-1)"
+      Align: center
+
+    AWSCloud:
+      Type: AWS::Diagram::Cloud
+      Preset: AWSCloudNoLogo
+      Direction: vertical
+      Align: center
+      Children:
+        - RegionUS
+        - RegionEU
+
+    RegionUS:
+      Type: AWS::Region
+      Title: "us-east-2 — antenna"
+      Children:
+        - GroundStation
+
+    GroundStation:
+      Type: AWS::Diagram::Resource
+      Preset: "AWS Ground Station"
+      Title: "Ohio 1 antenna"
+      Align: center
+
+    RegionEU:
+      Type: AWS::Region
+      Title: "eu-central-1 — storage & processing"
+      Direction: vertical
+      Children:
+        - Trigger
+        - Compute
+        - Output
+
+    Trigger:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - RawBucket
+        - EventBridge
+        - StepFunctions
+
+    RawBucket:
+      Type: AWS::S3::Bucket
+      Title: "reception bucket - 27 x 2.18 GB"
+      Align: center
+
+    EventBridge:
+      Type: AWS::Events::Rule
+      Title: "EventBridge"
+      Align: center
+
+    StepFunctions:
+      Type: AWS::StepFunctions
+      Title: "Step Functions"
+      Align: center
+
+    Compute:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - ECR
+        - CodeBuild
+
+    ECR:
+      Type: AWS::ECR
+      Title: "ECR image"
+      Align: center
+
+    CodeBuild:
+      Type: AWS::CodeBuild::Project
+      Title: "CodeBuild - 27 parallel containers"
+      Align: center
+
+    Output:
+      Type: AWS::S3::Bucket
+      Title: "output bucket - composites + .cadu"
+      Align: center
+
+  Links:
+    - Source: Satellite
+      SourcePosition: NNE
+      Target: GroundStation
+      TargetPosition: WNW
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        AutoLeft:
+          Title: "X-band ~15 Mbps"
+
+    - Source: GroundStation
+      SourcePosition: S
+      Target: RawBucket
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+      Type: orthogonal
+      Labels:
+        AutoRight:
+          Title: "DigIF 58.7 GB cross-region"
+
+    - Source: RawBucket
+      SourcePosition: E
+      Target: EventBridge
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: EventBridge
+      SourcePosition: E
+      Target: StepFunctions
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: StepFunctions
+      SourcePosition: S
+      Target: CodeBuild
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+      Type: orthogonal
+
+    - Source: ECR
+      SourcePosition: E
+      Target: CodeBuild
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: CodeBuild
+      SourcePosition: S
+      Target: Output
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+      Type: orthogonal

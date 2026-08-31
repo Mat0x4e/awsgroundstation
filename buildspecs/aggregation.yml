@@ -1,0 +1,63 @@
+# Final aggregation (CADU -> RDR -> SDR/GEO) as a CodeBuild job.
+#
+# Why CodeBuild and not the EC2 aggregation instance: CSPP's ancillary staging
+# fetches from http://jpssdb.ssec.wisc.edu at runtime, and the EC2 instance's
+# security group is deliberately "SSM outbound HTTPS only" -- no route. On EC2
+# the fetch times out 5x (~11 min) and CSPP then dies inside its own error
+# handling with "TypeError: object of type 'bool' has no len()". The CodeBuild
+# container has egress, and the sdr-pipeline image already carries CSPP 4.1.1,
+# the J01 straylight LUTs, and a LUT cache DB built by sdr_luts.sh at image
+# build time. This matches articles/diagrams/article-2-nasa-stack.yaml, which
+# records "no route from EC2" and "sdr_luts.sh reaches it" from the build.
+#
+# Required environment overrides:
+#   RECEPTION_BUCKET  bucket Ground Station delivered the raw .pcap to
+#   OUTPUT_BUCKET     SDR output bucket holding .cadu in and RDR/SDR out
+#   CONTACT_ID        Ground Station contact UUID
+#   CONTACT_DATE      YYYY/MM/DD, matching the S3 prefix
+
+version: 0.2
+
+env:
+  variables:
+    # aggregation.sh powers the host off when this is 1; a container must not.
+    SELF_STOP: "0"
+    RTSTPS_HOME: /opt/rt-stps
+    CSPP_HOME: /opt/SDR_4_1
+    CSPP_SDR_HOME: /opt/SDR_4_1
+    CSPP_RT_HOME: /opt/SDR_4_1
+
+phases:
+  pre_build:
+    commands:
+      - echo "Aggregating contact ${CONTACT_ID} (${CONTACT_DATE})"
+      # Take the script from S3 rather than the image's baked /opt/scripts copy,
+      # so a redeploy of aggregation.sh takes effect without rebuilding the image.
+      - aws s3 cp "s3://${OUTPUT_BUCKET}/software/aggregation.sh" /tmp/aggregation.sh
+      - chmod +x /tmp/aggregation.sh
+      - test -x "${CSPP_HOME}/bin/viirs_sdr.sh" || { echo "CSPP missing from image"; exit 1; }
+      - test -x "${RTSTPS_HOME}/bin/batch.sh" || { echo "RT-STPS missing from image"; exit 1; }
+      # CSPP_SOLVED.md req 1 -- J01 shipped LUTs. The image carries straylight and
+      # ecotiles but NOT shipped_luts, so check_installation() aborts with
+      # "Installation problem .../SDR_4_1_DB/package needs to exist". Do NOT also
+      # extract straylight/static_tiles here: they are already in the image and the
+      # redundant ~10 GB fills the CodeBuild disk and breaks sdr_luts.sh.
+      - aws s3 cp "s3://${OUTPUT_BUCKET}/software/CSPP_SDR_V4.1_static_luts_j01.tar.gz" /tmp/j01luts.tgz
+      - tar xzf /tmp/j01luts.tgz -C /opt/ && rm -f /tmp/j01luts.tgz
+      - test -d "${CSPP_HOME}/anc/static/shipped_luts/j01" || { echo "shipped_luts/j01 missing after extract"; exit 1; }
+      # CSPP_SOLVED.md req 2 -- populate the cache DB from jpssdb.ssec.wisc.edu.
+      # This is the step that needs internet egress, and the reason aggregation
+      # cannot run on the EC2 instance at all.
+      - cd "${CSPP_HOME}" && timeout 2400 ./bin/sdr_luts.sh > /tmp/luts.log 2>&1; echo "sdr_luts exit $?"; tail -5 /tmp/luts.log
+      - test -e "${CSPP_HOME}/anc/static/SDR_4_1_DB/package" || { echo "LUT cache DB still absent after sdr_luts.sh"; tail -40 /tmp/luts.log; exit 1; }
+
+  build:
+    commands:
+      - /tmp/aggregation.sh "${RECEPTION_BUCKET}" "${CONTACT_ID}" "${CONTACT_DATE}" "${OUTPUT_BUCKET}"
+
+  post_build:
+    commands:
+      # aggregation.sh uploads its own logs via the EXIT trap; surface the tail
+      # here too so a failure is visible in the CodeBuild console without S3.
+      - echo "Exit status ${CODEBUILD_BUILD_SUCCEEDING}"
+      - tail -40 /var/log/aggregation.log 2>/dev/null || true

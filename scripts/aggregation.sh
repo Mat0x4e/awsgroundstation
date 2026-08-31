@@ -3,7 +3,7 @@
 # Deployed to /opt/scripts/aggregation.sh on the EC2 aggregation instance.
 # Executed via SSM Run Command by the Trigger Lambda.
 #
-# Usage: aggregation.sh <bucket> <contact_id> <contact_date>
+# Usage: aggregation.sh <reception_bucket> <contact_id> <contact_date> [output_bucket]
 #
 # NOTE: Ensure this file is executable after deployment:
 #   chmod +x /opt/scripts/aggregation.sh
@@ -18,10 +18,27 @@ CONTACT_DATE="$3"
 # --- Configuration ---
 LOG_FILE="/var/log/aggregation.log"
 KMS_KEY_ID="70451aac-a58c-4a93-be24-4587cd55a795"
-WORK_DIR="/tmp/aggregation/${CONTACT_ID}"
+# NOT /tmp: that is a 16 GB tmpfs (RAM-backed) on this instance, while / has
+# ~230 GB free. CSPP expands a ~670 MB VIIRS RDR into many GB of SDR/GEO scratch,
+# which both risks ENOSPC and competes for the RAM CSPP itself needs. /var/tmp
+# also survives the reboot, so logs are still there to read after a failure.
+WORK_DIR="/var/tmp/aggregation/${CONTACT_ID}"
 RTSTPS_HOME="/opt/rt-stps"
-CSPP_HOME="/opt/cspp-sdr"
-S3_PREFIX="s3://${BUCKET}/contacts/${CONTACT_DATE}/${CONTACT_ID}"
+CSPP_HOME="${CSPP_HOME:-/opt/SDR_4_1}"
+# The Trigger Lambda passes the *reception* bucket in $1 (where Ground Station
+# dropped the raw .pcap), but every artifact this script touches lives in the SDR
+# output bucket: the per-chunk CodeBuild jobs wrote their .cadu there via
+# OUTPUT_BUCKET, and the RDR/SDR products belong alongside them. Reading .cadu
+# from $BUCKET finds nothing and aborts the run.
+OUTPUT_BUCKET="${4:-${OUTPUT_BUCKET:-groundstation-noaa20-sdr-output-471112743408}}"
+S3_PREFIX="s3://${OUTPUT_BUCKET}/contacts/${CONTACT_DATE}/${CONTACT_ID}"
+CSPP_LOG="${WORK_DIR}/cspp_sdr.log"
+
+# 1 on the EC2 aggregation instance, which must power itself off when done.
+# 0 in the CodeBuild container, which has no shutdown(8) and is torn down by the
+# build service -- CSPP's ancillary fetch needs the internet egress CodeBuild has
+# and the EC2 instance deliberately does not.
+SELF_STOP="${SELF_STOP:-1}"
 
 # --- Structured Logging (JSON) ---
 log_json() {
@@ -33,14 +50,45 @@ log_json() {
         "$timestamp" "$level" "$CONTACT_ID" "$CONTACT_DATE" "$message" | tee -a "$LOG_FILE"
 }
 
+# --- Upload logs to S3 before powering off ---
+# The EXIT trap shuts the instance down, which also severs SSM's reporting
+# channel -- without this the only record of a failure dies with the box.
+upload_logs() {
+    aws s3 cp "$LOG_FILE" "${S3_PREFIX}/logs/aggregation.log"         --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID" >/dev/null 2>&1 || true
+    if [ -f "$CSPP_LOG" ]; then
+        aws s3 cp "$CSPP_LOG" "${S3_PREFIX}/logs/cspp_sdr.log"             --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID" >/dev/null 2>&1 || true
+    fi
+}
+
 # --- EXIT Trap: self-stop instance on any exit (success or failure) ---
-trap 'kill $WATCHDOG_PID 2>/dev/null; log_json "INFO" "Stopping instance..."; shutdown -h now' EXIT
+# A failing command inside an EXIT trap aborts the trap under `set -e`, which
+# silently skips everything after it. That is how a bare `kill ""` (empty
+# WATCHDOG_PID, exit 2) swallowed CSPP's real error and its log upload. Disable
+# -e for the duration of the handler so cleanup always runs to completion.
+on_exit() {
+    local rc=$?
+    set +e
+    [ -n "${WATCHDOG_PID:-}" ] && kill "$WATCHDOG_PID" 2>/dev/null
+    upload_logs
+    if [ "$SELF_STOP" = "1" ]; then
+        log_json "INFO" "Stopping instance (rc=${rc})..."
+        shutdown -h now
+    else
+        log_json "INFO" "Exiting (rc=${rc})"
+    fi
+    return "$rc"
+}
+trap on_exit EXIT
 
 # --- Watchdog: force shutdown after 35 minutes as safety net ---
 # SSM executionTimeout (30 min) should terminate the process first, but if
 # the SSM agent itself hangs, this ensures the instance always self-stops.
-(sleep 2100 && log_json "ERROR" "Watchdog timeout reached (35 min) — forcing shutdown" && shutdown -h now) &
-WATCHDOG_PID=$!
+if [ "$SELF_STOP" = "1" ]; then
+    (sleep 2100 && log_json "ERROR" "Watchdog timeout reached (35 min) — forcing shutdown" && shutdown -h now) &
+    WATCHDOG_PID=$!
+else
+    WATCHDOG_PID=""   # CodeBuild enforces its own build timeout
+fi
 
 # --- Clean up working directory (in case of previous failed run) ---
 rm -rf "$WORK_DIR"
@@ -87,8 +135,14 @@ sed -i 's/PnEncoded="true"/PnEncoded="false"/' "$WORK_DIR/jpss1.xml"
 sed -i '/from="pn" to="reed_solomon"/d' "$WORK_DIR/jpss1.xml"
 sed -i 's|from="frame_sync" to="pn"|from="frame_sync" to="reed_solomon"|' "$WORK_DIR/jpss1.xml"
 
-# Ensure RT-STPS output directory exists
+# Ensure RT-STPS output directory exists, and clear any RDRs left by an earlier
+# contact. jpss1.xml sends output to /opt/data (a sibling of RTSTPS_HOME), which
+# is shared across runs -- without this, step 4 can select a previous contact's
+# VIIRS RDR and step 5 uploads it under this contact's prefix.
 mkdir -p /opt/data
+log_json "INFO" "Clearing $(find /opt/data -name '*.h5' | wc -l) RDR file(s) from previous runs"
+find /opt/data -maxdepth 1 -name '*.h5' -delete
+find /opt/data -maxdepth 1 -name '*.PDS' -delete
 
 log_json "INFO" "Running RT-STPS batch processing..."
 cd "$RTSTPS_HOME" && bin/batch.sh "$WORK_DIR/jpss1.xml" "$WORK_DIR/combined.cadu"
@@ -99,13 +153,13 @@ log_json "INFO" "RT-STPS produced ${RDR_COUNT} RDR HDF5 files"
 # =============================================================================
 # Step 4: Run CSPP SDR (only if VIIRS RDR exists)
 # =============================================================================
-VIIRS_RDR=$(find /opt/data -name 'RNSCA-RVIRS*.h5' | head -1)
+VIIRS_RDR=$(find /opt/data -name 'RNSCA-RVIRS*.h5' | sort | head -1)
 
 if [ -n "$VIIRS_RDR" ]; then
     log_json "INFO" "VIIRS RDR found: ${VIIRS_RDR} — running CSPP SDR viirs_sdr.sh..."
     export CSPP_SDR_HOME="$CSPP_HOME"
     export CSPP_RT_HOME="$CSPP_HOME"
-    "$CSPP_HOME/viirs/viirs_sdr.sh" --work-dir "$WORK_DIR/sdr" "$VIIRS_RDR"
+    "$CSPP_HOME/bin/viirs_sdr.sh" --work-dir "$WORK_DIR/sdr" -p 4 "$VIIRS_RDR" >>"$CSPP_LOG" 2>&1
 
     SDR_COUNT=$(find "$WORK_DIR/sdr" -name 'SV*.h5' -o -name 'G*.h5' | wc -l)
     log_json "INFO" "CSPP SDR produced ${SDR_COUNT} SDR/GEO HDF5 files"

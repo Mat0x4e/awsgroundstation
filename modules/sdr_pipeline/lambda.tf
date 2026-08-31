@@ -124,7 +124,11 @@ resource "aws_lambda_function" "aggregation_trigger" {
   runtime     = "python3.12"
   handler     = "handler.lambda_handler"
   memory_size = 256
-  timeout     = 120
+
+  # 300s so the handler's 240s instance-start poll can actually run to completion.
+  # A 60s budget discarded a full run on 2026-08-31 when EC2 returned
+  # Server.InternalError and the instance needed a second start attempt.
+  timeout = 300
 
   environment {
     variables = {

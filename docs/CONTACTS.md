@@ -284,7 +284,8 @@ not a pipeline regression.
 - [x] Produce composites — **done 2026-09-01**, 3 products after fixing the visualisation orchestrator
 - [x] Confirm the `--contact-time` geolocation fix on a rebuilt image — **done 2026-09-01**, bbox moved from the Caspian to Europe
 - [x] Fix the cross-track extension in `_from_tle` — **done 2026-09-01**, spherical arc + bearing split
-- [ ] Re-render contact #5 on the rebuilt image and check the overlay against the coastlines
+- [x] Re-render contact #5 and check the overlay — **done 2026-09-01 17:45**: lat 37.15–45.63, lon −2.85–32.34; Corsica/Sardinia, Barcelona and Rome fall where they belong
+- [ ] Optional next step for true georeferencing: `product.cbor`'s `projection_cfg.ephemeris` (30 points, ECI, spanning exactly the 29 s chunk) is usable once its timestamps are unwrapped — they are stored 2³² seconds low, reading as 1890. Rotating those to ECEF via GMST and using the `viirs_single_line` scan model would give a GCP warp instead of an axis-aligned box, which is the only way to fit a tilted swath (941 × 2,930 km box for a ~200 × 3,000 km strip)
 - [x] Fix `SVOM15`/`GMODO`/`GIGTO` constants in `scripts/viirs/` before the NASA path — **done 2026-08-27**, verified against contact #3's real `GMTCO`/`GITCO`
 - [ ] True-colour composite + I-band (375 m) look at the Adriatic/Naples area
 

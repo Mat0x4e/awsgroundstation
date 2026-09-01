@@ -110,6 +110,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Contact start time in HH:MM:SS UTC format (improves geolocation accuracy).",
     )
     parser.add_argument(
+        "--pass-duration-seconds",
+        required=False,
+        type=float,
+        default=None,
+        help=(
+            "Along-track duration the composites cover, in seconds. Only used by "
+            "the TLE fallback. A SatDump composite spans one chunk (~30 s); the "
+            "default propagates a whole pass and overstates the bounding box."
+        ),
+    )
+    parser.add_argument(
         "--enable-geotiff",
         required=True,
         choices=["true", "false"],
@@ -127,6 +138,7 @@ def _resolve_bbox(
     input_dir: Path,
     coordinates_dir: Path | None,
     bbox_calc: BBoxCalculator,
+    duration_seconds: float | None = None,
 ):
     """Resolve bounding box, trying coordinates-dir first if provided.
 
@@ -154,7 +166,7 @@ def _resolve_bbox(
                 )
 
     # Fall through to standard priority chain (input_dir .georef → CBOR → TLE)
-    return bbox_calc.compute(cbor_meta, input_dir)
+    return bbox_calc.compute(cbor_meta, input_dir, duration_seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +255,9 @@ def main(argv: list[str] | None = None) -> int:
 
     bbox_calc = BBoxCalculator()
     try:
-        bbox = _resolve_bbox(cbor_meta, input_dir, coordinates_dir, bbox_calc)
+        bbox = _resolve_bbox(
+            cbor_meta, input_dir, coordinates_dir, bbox_calc, args.pass_duration_seconds
+        )
     except NoBBoxSourceError as exc:
         logger.error("Cannot compute bounding box — aborting: %s", exc)
         return 1

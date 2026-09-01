@@ -112,6 +112,11 @@ stack is worth the trouble. See [`../articles/article-2-nasa-software.md`](../ar
 **A green execution does not mean 22 good chunks.** The Map tolerates 100 % failure by
 design, so partial results still reach aggregation. Check the per-chunk `build_status`.
 
+**A green execution does not mean imagery either.** `StartVisualization` catches to
+success, so a failed rendering leaves `products/{date}/{contact}/` empty while the
+execution reports `SUCCEEDED`. Three rehearsals did exactly that on 2026-09-01. Verify
+against the products prefix, never the execution status.
+
 ---
 
 ## Constraints worth knowing before changing anything
@@ -128,6 +133,18 @@ design, so partial results still reach aggregation. Check the per-chunk `build_s
   `year=Y/month=M/day=D/satellite=<sat>/<contactId>_<ts>_<uuid>.pcap`.
 - **Re-running a contact accumulates products.** RDR and SDR filenames embed a creation
   timestamp, so they never overwrite; only `.cadu` does.
+- **The visualisation buildspecs live in the Lambda, not in `buildspecs/`.** The CodeBuild
+  project is `NO_SOURCE` with a stub spec that exits 1; the real spec is passed as
+  `buildspecOverride` at `start_build()` time from
+  [`lambdas/viirs_visualizer/handler.py`](../lambdas/viirs_visualizer/handler.py). The
+  `buildspecs/viirs_*.yml` files are manual-run copies and are *not* what runs. Three
+  defects hid in that gap until 2026-09-01: a wrong script path, the NASA path reading
+  `chunks/` instead of `sdr/` under pre-J01 filenames, and a SatDump sync that produced a
+  nested tree the non-recursive composite discovery could not see.
+- **SatDump output is per chunk, not per contact.** Composites live at
+  `satdump/chunk_N/<INSTRUMENT>/`, one set per 30 s of downlink. `chunk_0` is the first
+  30 s after AOS. The visualiser globs a flat directory, so the buildspec stages the
+  per-chunk folders into one, lowest chunk number winning.
 - **Visualisation is told, not triggered.** It was once driven by an S3 `ObjectCreated` rule
   matching `.png`; a contact writes ~9,150 objects, so arming that bucket produced ~6,000
   CodeBuild builds in a morning and exhausted the account build queue. Nothing this pipeline

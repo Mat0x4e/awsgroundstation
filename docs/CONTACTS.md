@@ -214,6 +214,32 @@ This contact was also used for three pipeline rehearsals on 2026-09-01; products
 runs accumulate alongside the originals (RDR/SDR filenames embed a creation timestamp).
 Pre-rehearsal copies: `s3://groundstation-noaa20-sdr-output-471112743408/rehearsal-backup/2026-09-01/ba2c5446/`.
 
+Rehearsal 3 (13:16–14:13 CEST) is the first fully green run: **22/22 chunk builds**, then
+aggregation to 5 RDRs and 35 SDR/GEO files, reproducing the science outcome above exactly.
+Most of the 57 min was CodeBuild queue time — the account's concurrent-build limit, not the
+Map's `MaxConcurrency`, is what paces the fan-out.
+
+### The basin is in the imagery — via SatDump, not CSPP
+
+No calibrated SDR covers the Mediterranean, but `satdump/chunk_0/VIIRS/` composites plainly
+show **Italy, the Adriatic and Corsica/Sardinia**. SatDump decodes CADU straight to
+composites and tolerates the incomplete science RDR that CSPP rejects, so the two paths
+disagree about what survived the pass. Chunk order is time order, and `chunk_0` is the first
+30 s after AOS — the southernmost, Mediterranean end of the swath.
+
+Rendered products are in `products/2026/08/31/ba2c5446-.../` — True Color, Thermal IR and
+Day Microphysics, each PNG + GeoTIFF + JSON. They exist only from 2026-09-01: the
+visualisation stage had never once succeeded, and the state machine's catch-to-success hid
+it (see [ARCHITECTURE.md](ARCHITECTURE.md)).
+
+**Georeferencing on the SatDump path is not trustworthy yet.** `product.cbor` carries no
+timestamp, so bbox resolution fell back to midnight on the contact date and the sidecar
+claimed lon 29.5–52.1°E (the Caspian) for a scene that is obviously the central
+Mediterranean; the coastline overlay sits ~20° off the land. The acquisition time is
+available — `satdump/chunk_N/dataset.json` records it, 11:59:57 UTC for `chunk_0`, eight
+seconds after AOS — and is now passed through as `--contact-time`. The imagery is sound; the
+geolocation metadata should not be quoted until a run confirms it.
+
 ### Expected Coverage
 
 Ascending daytime pass, ~13:20 local solar time. Sub-track 40.3°N 15.2°E (Gulf of
@@ -241,7 +267,9 @@ not a pipeline regression.
 - [ ] Check cloud forecast for the western/central Med on 2026-08-30
 - [ ] Confirm `contactStatus` reaches `SCHEDULED`
 - [ ] Verify .pcap arrival after 14:12 CEST
-- [ ] Run SDR pipeline with the working CSPP recipe ([DEPLOYMENT.md](DEPLOYMENT.md))
+- [x] Run SDR pipeline with the working CSPP recipe ([DEPLOYMENT.md](DEPLOYMENT.md)) — **done 2026-09-01**, rehearsal 3, 22/22 chunks
+- [x] Produce composites — **done 2026-09-01**, 3 products after fixing the visualisation orchestrator
+- [ ] Confirm the `--contact-time` geolocation fix on a rebuilt image, then re-check the sidecar bbox
 - [x] Fix `SVOM15`/`GMODO`/`GIGTO` constants in `scripts/viirs/` before the NASA path — **done 2026-08-27**, verified against contact #3's real `GMTCO`/`GITCO`
 - [ ] True-colour composite + I-band (375 m) look at the Adriatic/Naples area
 

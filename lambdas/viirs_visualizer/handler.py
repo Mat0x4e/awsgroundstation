@@ -14,6 +14,8 @@ import fnmatch
 import json
 import logging
 import os
+import re
+from datetime import datetime, timezone
 from typing import Optional
 
 import boto3
@@ -24,7 +26,8 @@ logger.setLevel(logging.INFO)
 
 # ---------------------------------------------------------------------------
 # Build spec inlines — the Lambda passes these to CodeBuild as overrides.
-# The actual pipeline scripts live inside the Docker image at /opt/scripts/;
+# The actual pipeline scripts live inside the Docker image at
+# /opt/scripts/viirs/ (the Dockerfile does COPY scripts/ /opt/scripts/);
 # these buildspecs just orchestrate the download → render → upload workflow.
 # ---------------------------------------------------------------------------
 
@@ -38,20 +41,33 @@ phases:
   pre_build:
     commands:
       - echo "Downloading SatDump outputs from S3..."
-      - mkdir -p /tmp/input/satdump /tmp/input/coordinates /tmp/output
-      - aws s3 sync "s3://${INPUT_BUCKET}/${INPUT_PREFIX}/satdump/" /tmp/input/satdump/
-          --exclude "*" --include "*.png" --include "*.cbor" --include "*.georef"
+      - mkdir -p /tmp/input/chunks /tmp/input/satdump /tmp/input/coordinates /tmp/output
+      # SatDump writes one composite set per 30 s chunk, under
+      # <prefix>/satdump/chunk_N/<INSTRUMENT>/. Pull the VIIRS ones only: a
+      # contact holds ~9,000 PNGs across all instruments and the visualizer
+      # reads ~36 of them.
+      - aws s3 sync "s3://${INPUT_BUCKET}/${INPUT_PREFIX}/satdump/" /tmp/input/chunks/
+          --exclude "*"
+          --include "*/VIIRS/*.png"
+          --include "*/VIIRS/*.cbor"
+          --include "*/VIIRS/*.georef"
+      # SatDumpVisualizer.discover_composites globs its input dir non-recursively,
+      # so flatten the per-chunk folders into it. Lowest chunk number wins each
+      # name: chunk_0 is the first 30 s after AOS, the southernmost part of the
+      # swath. This is the layout every successful manual run used (.build/).
+      - for d in $(ls -d /tmp/input/chunks/chunk_* 2>/dev/null | sort -V); do cp -n "$d"/VIIRS/* /tmp/input/satdump/ 2>/dev/null || true; done
+      - echo "Composites staged:" && ls /tmp/input/satdump | head -20
       - aws s3 sync "s3://${INPUT_BUCKET}/${INPUT_PREFIX}/coordinates/" /tmp/input/coordinates/
 
   build:
     commands:
       - echo "Running SatDump visualization pipeline..."
-      - python3 /opt/scripts/visualize_satdump.py
+      - python3 /opt/scripts/viirs/visualize_satdump.py
           --input-dir /tmp/input/satdump
           --coordinates-dir /tmp/input/coordinates
           --output-dir /tmp/output
           --contact-id "${CONTACT_ID}"
-          --contact-date "${CONTACT_DATE}"
+          --contact-date "${CONTACT_DATE}"__CONTACT_TIME_ARG____PASS_DURATION_ARG__
           --enable-geotiff "${ENABLE_GEOTIFF}"
 
   post_build:
@@ -74,19 +90,27 @@ phases:
   pre_build:
     commands:
       - echo "Downloading SDR + GEO files from S3..."
-      - mkdir -p /tmp/input/chunks /tmp/output
-      - aws s3 sync "s3://${INPUT_BUCKET}/${INPUT_PREFIX}/chunks/" /tmp/input/chunks/
+      - mkdir -p /tmp/input/sdr /tmp/output
+      # aggregation.sh uploads CSPP output to <prefix>/sdr/. <prefix>/chunks/
+      # holds per-chunk RT-STPS metadata only -- no .h5 ever lands there.
+      # Both the terrain-corrected names CSPP writes for J01 (SVM15/GITCO/GMTCO)
+      # and the older ellipsoid ones (SVOM15/GIGTO/GMODO) are pulled, matching
+      # what scripts/viirs/visualize_nasa.py accepts.
+      - aws s3 sync "s3://${INPUT_BUCKET}/${INPUT_PREFIX}/sdr/" /tmp/input/sdr/
           --exclude "*"
           --include "SVI0*.h5"
+          --include "SVM15*.h5"
           --include "SVOM15*.h5"
+          --include "GITCO*.h5"
           --include "GIGTO*.h5"
+          --include "GMTCO*.h5"
           --include "GMODO*.h5"
 
   build:
     commands:
       - echo "Running NASA visualization pipeline..."
-      - python3 /opt/scripts/visualize_nasa.py
-          --input-dir /tmp/input/chunks
+      - python3 /opt/scripts/viirs/visualize_nasa.py
+          --input-dir /tmp/input/sdr
           --output-dir /tmp/output
           --contact-id "${CONTACT_ID}"
           --contact-date "${CONTACT_DATE}"
@@ -122,9 +146,12 @@ class VisualizationOrchestrator:
         "viirs_rgb_*.png",
         "viirs_*_Thermal_IR_*.png",
     ]
+    # Satellite token is _j01_ for NOAA-20 and _npp_ for Suomi-NPP; CSPP writes
+    # SVM15 for J01 where older runs wrote SVOM15.
     NASA_PATTERNS = [
-        "SVI0*_npp_*.h5",
-        "SVOM15_npp_*.h5",
+        "SVI0*.h5",
+        "SVM15*.h5",
+        "SVOM15*.h5",
     ]
 
     def __init__(
@@ -183,12 +210,22 @@ class VisualizationOrchestrator:
 
         logger.info("Detected visualization path: %s", path)
 
+        # SatDump-only: the NASA path reads true geolocation out of the GEO
+        # HDF5 (GITCO/GMTCO lat/lon arrays) and needs no acquisition time.
+        contact_time, chunk_duration = (
+            self._lookup_acquisition(bucket, s3_keys)
+            if path == "satdump"
+            else (None, None)
+        )
+
         try:
             build_id = self._submit_codebuild(
                 path=path,
                 contact_id=contact_id,
                 contact_date=contact_date,
                 input_prefix=input_prefix,
+                contact_time=contact_time,
+                chunk_duration=chunk_duration,
             )
         except ClientError as exc:
             logger.error(
@@ -277,6 +314,75 @@ class VisualizationOrchestrator:
         )
 
     # ------------------------------------------------------------------
+    # Acquisition time
+    # ------------------------------------------------------------------
+
+    # contacts/<date>/<id>/satdump/chunk_<N>/dataset.json
+    _DATASET_KEY_RE = re.compile(r"/satdump/chunk_(\d+)/dataset\.json$")
+
+    def _read_chunk_timestamp(self, bucket: str, key: str) -> Optional[datetime]:
+        """Return the acquisition time recorded in one chunk's dataset.json."""
+        try:
+            body = self._s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+            timestamp = json.loads(body)["timestamp"]
+            return datetime.fromtimestamp(float(timestamp), tz=timezone.utc)
+        except (ClientError, KeyError, ValueError, TypeError) as exc:
+            logger.warning("Could not read acquisition time from %s: %s", key, exc)
+            return None
+
+    def _lookup_acquisition(
+        self, bucket: str, s3_keys: list[str]
+    ) -> tuple[Optional[str], Optional[float]]:
+        """Return ("HH:MM:SS" UTC, chunk duration in seconds), either may be None.
+
+        SatDump's product.cbor carries no timestamp, so visualize_satdump.py
+        would otherwise fall back to midnight on --contact-date and propagate
+        the TLE to the wrong point in the orbit -- a whole-continent error.
+        SatDump does record the acquisition time per chunk in dataset.json.
+
+        The lowest-numbered chunk is used, matching the buildspec's staging
+        rule (lowest chunk wins each composite filename). The gap to the next
+        chunk is the downlink cadence, which is also the along-track duration
+        one composite covers -- the TLE propagation window. Measuring it beats
+        assuming 30 s, and beats the 10 min whole-pass default that overstates
+        a composite's box roughly twentyfold.
+
+        Either value is None when it cannot be established; the corresponding
+        flag is then left off the command line rather than passed wrong.
+        """
+        chunks: list[tuple[int, str]] = []
+        for key in s3_keys:
+            match = self._DATASET_KEY_RE.search(key)
+            if match:
+                chunks.append((int(match.group(1)), key))
+        if not chunks:
+            logger.warning("No satdump chunk dataset.json found -- no acquisition time")
+            return None, None
+
+        chunks.sort()
+        first = self._read_chunk_timestamp(bucket, chunks[0][1])
+        if first is None:
+            return None, None
+
+        duration: Optional[float] = None
+        if len(chunks) > 1:
+            second = self._read_chunk_timestamp(bucket, chunks[1][1])
+            if second is not None:
+                gap = (second - first).total_seconds()
+                # Guard against out-of-order or duplicated chunk timestamps.
+                if 0 < gap <= 600:
+                    duration = gap
+                else:
+                    logger.warning("Implausible chunk cadence %.1f s -- ignoring", gap)
+
+        logger.info(
+            "Acquisition %s from %s, chunk cadence %s",
+            first.isoformat(), chunks[0][1],
+            f"{duration:.1f}s" if duration else "unknown",
+        )
+        return first.strftime("%H:%M:%S"), duration
+
+    # ------------------------------------------------------------------
     # CodeBuild submission
     # ------------------------------------------------------------------
 
@@ -286,6 +392,8 @@ class VisualizationOrchestrator:
         contact_id: str,
         contact_date: str,
         input_prefix: str,
+        contact_time: Optional[str] = None,
+        chunk_duration: Optional[float] = None,
     ) -> str:
         """Start a CodeBuild build for the detected path.
 
@@ -293,10 +401,32 @@ class VisualizationOrchestrator:
         """
         buildspec = SATDUMP_BUILDSPEC if path == "satdump" else NASA_BUILDSPEC
 
+        # The flag is omitted entirely when the acquisition time is unknown:
+        # an empty --contact-time fails to parse and would leave the run worse
+        # off than the date-only fallback.
+        buildspec = buildspec.replace(
+            "__CONTACT_TIME_ARG__",
+            f'\n          --contact-time "{contact_time}"' if contact_time else "",
+        )
+        # Likewise the propagation window: without a measured cadence the
+        # script keeps its own default rather than being handed a guess.
+        buildspec = buildspec.replace(
+            "__PASS_DURATION_ARG__",
+            f'\n          --pass-duration-seconds "{chunk_duration:.0f}"'
+            if chunk_duration
+            else "",
+        )
+
         env_overrides = [
             {"name": "INPUT_PREFIX", "value": input_prefix, "type": "PLAINTEXT"},
             {"name": "CONTACT_ID", "value": contact_id, "type": "PLAINTEXT"},
             {"name": "CONTACT_DATE", "value": contact_date, "type": "PLAINTEXT"},
+            {"name": "CONTACT_TIME", "value": contact_time or "", "type": "PLAINTEXT"},
+            {
+                "name": "CHUNK_DURATION_S",
+                "value": f"{chunk_duration:.0f}" if chunk_duration else "",
+                "type": "PLAINTEXT",
+            },
             {"name": "VIZ_PATH", "value": path, "type": "PLAINTEXT"},
             {"name": "ENABLE_GEOTIFF", "value": self._enable_geotiff, "type": "PLAINTEXT"},
         ]

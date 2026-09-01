@@ -17,7 +17,7 @@ import math
 import os
 import urllib.request
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .models import BoundingBox, CBORMetadata
@@ -75,6 +75,7 @@ class BBoxCalculator:
         self,
         cbor_meta: CBORMetadata,
         folder: Path,
+        duration_seconds: float | None = None,
     ) -> BoundingBox:
         """Return a BoundingBox using the highest-priority available source.
 
@@ -90,6 +91,12 @@ class BBoxCalculator:
             Metadata extracted from the SatDump product.cbor file.
         folder:
             Directory to scan for *.georef files (source 2).
+        duration_seconds:
+            Along-track window to propagate for source 4, in seconds. Defaults
+            to PASS_DURATION_MINUTES. Pass the duration the image actually
+            covers -- a SatDump composite spans one chunk (~30 s), and
+            propagating a whole 10 min pass for it overstates the box roughly
+            twentyfold.
 
         Raises NoBBoxSourceError if none of the four sources can produce a result.
         """
@@ -118,7 +125,7 @@ class BBoxCalculator:
         # 4. TLE propagation
         if cbor_meta.timestamp is not None:
             try:
-                return self._from_tle(cbor_meta.timestamp)
+                return self._from_tle(cbor_meta.timestamp, duration_seconds)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to compute bbox from TLE: %s", exc)
 
@@ -309,14 +316,19 @@ class BBoxCalculator:
     # Source 3: TLE + sgp4 propagation
     # ------------------------------------------------------------------
 
-    def _from_tle(self, timestamp: datetime) -> BoundingBox:
+    def _from_tle(
+        self,
+        timestamp: datetime,
+        duration_seconds: float | None = None,
+    ) -> BoundingBox:
         """Propagate NOAA-20 orbit via sgp4 and return a swath bounding box.
 
         Steps:
           1. Fetch TLE from CelesTrak (fall back to env var TLE_FALLBACK or
              the embedded TLE if the fetch fails).
           2. Parse with sgp4.api.Satrec.
-          3. Propagate every 30 s over PASS_DURATION_MINUTES.
+          3. Propagate every 30 s over *duration_seconds* (default
+             PASS_DURATION_MINUTES).
           4. Convert ECI → geodetic (lat/lon).
           5. Compute nadir bbox from ground track min/max.
           6. Extend lat/lon by the VIIRS cross-track swath width.
@@ -351,18 +363,25 @@ class BBoxCalculator:
         lats: list[float] = []
         lons: list[float] = []
 
-        step_seconds = 30
-        n_steps = (PASS_DURATION_MINUTES * 60) // step_seconds + 1
+        window = (
+            float(duration_seconds)
+            if duration_seconds and duration_seconds > 0
+            else PASS_DURATION_MINUTES * 60
+        )
+        # At least two points, so a sub-step window still yields a ground track.
+        step_seconds = min(30, window / 2)
+        n_steps = int(window // step_seconds) + 1
+        logger.info(
+            "TLE propagation window: %.0f s from %s (%d steps)",
+            window, timestamp.isoformat(), n_steps,
+        )
 
         for i in range(n_steps):
-            t = ts_utc.replace(
-                second=(ts_utc.second + i * step_seconds) % 60,
-                minute=ts_utc.minute
-                + (ts_utc.second + i * step_seconds) // 60,
-            )
-            # Recompute properly to avoid minute/hour overflow
-            from datetime import timedelta
-
+            # timedelta carries seconds into minutes, minutes into hours and
+            # across a day boundary. An earlier .replace(second=..., minute=...)
+            # here raised "minute must be in 0..59" the moment the seconds
+            # carried -- unreachable while the ephemeris path won, and fatal as
+            # soon as --contact-time forced this branch.
             t = ts_utc + timedelta(seconds=i * step_seconds)
 
             jd, fr = jday(

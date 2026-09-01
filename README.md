@@ -29,6 +29,7 @@ end-to-end sequence with real timings, and the constraints that shaped the desig
 | [`lambdas/`](lambdas/) | Lambda handlers (scheduler, aggregation trigger, VIIRS orchestrator) |
 | [`articles/`](articles/) | Write-ups of the project, with their own `awsdac` figures |
 | [`tests/`](tests/) | pytest suite |
+| `output/` | **Local, gitignored.** Working copies of pass products, one folder per contact — see [Collecting a pass locally](#collecting-a-pass-locally) |
 | `.kiro/specs/` | Design specs and task lists per subsystem |
 
 ## Documentation
@@ -80,6 +81,64 @@ execution short-circuits to `AlreadyProcessing`:
 aws s3api delete-object --bucket groundstation-noaa20-sdr-output-471112743408 \
   --key "contacts/<contact_id>/.processing"
 ```
+
+A `SUCCEEDED` execution is **not** proof that imagery exists: `StartVisualization`
+catches to success on purpose, so the science products in S3 survive a rendering
+failure. Check the products prefix, not the execution status:
+
+```bash
+aws s3 ls "s3://groundstation-noaa20-sdr-output-471112743408/products/<YYYY/MM/DD>/<contact_id>/"
+```
+
+Expect three composites (True Color, Thermal IR, Day Microphysics), each as PNG +
+GeoTIFF + JSON sidecar. An empty prefix means visualization failed — the state
+machine will not tell you.
+
+### Collecting a pass locally
+
+`output/` is the local working copy of what a pass produced. It is gitignored: S3
+stays the source of truth, and nothing in it is needed to run the pipeline. It exists
+so composites can be looked at, compared between passes, and pulled into articles.
+
+One folder per contact, `contact-NN_<ground-station>_<YYYY-MM-DD>/`:
+
+| Sub-folder | Contents |
+|---|---|
+| `VIIRS/` | SatDump VIIRS composites, from `chunk_0` unless noted |
+| `VIIRS-DNB/` | SatDump day/night band composites |
+| `ATMS/` | SatDump ATMS composites |
+| `NASA-SDR/` | products rendered from CSPP SDR/GEO HDF5 |
+| `products/` | products rendered by the pipeline's visualization stage |
+| `dataset.json` | SatDump dataset descriptor for the chunk that was pulled |
+
+A contact only has the folders it produced. After a pass completes and the
+visualization build succeeds:
+
+```bash
+BUCKET=groundstation-noaa20-sdr-output-471112743408
+CONTACT=<contact_id>; DATE=<YYYY/MM/DD>          # e.g. 2026/08/31
+DEST=output/contact-<NN>_<station>_<YYYY-MM-DD>  # e.g. contact-05_stockholm-1_2026-08-31
+
+mkdir -p "$DEST"
+
+# Composites. chunk_0 is the first 30 s after AOS, so for a target at the southern
+# edge of reach (the Mediterranean from Stockholm) it is the chunk holding it.
+# Use a later chunk if the area of interest is later in the pass.
+aws s3 sync "s3://$BUCKET/contacts/$DATE/$CONTACT/satdump/chunk_0/VIIRS/"     "$DEST/VIIRS/"
+aws s3 sync "s3://$BUCKET/contacts/$DATE/$CONTACT/satdump/chunk_0/VIIRS-DNB/" "$DEST/VIIRS-DNB/"
+aws s3 cp   "s3://$BUCKET/contacts/$DATE/$CONTACT/satdump/chunk_0/dataset.json" "$DEST/dataset.json"
+
+# Rendered products (PNG + GeoTIFF + JSON sidecar).
+aws s3 sync "s3://$BUCKET/products/$DATE/$CONTACT/" "$DEST/products/"
+```
+
+Do **not** sync `satdump/` wholesale — a contact holds ~9,000 PNGs across every
+instrument and all 22 chunks, ~4 GB. Nor `sdr/`/`rdr/`: those are multi-GB HDF5 and
+belong in S3.
+
+Record two things in [`docs/CONTACTS.md`](docs/CONTACTS.md) while the pass is fresh:
+which chunk the composites came from, and whether the JSON sidecars' `bounding_box`
+is plausible for the pass geometry.
 
 ## Vendor software (not redistributable)
 

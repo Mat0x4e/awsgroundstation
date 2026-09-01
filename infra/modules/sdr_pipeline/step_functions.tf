@@ -518,7 +518,7 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
           {
             Variable     = "$.aggregation_poll.build_status"
             StringEquals = "SUCCEEDED"
-            Next         = "PipelineSucceeded"
+            Next         = "StartVisualization"
           }
         ]
         Default = "MarkAggregationFailed"
@@ -537,13 +537,59 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
         ResultPath = "$.error"
         Next       = "AggregationFailure"
       }
-      # ── 7. PipelineSucceeded ───────────────────────────────────────────────
+      # ── 7. StartVisualization ──────────────────────────────────────────────
+      # Tell the orchestrator which contact just completed, rather than letting
+      # it discover work from S3 object events.
+      #
+      # It used to be triggered by an EventBridge rule matching every .png in the
+      # output bucket. A contact writes ~9,150 objects, most of them composites,
+      # so switching that bucket to EventBridge produced ~6,000 CodeBuild builds
+      # in a morning and exhausted the account build queue (2026-09-01). The
+      # orchestrator only ever needed the contact id and date: it lists the whole
+      # prefix itself and submits one build.
+      #
+      # The key does not need to exist -- the handler parses contact_id and
+      # contact_date out of it and then lists the prefix.
+      #
+      # Best effort: the science products are already in S3 by this point, so a
+      # visualization failure must not mark the pipeline failed.
+      StartVisualization = {
+        Type     = "Task"
+        Comment  = "Invoke the VIIRS visualization orchestrator for this contact"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = "arn:aws:lambda:${data.aws_region.current.id}:${var.account_id}:function:${var.project_name}-viirs-orchestrator"
+          Payload = {
+            "bucket" = aws_s3_bucket.sdr_output.id
+            "key.$"  = "States.Format('contacts/{}/{}/manifest.json', $.contact_date, $.contact_id)"
+          }
+        }
+        ResultPath = "$.visualization"
+        Retry = [
+          {
+            ErrorEquals     = ["Lambda.TooManyRequestsException", "Lambda.ServiceException"]
+            IntervalSeconds = 5
+            MaxAttempts     = 2
+            BackoffRate     = 2.0
+          }
+        ]
+        Catch = [
+          {
+            ErrorEquals = ["States.ALL"]
+            Next        = "PipelineSucceeded"
+            ResultPath  = "$.visualization_error"
+          }
+        ]
+        Next = "PipelineSucceeded"
+      }
+
+      # ── 8. PipelineSucceeded ───────────────────────────────────────────────
       PipelineSucceeded = {
         Type    = "Succeed"
         Comment = "All chunks processed and aggregation complete"
       }
 
-      # ── 8. AggregationFailure ──────────────────────────────────────────────
+      # ── 9. AggregationFailure ──────────────────────────────────────────────
       AggregationFailure = {
         Type     = "Task"
         Comment  = "Publish aggregation failure to SNS and fail the execution"

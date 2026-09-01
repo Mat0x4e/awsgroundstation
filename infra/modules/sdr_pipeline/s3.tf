@@ -207,19 +207,15 @@ resource "aws_s3_bucket_policy" "sdr_output" {
 }
 
 # ---------------------------------------------------------------------------
-# SDR output bucket -> EventBridge
+# SDR output bucket -- deliberately NO EventBridge notification.
 #
-# modules/viirs_visualization/eventbridge.tf notes that this bucket "must have
-# EventBridge notifications enabled ... owned by the sdr_pipeline module", but
-# nothing ever set it, so groundstation-noaa20-viirs-trigger could never fire
-# and no visualization products were produced.
+# It had eventbridge = true briefly on 2026-09-01. The viirs_visualization rule
+# matched every .png in this bucket, each chunk build writes hundreds of SatDump
+# composites, and the result was ~6,000 CodeBuild builds in one morning -- enough
+# to exhaust the account build queue and starve this pipeline's own aggregation
+# build. Visualization is now invoked directly by the state machine
+# (StartVisualization), so nothing needs S3 events from this bucket.
 #
-# As with the reception bucket, S3 permits one notification configuration per
-# bucket: keep this the single owner and add blocks here rather than declaring
-# aws_s3_bucket_notification for this bucket in another module.
+# Before re-enabling: make sure the consuming rule keys on an object that is
+# written exactly ONCE per contact. Nothing here is, today.
 # ---------------------------------------------------------------------------
-resource "aws_s3_bucket_notification" "sdr_output" {
-  bucket = aws_s3_bucket.sdr_output.id
-
-  eventbridge = true
-}

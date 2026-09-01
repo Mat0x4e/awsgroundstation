@@ -207,6 +207,17 @@ resource "aws_iam_role_policy" "sfn" {
         Action   = ["s3:ListBucket"]
         Resource = "arn:aws:s3:::${var.input_bucket_name}"
       },
+
+      # StartVisualization invokes the VIIRS orchestrator once aggregation
+      # succeeds. The ARN is built by convention rather than referenced:
+      # modules/viirs_visualization already consumes this module's outputs, so a
+      # reference back would be a circular module dependency.
+      {
+        Sid      = "InvokeVisualizationOrchestrator"
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction"]
+        Resource = "arn:aws:lambda:${data.aws_region.current.id}:${var.account_id}:function:${var.project_name}-viirs-orchestrator"
+      },
       # SNS — publish pipeline completion / failure notifications
       {
         Sid      = "SNSPublish"

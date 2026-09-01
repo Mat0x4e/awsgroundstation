@@ -232,13 +232,26 @@ Day Microphysics, each PNG + GeoTIFF + JSON. They exist only from 2026-09-01: th
 visualisation stage had never once succeeded, and the state machine's catch-to-success hid
 it (see [ARCHITECTURE.md](ARCHITECTURE.md)).
 
-**Georeferencing on the SatDump path is not trustworthy yet.** `product.cbor` carries no
-timestamp, so bbox resolution fell back to midnight on the contact date and the sidecar
-claimed lon 29.5–52.1°E (the Caspian) for a scene that is obviously the central
-Mediterranean; the coastline overlay sits ~20° off the land. The acquisition time is
-available — `satdump/chunk_N/dataset.json` records it, 11:59:57 UTC for `chunk_0`, eight
-seconds after AOS — and is now passed through as `--contact-time`. The imagery is sound; the
-geolocation metadata should not be quoted until a run confirms it.
+**Georeferencing on the SatDump path is better but still not quotable.** `product.cbor`
+carries no timestamp, so bbox resolution fell back to midnight on the contact date and the
+sidecar claimed lon 29.5–52.1°E (the Caspian) for a scene that is obviously the central
+Mediterranean. The acquisition time is available — `satdump/chunk_N/dataset.json` records it,
+11:59:57 UTC for `chunk_0`, eight seconds after AOS — and the orchestrator now passes it as
+`--contact-time`, along with `--pass-duration-seconds` measured from the gap to `chunk_1`
+(29 s on this contact). Re-rendered 2026-09-01 17:25:
+
+| | Before | After |
+|---|---|---|
+| `datetime_utc` | `2026-08-31T00:00:00Z` | `2026-08-31T11:59:57Z` |
+| Bounding box | lat 28.7–52.6, lon 29.5–52.1 (Caspian) | lat 29.5–53.2, lon 3.4–26.0 (Europe) |
+
+The swath geometry was then corrected too (same day): the cross-track extension is now a
+ground arc rather than a flat tangent — 1,494 km against 1,222 km for VIIRS, matching the
+documented ~3,000 km swath — and it is split between latitude and longitude by the ground
+track's bearing instead of being added to both, with longitude scaled by cos(lat). For this
+contact the footprint goes from 23.7° × 22.6° (2,632 × 1,866 km) to 8.5° × 35.2°
+(941 × 2,930 km), against a true footprint of about 3,000 km cross-track by 200 km
+along-track. Both the ephemeris and TLE sources share the corrected helper.
 
 ### Expected Coverage
 
@@ -269,7 +282,9 @@ not a pipeline regression.
 - [ ] Verify .pcap arrival after 14:12 CEST
 - [x] Run SDR pipeline with the working CSPP recipe ([DEPLOYMENT.md](DEPLOYMENT.md)) — **done 2026-09-01**, rehearsal 3, 22/22 chunks
 - [x] Produce composites — **done 2026-09-01**, 3 products after fixing the visualisation orchestrator
-- [ ] Confirm the `--contact-time` geolocation fix on a rebuilt image, then re-check the sidecar bbox
+- [x] Confirm the `--contact-time` geolocation fix on a rebuilt image — **done 2026-09-01**, bbox moved from the Caspian to Europe
+- [x] Fix the cross-track extension in `_from_tle` — **done 2026-09-01**, spherical arc + bearing split
+- [ ] Re-render contact #5 on the rebuilt image and check the overlay against the coastlines
 - [x] Fix `SVOM15`/`GMODO`/`GIGTO` constants in `scripts/viirs/` before the NASA path — **done 2026-08-27**, verified against contact #3's real `GMTCO`/`GITCO`
 - [ ] True-colour composite + I-band (375 m) look at the Adriatic/Naples area
 

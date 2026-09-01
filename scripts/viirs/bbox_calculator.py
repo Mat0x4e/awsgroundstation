@@ -19,6 +19,7 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 from .models import BoundingBox, CBORMetadata
 
@@ -206,25 +207,17 @@ class BBoxCalculator:
 
         nadir_bbox = _make_bbox(lats, lons)
 
-        # Extend lat AND lon by the physical cross-track half-swath
         mean_altitude = sum(altitudes) / len(altitudes) if altitudes else SATELLITE_ALTITUDE_KM
-        half_angle_rad = math.radians(scan_angle / 2.0)
-        cross_track_km = mean_altitude * math.tan(half_angle_rad)
-        cross_track_deg = cross_track_km / 111.0
 
         logger.debug(
-            "_from_ephemeris: mean_alt=%.1f km cross_track=%.1f km (%.3f°) "
-            "nadir=[%.3f,%.3f]×[%.3f,%.3f]",
-            mean_altitude, cross_track_km, cross_track_deg,
+            "_from_ephemeris: mean_alt=%.1f km nadir=[%.3f,%.3f]x[%.3f,%.3f]",
+            mean_altitude,
             nadir_bbox.lat_min, nadir_bbox.lat_max,
             nadir_bbox.lon_min, nadir_bbox.lon_max,
         )
 
-        return BoundingBox(
-            lat_min=max(-90.0, nadir_bbox.lat_min - cross_track_deg),
-            lat_max=min(90.0, nadir_bbox.lat_max + cross_track_deg),
-            lon_min=max(-180.0, nadir_bbox.lon_min - cross_track_deg),
-            lon_max=min(180.0, nadir_bbox.lon_max + cross_track_deg),
+        return _extend_by_swath(
+            nadir_bbox, lats, lons, mean_altitude, scan_angle / 2.0
         )
 
     # ------------------------------------------------------------------
@@ -331,7 +324,8 @@ class BBoxCalculator:
              PASS_DURATION_MINUTES).
           4. Convert ECI → geodetic (lat/lon).
           5. Compute nadir bbox from ground track min/max.
-          6. Extend lat/lon by the VIIRS cross-track swath width.
+          6. Extend the ground track into the swath footprint, split
+             between lat and lon by the track's bearing.
           7. Clamp to valid WGS84 ranges and return.
         """
         tle_text = self._fetch_tle()
@@ -403,17 +397,13 @@ class BBoxCalculator:
         # Nadir bbox
         nadir_bbox = _make_bbox(lats, lons)
 
-        # Cross-track extension
-        cross_track_km = SATELLITE_ALTITUDE_KM * math.tan(
-            math.radians(VIIRS_CROSS_TRACK_ANGLE_DEG)
-        )
-        cross_track_deg = cross_track_km / 111.0  # ~111 km/degree
-
-        return BoundingBox(
-            lat_min=max(-90.0, nadir_bbox.lat_min - cross_track_deg),
-            lat_max=min(90.0, nadir_bbox.lat_max + cross_track_deg),
-            lon_min=max(-180.0, nadir_bbox.lon_min - cross_track_deg),
-            lon_max=min(180.0, nadir_bbox.lon_max + cross_track_deg),
+        return _extend_by_swath(
+            nadir_bbox,
+            lats,
+            lons,
+            SATELLITE_ALTITUDE_KM,
+            VIIRS_CROSS_TRACK_ANGLE_DEG,
+            inclination_rad=getattr(satellite, "inclo", None),
         )
 
     # ------------------------------------------------------------------
@@ -450,6 +440,107 @@ class BBoxCalculator:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+KM_PER_DEG_LAT = 111.32
+
+
+def _swath_half_width_km(altitude_km: float, nadir_half_angle_deg: float) -> float:
+    """Ground-arc half-width of a swath scanned to *nadir_half_angle_deg*.
+
+    Spherical, not flat. The tangent-plane form ``h * tan(eta)`` understates
+    the arc badly at wide scan angles: for VIIRS (eta 56 deg, h 824 km) it
+    gives 1221 km where the true ground arc is ~1500 km -- the documented
+    ~3000 km swath.
+
+    From the sensor at radius R+h, a ray at nadir angle *eta* meets the ground
+    at elevation *eps*, where ``sin(eta) = (R / (R+h)) * cos(eps)``. The Earth
+    central angle is then ``90 - eta - eps``, and the ground arc is R times it.
+    """
+    eta = math.radians(nadir_half_angle_deg)
+    horizon = math.acos(EARTH_RADIUS_KM / (EARTH_RADIUS_KM + altitude_km))
+
+    cos_eps = math.sin(eta) * (EARTH_RADIUS_KM + altitude_km) / EARTH_RADIUS_KM
+    if cos_eps >= 1.0:
+        # The scan angle reaches past the limb; the horizon arc is the cap.
+        return EARTH_RADIUS_KM * horizon
+
+    central_angle = math.pi / 2.0 - eta - math.acos(cos_eps)
+    return EARTH_RADIUS_KM * max(0.0, min(central_angle, horizon))
+
+
+def _track_bearing_rad(lats: list[float], lons: list[float]) -> Optional[float]:
+    """Bearing of the ground track from north, or None if it cannot be read.
+
+    Two distinct points are enough. Longitude differences are scaled by
+    cos(lat) so the bearing is measured on the ground, not in degree space.
+    """
+    for lat2, lon2 in zip(reversed(lats), reversed(lons)):
+        if (lat2, lon2) != (lats[0], lons[0]):
+            mean_lat = math.radians((lats[0] + lat2) / 2.0)
+            dlon = (lon2 - lons[0] + 540.0) % 360.0 - 180.0  # shortest way round
+            return math.atan2(dlon * math.cos(mean_lat), lat2 - lats[0])
+    return None
+
+
+def _extend_by_swath(
+    nadir: BoundingBox,
+    lats: list[float],
+    lons: list[float],
+    altitude_km: float,
+    nadir_half_angle_deg: float,
+    inclination_rad: Optional[float] = None,
+) -> BoundingBox:
+    """Widen a nadir ground track into the swath footprint it images.
+
+    The swath is perpendicular to the ground track, so how it splits between
+    latitude and longitude depends on the track's bearing. A sun-synchronous
+    track is near-polar but not vertical -- about 12 deg off the meridian at
+    mid-latitudes -- so the swath spills mostly into longitude and only a
+    little into latitude. Extending both by the same number of degrees, as
+    this used to, overstates latitude several-fold and understates longitude
+    everywhere off the equator, where a degree of longitude is shorter than a
+    degree of latitude.
+    """
+    half_km = _swath_half_width_km(altitude_km, nadir_half_angle_deg)
+    mean_lat = (nadir.lat_min + nadir.lat_max) / 2.0
+
+    bearing = _track_bearing_rad(lats, lons)
+    if bearing is None and inclination_rad is not None:
+        # Single position: fall back on the orbit. For a circular orbit,
+        # sin(bearing) = cos(inclination) / cos(latitude).
+        cos_lat = max(1e-6, math.cos(math.radians(mean_lat)))
+        bearing = math.asin(
+            max(-1.0, min(1.0, math.cos(inclination_rad) / cos_lat))
+        )
+    if bearing is None:
+        bearing = 0.0  # assume a due-north track: all swath in longitude
+
+    lat_ext_deg = abs(half_km * math.sin(bearing)) / KM_PER_DEG_LAT
+
+    # Over a pole every meridian is in view, and a one-sided extension would
+    # still leave a wedge uncovered once clamped -- take the whole range.
+    cos_lat = math.cos(math.radians(mean_lat))
+    over_the_pole = cos_lat < 0.02
+    lon_ext_deg = (
+        180.0
+        if over_the_pole
+        else abs(half_km * math.cos(bearing)) / (KM_PER_DEG_LAT * cos_lat)
+    )
+
+    logger.debug(
+        "swath extension: half=%.0f km bearing=%.1f deg -> lat +/-%.2f deg, lon +/-%.2f deg",
+        half_km, math.degrees(bearing), lat_ext_deg, lon_ext_deg,
+    )
+
+    # Note: a box crossing the antimeridian cannot be expressed this way and
+    # is clamped, same as before.
+    return BoundingBox(
+        lat_min=max(-90.0, nadir.lat_min - lat_ext_deg),
+        lat_max=min(90.0, nadir.lat_max + lat_ext_deg),
+        lon_min=-180.0 if over_the_pole else max(-180.0, nadir.lon_min - lon_ext_deg),
+        lon_max=180.0 if over_the_pole else min(180.0, nadir.lon_max + lon_ext_deg),
+    )
 
 
 def _make_bbox(lats: list[float], lons: list[float]) -> BoundingBox:

@@ -1,7 +1,7 @@
 data "archive_file" "contact_scheduler" {
   type        = "zip"
-  source_file = "${path.module}/../../lambdas/contact_scheduler/handler.py"
-  output_path = "${path.module}/../../.build/contact_scheduler.zip"
+  source_file = "${path.module}/../../../lambdas/contact_scheduler/handler.py"
+  output_path = "${path.module}/../../../.build/contact_scheduler.zip"
 }
 
 resource "aws_lambda_function" "contact_scheduler" {

@@ -1,46 +1,80 @@
-# Getting Labelled Earth Images from Space — Part 2: The NASA Software Stack, Capabilities and Limits
+# Getting Labelled Earth Images from Space — Part 2: What the NASA Stack Adds
 
-[Part 1](./article-1-cloud-opensource.md) described a cloud-based pipeline that turns raw NOAA-20 radio signals into VIIRS imagery using AWS Ground Station and SatDump, with one limit: map overlays land 100–300 km from the actual terrain. This article covers the standard remedy — NASA's direct-broadcast processing software — what it adds, and what it requires to operate.
+[Part 1](./article-1-cloud-opensource.md) built a cloud pipeline that turns raw NOAA-20 radio signals into VIIRS imagery for about $160 a pass, with one limit: map overlays landed 100–300 km from the terrain, because the composites carry no per-pixel coordinates.
 
-## The target: per-pixel geolocation
+This part closes that gap with the software the agencies use themselves. The result, from the same 13-minute pass:
 
-Government agencies process this downlink with a well-defined chain:
+![Contact #2 true colour with coastline overlay](../output/contact-02_ohio-1_2026-06-23/NASA-SDR/noaa20_viirs_truecolor_overlay_contact02.png)
 
-- **RT-STPS** (Real-Time Software Telemetry Processing System, NASA) ingests CADU frames and produces Level 0 *RDR* files — raw instrument science data in HDF5.
-- **CSPP SDR** (Community Satellite Processing Package, University of Wisconsin/CIMSS) turns RDRs into Level 1 *SDR* products: calibrated radiances, plus GEO files containing terrain-corrected latitude and longitude for every pixel, at sub-kilometre accuracy.
+Hudson Bay, the Great Lakes, Florida, Cuba and the Bahamas, each sitting on its own coastline. Same antenna, same $130 of downlink, same zero licence fees — the error went from 100–300 km to **sub-kilometre**.
 
-Both packages are free to download. Both were designed for a long-lived Linux workstation rather than an ephemeral cloud container — a design assumption that determines most of what follows.
+## Two chains, two file trails
 
-## RT-STPS: three configuration issues
+Both pipelines share a front end: the clean CADU frames that [Part 1](./article-1-cloud-opensource.md)'s SatDump step produces. From there they diverge, and the divergence is entirely about what each file format carries.
 
-Both packages were added to the pipeline's Docker image, with RT-STPS fed the CADU frames produced by SatDump. Getting from installed to working required resolving three issues.
+```mermaid
+flowchart TD
+    PCAP[".pcap — VITA-49 DigIF<br/>raw digitized RF · ~58 GB / pass"]
+    CS8[".cs8 — raw I/Q<br/>headerless complex int8"]
+    CADU[".cadu — clean CCSDS frames"]
+    PCAP -->|"de-encapsulation"| CS8
+    CS8 -->|"SatDump: QPSK + Viterbi + Reed-Solomon"| CADU
 
-**1. Spacecraft configuration.** RT-STPS ships one configuration file per satellite. `npp.xml` is for Suomi-NPP, NOAA-20's predecessor; NOAA-20 (JPSS-1) requires `jpss1.xml`. With the wrong file, RT-STPS produces no output and no error message.
-
-**2. Insufficient data per chunk.** Each pipeline container processes one 30-second chunk, but a VIIRS granule requires about 85 seconds of data, so RT-STPS produced nothing per chunk. This changed the architecture: every container uploads its CADU to S3, and a final aggregation step concatenates all chunks (25 in the run used here) into a single 1.3 GB stream before running RT-STPS once.
-
-**3. PN encoding mismatch.** Satellite downlinks are scrambled with a pseudo-noise (PN) sequence, and RT-STPS's default configuration removes it. SatDump, however, had already removed it during demodulation. RT-STPS therefore XORed clean frames with the PN sequence — corrupting them — after which every Reed-Solomon check failed and all 54,868 frames were discarded, without any error message. Frame inspection confirmed the input was valid: correct sync marker `1A CF FC 1D`, correct spacecraft ID 159, correct VIIRS virtual channel. The fix is two changes in the XML configuration: `PnEncoded="false"` and removing the `pn` node from the processing chain.
-
-With these three fixes in place, RT-STPS processed a full pass into five RDR files — 344 MB of VIIRS, plus CrIS, ATMS and two OMPS instruments. Level 0 was operational.
-
-## CSPP SDR: the blocking issue
-
-CSPP SDR — the 845 MB package that provides the per-pixel geolocation — found the RDRs and started, then stopped at its installation check: missing NOAA-20 support files. Two supplementary tarballs (stray-light correction LUTs and static terrain tiles) resolved that.
-
-The next error was of a different kind:
-
+    subgraph OS["Open-source path — Part 1"]
+      PNG["composite PNG<br/>display image · pixels only<br/>coordinates estimated from orbit<br/>→ 100–300 km error"]
+    end
+    subgraph NASA["NASA path — Part 2"]
+      RDR["RDR HDF5 · Level 0<br/>raw counts, per instrument"]
+      SDR["SDR + GEO HDF5 · Level 1<br/>radiances + per-pixel lat/lon"]
+      TIF["GeoTIFF<br/>georeferenced raster → sub-km"]
+      RDR -->|"CSPP SDR: calibrate + geolocate"| SDR
+      SDR -->|"project + render"| TIF
+    end
+    CADU -->|"SatDump render"| PNG
+    CADU -->|"RT-STPS: demux + CCSDS reassembly"| RDR
 ```
-ERROR: Installation problem SDR_4_1_DB/package needs to exist
-```
 
-CSPP requires an initialized lookup-table cache database, created by an installation script called `sdr_luts.sh`. That script did not complete inside a Docker build on AWS CodeBuild under any tested variant: different flags, different working directories, execution at build time and at runtime. Increasing the hardware to CodeBuild's largest tier — 72 vCPUs, 145 GB of RAM, 90-minute timeouts — did not change the outcome. Creating the expected directory manually passed the installation check but led to an indefinite hang on `wait for cache db initialization`, as CSPP assumed another process was mid-setup.
+[SatDump](./article-1-cloud-opensource.md) renders CADUs straight to composite PNGs — display images whose pixels are correct but whose coordinates are attached afterwards by propagating the orbit, which is where the 100–300 km error lives. The NASA chain instead keeps the science all the way down: RDRs hold raw counts, SDRs hold calibrated physical radiances, and GEO files hold terrain-corrected latitude and longitude for *every pixel*.
 
-The root cause is architectural rather than a bug: CSPP assumes a persistent machine — state that survives between runs, ancillary data refreshed from the internet, one installation maintained over time. An immutable container rebuilt from scratch violates each of those assumptions.
+## What the official chain produces
 
-## Assessment
+Two free packages do the work:
 
-The NASA stack's capabilities are real: calibrated, science-grade Level 1 products with terrain-corrected coordinates for every pixel — beyond what the open-source path provides. RT-STPS, once its configuration issues are known, runs reliably in a container.
+- **RT-STPS** (NASA) ingests CADU frames and produces Level 0 **RDR** files — raw instrument science data in HDF5.
+- **CSPP SDR** (University of Wisconsin/CIMSS) turns RDRs into Level 1 **SDR** products: calibrated radiances and brightness temperatures, plus **GEO** files carrying terrain-corrected latitude and longitude for *every pixel*.
 
-CSPP SDR, in this cloud-native setting, could not be made to run, and the attempt was eventually abandoned. The requirement it was meant to satisfy — usable per-pixel geolocation — was ultimately met by a capability already present in software the pipeline was running. That is the subject of Part 3.
+That last item is the whole point. Part 1 estimated where the swath probably was; CSPP states where each pixel actually is, corrected for terrain. Calibration matters just as much: [SatDump](./article-1-cloud-opensource.md)'s composites are display images, while SDR radiances are physical quantities you can do science on.
 
-*~700 words*
+![Architecture](diagrams/out/article-2-nasa-stack.png)
+
+## What running them on ephemeral cloud requires
+
+Both packages were written for a long-lived Linux workstation. Running them on ephemeral AWS infrastructure sets five requirements; each has a concrete solution, and with all five met the chain runs deterministically.
+
+**A full granule of contiguous data.** A VIIRS granule needs ~85 seconds of continuous downlink, while the Part 1 pipeline works in 30-second chunks. *Solution:* every container uploads its CADUs to S3, and a separate step concatenates all 27 chunks into one stream, processed once. For contact #2 that produced an **863 MB VIIRS RDR** (plus CrIS, ATMS and two OMPS instruments).
+
+**The NOAA-20 spacecraft configuration.** RT-STPS ships one XML per satellite. *Solution:* select `jpss1.xml` for NOAA-20 (`npp.xml` is Suomi-NPP).
+
+**Frames descrambled exactly once.** Downlinks are scrambled with a pseudo-noise sequence, and SatDump already removes it during demodulation. *Solution:* tell RT-STPS the frames are already clean — `PnEncoded="false"` with the `pn` node dropped — so it does not XOR clean frames back into noise.
+
+**The spacecraft token preserved in the RDR filename.** `viirs_sdr.sh` reads the spacecraft from the `_j01_` token *in the filename*. *Solution:* keep the `RNSCA-RVIRS_j01_….h5` name that RT-STPS emits; the token has to survive to the SDR step intact.
+
+**A network path to the calibration LUT server.** This requirement is about where you run, not how. CSPP populates a calibration lookup-table cache by fetching from `jpssdb.ssec.wisc.edu` at setup time. CodeBuild reaches that host; the EC2 aggregation instance in this account does not. *Solution:* run the CSPP step in CodeBuild — chosen for egress, not compute — where it takes about 14 minutes.
+
+That last requirement is the durable lesson, and it survives the fact that the chain works: software written for a persistent workstation expects state and network access that ephemeral, locked-down cloud compute does not grant by default. Deciding which execution environment holds the network path is an architecture question, not a bug to fix.
+
+## What it's worth
+
+The value is easy to state: the same pass and the same free software, with per-pixel geolocation improved by two to three orders of magnitude — from 100–300 km to sub-kilometre. The cost was entirely engineering time; the compute is ~14 CodeBuild minutes on top of a $160 pass.
+
+## What makes a contact worth processing
+
+The software can only calibrate what the antenna cleanly heard, so a pass's value is decided before any of this code runs. Three conditions separate a contact that yields a full true-colour mosaic from one that yields a single thermal granule:
+
+- **Daylight over the target.** VIIRS's reflective bands — the ones true colour is built from — need sunlight. Contact #2 was a daytime pass and produced **10 fully calibrated granules**; a night pass has no reflective bands at all and gives thermal only. NOAA-20's sun-synchronous orbit crosses its daytime node near 13:25 local solar time, so booking that node is what makes true colour possible in the first place.
+- **High elevation and clean RF.** Calibration is all-or-nothing per granule: a partial granule from RF packet loss cannot be calibrated and is dropped. A high-max-elevation pass keeps the spacecraft above the horizon longer on a stronger link, so more complete granules survive. Contact #3, at night and from a comparable raw RDR, yielded just one usable thermal granule.
+- **A long enough pass to fill granules.** Granules are ~85 seconds each, so short or low passes produce fewer complete ones. The mosaic you can build is capped by how many contiguous granules the pass delivered — by what the antenna heard, not by what the software can do.
+
+---
+
+*Figures: architecture diagram generated with [awslabs/diagram-as-code](https://github.com/awslabs/diagram-as-code) from [`diagrams/article-2-nasa-stack.yaml`](diagrams/article-2-nasa-stack.yaml); the file-transformation diagram renders natively on GitHub/GitLab — export it as an image (e.g. via mermaid.live) before publishing to Medium or dev.to. The full CSPP recipe is in [`docs/CSPP_SOLVED.md`](../CSPP_SOLVED.md).*

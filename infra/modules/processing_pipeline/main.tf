@@ -99,8 +99,8 @@ resource "aws_sqs_queue_policy" "processing" {
 # Lambda function for data processing
 data "archive_file" "data_processor" {
   type        = "zip"
-  source_file = "${path.module}/../../lambdas/data_processor/handler.py"
-  output_path = "${path.module}/../../.build/data_processor.zip"
+  source_file = "${path.module}/../../../lambdas/data_processor/handler.py"
+  output_path = "${path.module}/../../../.build/data_processor.zip"
 }
 
 resource "aws_lambda_function" "data_processor" {

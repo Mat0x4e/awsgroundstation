@@ -14,8 +14,8 @@
 
 data "archive_file" "viirs_orchestrator" {
   type        = "zip"
-  source_dir  = "${path.module}/../../lambdas/viirs_visualizer"
-  output_path = "${path.module}/../../.build/viirs_orchestrator.zip"
+  source_dir  = "${path.module}/../../../lambdas/viirs_visualizer"
+  output_path = "${path.module}/../../../.build/viirs_orchestrator.zip"
 }
 
 # ─────────────────────────────────────────────

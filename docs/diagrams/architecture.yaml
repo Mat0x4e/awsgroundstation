@@ -1,0 +1,293 @@
+Diagram:
+  DefinitionFiles:
+    - Type: URL
+      Url: "https://raw.githubusercontent.com/awslabs/diagram-as-code/main/definitions/definition-for-aws-icons-light.yaml"
+
+  Resources:
+    Canvas:
+      Type: AWS::Diagram::Canvas
+      Direction: vertical
+      Children:
+        - Title
+        - Body
+
+    Title:
+      Type: AWS::Diagram::Resource
+      Title: "protogroundstation - NOAA-20 X-band DigIF to geolocated VIIRS Level 1 - one contact, ~43 GB, ~90 min"
+      Align: center
+
+    Body:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - Unmanaged
+        - AWSCloud
+
+    Unmanaged:
+      Type: AWS::Diagram::VerticalStack
+      Children:
+        - Satellite
+        - Planner
+        - TLE
+        - LUTServer
+
+    Satellite:
+      Type: AWS::Diagram::Resource
+      Preset: "Satellite"
+      Title: "NOAA-20 (43013)"
+      Align: center
+
+    Planner:
+      Type: AWS::Diagram::Resource
+      Preset: "Toolkit"
+      Title: "plan_pass.py"
+      Align: center
+
+    TLE:
+      Type: AWS::Diagram::Resource
+      Preset: "Server"
+      Title: "celestrak.org - TLE"
+      Align: center
+
+    LUTServer:
+      Type: AWS::Diagram::Resource
+      Preset: "Server"
+      Title: "jpssdb.ssec.wisc.edu - CSPP LUTs"
+      Align: center
+
+    AWSCloud:
+      Type: AWS::Diagram::Cloud
+      Preset: AWSCloudNoLogo
+      Direction: vertical
+      Align: center
+      Children:
+        - RegionAntenna
+        - RegionMain
+
+    RegionAntenna:
+      Type: AWS::Region
+      Title: "eu-north-1 / us-east-2 - rented antenna"
+      Children:
+        - GroundStation
+
+    GroundStation:
+      Type: AWS::Diagram::Resource
+      Preset: "AWS Ground Station"
+      Title: "Stockholm 1 / Ohio 1"
+      Align: center
+
+    RegionMain:
+      Type: AWS::Region
+      Title: "eu-central-1 - reception, processing, products"
+      Direction: vertical
+      Children:
+        - RowTrigger
+        - RowChunks
+        - RowProducts
+
+    RowTrigger:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - ReceptionBucket
+        - EventBridge
+        - StepFunctions
+
+    ReceptionBucket:
+      Type: AWS::S3::Bucket
+      Title: "reception - 22 x 2.18 GB .pcap"
+      Align: center
+
+    EventBridge:
+      Type: AWS::Events::Rule
+      Title: "EventBridge - contact COMPLETED"
+      Align: center
+
+    StepFunctions:
+      Type: AWS::StepFunctions
+      Title: "Step Functions"
+      Align: center
+
+    RowChunks:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - ECR
+        - CodeBuildChunks
+        - CodeBuildAgg
+
+    ECR:
+      Type: AWS::ECR
+      Title: "ECR - SatDump, RT-STPS, CSPP"
+      Align: center
+
+    CodeBuildChunks:
+      Type: AWS::CodeBuild::Project
+      Title: "CodeBuild - 22 chunks, 19 parallel"
+      Align: center
+
+    CodeBuildAgg:
+      Type: AWS::CodeBuild::Project
+      Title: "CodeBuild - aggregation"
+      Align: center
+
+    RowProducts:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - OutputBucket
+        - VizLambda
+        - SNS
+
+    OutputBucket:
+      Type: AWS::S3::Bucket
+      Title: "output - cadu, RDR, SDR+GEO"
+      Align: center
+
+    VizLambda:
+      Type: AWS::Lambda::Function
+      Title: "VIIRS visualization"
+      Align: center
+
+    SNS:
+      Type: AWS::SNS::Topic
+      Title: "SNS - failures"
+      Align: center
+
+  Links:
+    - Source: Satellite
+      SourcePosition: NNE
+      Target: GroundStation
+      TargetPosition: WNW
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        AutoLeft:
+          Title: "X-band HRD 15 Mbps"
+
+    - Source: Planner
+      SourcePosition: E
+      Target: GroundStation
+      TargetPosition: SSW
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetLeft:
+          Title: "reserve-contact"
+
+    - Source: TLE
+      SourcePosition: N
+      Target: Planner
+      TargetPosition: S
+      TargetArrowHead:
+        Type: Open
+      Type: orthogonal
+
+    - Source: GroundStation
+      SourcePosition: S
+      Target: ReceptionBucket
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+      Type: orthogonal
+      Labels:
+        AutoRight:
+          Title: "DigIF cross-region"
+
+    - Source: GroundStation
+      SourcePosition: SE
+      Target: EventBridge
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetRight:
+          Title: "contact COMPLETED"
+
+    - Source: EventBridge
+      SourcePosition: E
+      Target: StepFunctions
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: StepFunctions
+      SourcePosition: SW
+      Target: ReceptionBucket
+      TargetPosition: SE
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetLeft:
+          Title: "list chunks"
+
+    - Source: StepFunctions
+      SourcePosition: S
+      Target: CodeBuildChunks
+      TargetPosition: NE
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetRight:
+          Title: "Map fan-out"
+
+    - Source: ECR
+      SourcePosition: E
+      Target: CodeBuildChunks
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: CodeBuildChunks
+      SourcePosition: E
+      Target: CodeBuildAgg
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+
+    - Source: CodeBuildAgg
+      SourcePosition: NE
+      Target: LUTServer
+      TargetPosition: E
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetRight:
+          Title: "sdr_luts.sh"
+
+    - Source: CodeBuildChunks
+      SourcePosition: S
+      Target: OutputBucket
+      TargetPosition: NE
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceLeft:
+          Title: "cadu"
+
+    - Source: CodeBuildAgg
+      SourcePosition: S
+      Target: OutputBucket
+      TargetPosition: E
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetRight:
+          Title: "RDR, SDR, GEO"
+
+    - Source: OutputBucket
+      SourcePosition: E
+      Target: VizLambda
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+
+    - Source: StepFunctions
+      SourcePosition: SE
+      Target: SNS
+      TargetPosition: NE
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetRight:
+          Title: "on failure"

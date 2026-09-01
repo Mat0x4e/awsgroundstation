@@ -55,7 +55,7 @@ processing background — introduce those terms in one line when first used.
   and what it costs / where it stops* — not a debugging diary. Failures appear only
   as short, generalizable lessons (one or two lines), never as the main narrative.
 - **Numbers over adjectives.** Prefer concrete figures (GB, km, minutes, dollars,
-  band names) to qualitative emphasis. Draw pass-specific numbers from CONTACTS.md.
+  band names) to qualitative emphasis. Draw pass-specific numbers from docs/CONTACTS.md.
 - **Honest about limits.** Name what does *not* work or is approximate; don't
   oversell. But frame limits as boundaries of an approach, not as defeat.
 - **Show, then explain.** Diagrams/images carry structure; prose explains the "why".
@@ -88,7 +88,7 @@ renting one by the minute). Where a capability is not worth its price, say so.
 - **CSPP SDR WORKS.** The official NASA path is not a dead end. It produces
   calibrated Level 1 SDR + terrain-corrected per-pixel geolocation (sub-km).
   Root cause of the long struggle was mundane: `viirs_sdr.sh` reads the spacecraft
-  from the RDR **filename** (`_j01_`); renaming the RDR broke it. See CSPP_SOLVED.md.
+  from the RDR **filename** (`_j01_`); renaming the RDR broke it. See docs/CSPP_SOLVED.md.
   → Article 2 must present the NASA stack as **working**, with the difficulties
   compressed to a couple of lines of lessons.
 - **Delivered results to feature:**
@@ -97,7 +97,7 @@ renting one by the minute). Where a capability is not worth its price, say so.
   - contact-03 (night): thermal-IR GeoTIFF, sub-km. Good contrast (night → thermal
     only; daytime → true color).
 - **Featured pass = contact #2** (daytime, true-color-capable). BUT verify its
-  ground station: CONTACTS.md currently says "Hawaii 1 / Pacific", which contradicts
+  ground station: docs/CONTACTS.md currently says "Hawaii 1 / Pacific", which contradicts
   the output dir `contact-02_ohio-1` and the actual imagery (North America → Caribbean:
   Hudson Bay, Great Lakes, Florida, Cuba). Resolve before publishing; the scene is
   **eastern North America to the Caribbean**, not the Pacific.

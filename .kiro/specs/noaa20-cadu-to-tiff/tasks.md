@@ -8,7 +8,7 @@ Automated pipeline converting raw DigIF files (.pcap VITA-49) received via AWS G
 
 - [x] 1. Docker image and ECR repository
   - [x] 1.1 Create ECR repository Terraform module
-    - Create `modules/sdr_pipeline/ecr.tf` with `aws_ecr_repository` resource
+    - Create `infra/modules/sdr_pipeline/ecr.tf` with `aws_ecr_repository` resource
     - Add lifecycle policy (keep last 5 images)
     - Enable image scanning on push
     - Encryption with project KMS CMK
@@ -221,7 +221,7 @@ Automated pipeline converting raw DigIF files (.pcap VITA-49) received via AWS G
 
 - [x] 11. Step Functions state machine (Terraform)
   - [x] 11.1 Create Step Functions state machine Terraform resource
-    - Create `modules/sdr_pipeline/step_functions.tf`
+    - Create `infra/modules/sdr_pipeline/step_functions.tf`
     - Define ASL with states: ListChunks → CheckProcessingMarker → WriteProcessingMarker → Map(ParallelProcessing) → CheckResults → FinalAggregation
     - Map state: concurrency 19, each item starts CodeBuild, waits, checks status
     - Per-chunk retry: 2 attempts with exponential backoff (30s, 60s)
@@ -252,7 +252,7 @@ Automated pipeline converting raw DigIF files (.pcap VITA-49) received via AWS G
 
 - [x] 12. EventBridge rule (Terraform)
   - [x] 12.1 Create EventBridge rule and target
-    - Create `modules/sdr_pipeline/eventbridge.tf`
+    - Create `infra/modules/sdr_pipeline/eventbridge.tf`
     - Rule: source = aws.s3, detail-type = "Object Created", filter on bucket name + .pcap suffix
     - Target: Step Functions state machine ARN
     - Input transformer: extract contact_id from S3 key, pass bucket + key
@@ -262,7 +262,7 @@ Automated pipeline converting raw DigIF files (.pcap VITA-49) received via AWS G
 
 - [x] 13. S3 output bucket, KMS, and IAM roles (Terraform)
   - [x] 13.1 Create S3 output bucket with security configuration
-    - Create `modules/sdr_pipeline/s3.tf`
+    - Create `infra/modules/sdr_pipeline/s3.tf`
     - Bucket: `{project}-sdr-output-{account_id}` with versioning enabled
     - Server-side encryption with project KMS CMK (SSE-KMS)
     - Block all public access
@@ -272,7 +272,7 @@ Automated pipeline converting raw DigIF files (.pcap VITA-49) received via AWS G
     - _Requirements: 8.1, 8.3, 8.4, 8.5_
 
   - [x] 13.2 Create IAM roles with least-privilege policies
-    - Create `modules/sdr_pipeline/iam.tf`
+    - Create `infra/modules/sdr_pipeline/iam.tf`
     - CodeBuild role: read source bucket, write output bucket, KMS encrypt/decrypt, CloudWatch Logs write, CloudWatch metrics put, ECR pull
     - Step Functions role: CodeBuild StartBuild + BatchGetBuilds, S3 read/write for markers, SNS publish
     - EventBridge role: states:StartExecution on the state machine ARN only
@@ -280,7 +280,7 @@ Automated pipeline converting raw DigIF files (.pcap VITA-49) received via AWS G
     - _Requirements: 8.2, 8.6_
 
   - [x] 13.3 Create CodeBuild project resource
-    - Create `modules/sdr_pipeline/codebuild.tf`
+    - Create `infra/modules/sdr_pipeline/codebuild.tf`
     - Project: BUILD_GENERAL1_LARGE compute type
     - Source: buildspec from S3 or inline
     - Environment: LINUX_CONTAINER, Docker image from ECR
@@ -290,16 +290,16 @@ Automated pipeline converting raw DigIF files (.pcap VITA-49) received via AWS G
     - _Requirements: 7.3, 7.4_
 
   - [x] 13.4 Create module entry point and variables
-    - Create `modules/sdr_pipeline/main.tf` (module composition)
-    - Create `modules/sdr_pipeline/variables.tf` (input bucket name, KMS key ARN, SNS topic ARN, project name, account ID)
-    - Create `modules/sdr_pipeline/outputs.tf` (state machine ARN, output bucket name, CodeBuild project name)
+    - Create `infra/modules/sdr_pipeline/main.tf` (module composition)
+    - Create `infra/modules/sdr_pipeline/variables.tf` (input bucket name, KMS key ARN, SNS topic ARN, project name, account ID)
+    - Create `infra/modules/sdr_pipeline/outputs.tf` (state machine ARN, output bucket name, CodeBuild project name)
     - Wire module in root `main.tf`
     - _Requirements: 7.3_
 
 - [x] 14. Checkpoint - Ensure Terraform validates and all tests pass
   - Ensure all tests pass, ask the user if questions arise.
   - Run `terraform validate` on the module
-  - Run `checkov -d modules/sdr_pipeline/ --quiet` for security findings
+  - Run `checkov -d infra/modules/sdr_pipeline/ --quiet` for security findings
 
 - [x] 15. Integration testing
   - [x] 15.1 Create integration test with sample data
@@ -322,7 +322,7 @@ Automated pipeline converting raw DigIF files (.pcap VITA-49) received via AWS G
 
 - [x] 16. Security checkpoint (Checkov)
   - [x] 16.1 Run Checkov security scan and remediate findings
-    - Run `checkov -d modules/sdr_pipeline/ --quiet --download-external-modules false`
+    - Run `checkov -d infra/modules/sdr_pipeline/ --quiet --download-external-modules false`
     - Fix all HIGH and CRITICAL findings
     - Document any accepted LOW/MEDIUM findings with justification comments
     - Verify: no public S3 access, KMS encryption at rest, TLS enforced, least-privilege IAM, logging enabled

@@ -139,7 +139,7 @@ chain, not the resolution.
 ## 6. Booking
 
 The scheduler cron is `DISABLED` in code
-([modules/contact_scheduler/main.tf:44](modules/contact_scheduler/main.tf#L44)) and must
+([infra/modules/contact_scheduler/main.tf:44](infra/modules/contact_scheduler/main.tf#L44)) and must
 stay that way — re-enabling it via `terraform apply` previously booked two unintended
 paid contacts. **Reserve manually.**
 

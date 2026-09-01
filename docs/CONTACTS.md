@@ -71,12 +71,12 @@
 | **Contact ID** | `7903eb3f-8126-4e3c-bb3d-74eef49f79b3` |
 | **Status** | ✅ COMPLETED |
 | **Satellite** | NOAA-20 (NORAD 43013) |
-| **Ground Station** | Hawaii 1 (`us-west-2`) |
-| **Visibility Start** | 2026-06-23 18:20:55 UTC (20:20 CEST) |
+| **Ground Station** | Ohio 1 (`us-east-2`) — *corrected 2026-07-24; this table previously said "Hawaii 1", a copy-paste from contact #1. The delivered swath spans 91.8°W–64.4°W (Hudson Bay → Great Lakes → Florida → Cuba), which a Hawaii antenna cannot receive.* |
+| **Visibility Start** | 2026-06-23 18:20:55 UTC (20:20 CEST — ~13:00 local solar time at the sub-satellite point) |
 | **Visibility End** | 2026-06-23 18:43:32 UTC (20:43 CEST) |
 | **Duration** | ~13 min |
 | **Mission Profile** | `arn:aws:groundstation:eu-central-1:471112743408:mission-profile/2655b0f6-8196-44d3-bbc0-3782b1942d34` |
-| **Dataflow** | antenna-downlink (Hawaii 1) → s3-recording (eu-central-1) |
+| **Dataflow** | antenna-downlink (Ohio 1) → s3-recording (eu-central-1) |
 | **Data Format** | VITA-49 DigIF (raw digitized RF, .pcap) |
 | **S3 Destination** | `s3://aws-groundstation-demo-reception-471112743408/year=2026/month=06/day=23/satellite=33f035e1-73f7-47a5-9df8-fbc48636dca8/` |
 | **Expected File** | `7903eb3f-8126-4e3c-bb3d-74eef49f79b3_*.pcap` |
@@ -160,6 +160,66 @@
 | Status | SatDump composites uploaded ✅ — RT-STPS failed (exit 254) |
 | Composites in S3 | `contacts/2026/06/30/69c8c149-.../satdump/chunk_0/VIIRS/` |
 | Pass coverage | Scandinavia (descending pass) |
+
+---
+
+## Contact #5 — Mediterranean
+
+Planned target rather than an opportunistic pass. Selection rationale, coverage analysis
+and the constraints behind it: [MEDITERRANEAN_PASS.md](MEDITERRANEAN_PASS.md).
+
+| Property | Value |
+|----------|-------|
+| **Contact ID** | `ba2c5446-280f-4985-8ad8-dced8ae8b616` |
+| **Status** | 📅 SCHEDULING (reserved 2026-08-27) |
+| **Satellite** | NOAA-20 (NORAD 43013) |
+| **Ground Station** | Stockholm 1 (`eu-north-1`) — the only onboarded antenna that reaches the Mediterranean |
+| **Max Elevation** | 51.23° |
+| **Pre-pass Start** | 2026-08-31 11:57:49 UTC (13:57 CEST) |
+| **Visibility Start** | 2026-08-31 11:59:49 UTC (13:59 CEST) |
+| **Visibility End** | 2026-08-31 12:10:20 UTC (14:10 CEST) |
+| **Post-pass End** | 2026-08-31 12:12:20 UTC (14:12 CEST) |
+| **Duration** | 10m31s |
+| **Mission Profile** | `arn:aws:groundstation:eu-central-1:471112743408:mission-profile/2655b0f6-8196-44d3-bbc0-3782b1942d34` |
+| **Dataflow** | antenna-downlink (Stockholm 1, `eu-north-1`) → s3-recording (`eu-central-1`) |
+| **Data Format** | VITA-49 DigIF (raw digitized RF, .pcap) |
+| **S3 Destination** | `s3://aws-groundstation-demo-reception-471112743408/year=2026/month=08/day=31/satellite=33f035e1-73f7-47a5-9df8-fbc48636dca8/` |
+| **Expected File** | `ba2c5446-280f-4985-8ad8-dced8ae8b616_*.pcap` |
+| **Expected Size** | ~45 GB (~21 files × 2.18 GB) |
+| **Estimated Cost** | ~$110 (on-demand narrowband X-band) |
+| **Scheduled By** | Manual `reserve-contact` (scheduler cron remains DISABLED) |
+| **Selected With** | [scripts/plan_pass.py](scripts/plan_pass.py) |
+
+### Expected Coverage
+
+Ascending daytime pass, ~13:20 local solar time. Sub-track 40.3°N 15.2°E (Gulf of
+Taranto) → 75.2°N 15.6°W (Arctic).
+
+| Basin | Off nadir | After AOS | Swath | Sun elev | Glint |
+|-------|-----------|-----------|-------|----------|-------|
+| Balearic Sea | 1013 km | +35 s | edge | 58.9° | 74.5° |
+| Gulf of Lion | 734 km | +75 s | core | 55.7° | 68.9° |
+| Ligurian Sea | 428 km | +75 s | core | 54.2° | 57.8° |
+| North Adriatic | 52 km | +75 s | core | 52.3° | 40.2° |
+| South Adriatic | 222 km | +15 s | core | 53.6° | 28.3° |
+| *Naples* | *63 km* | *+10 s* | *core* | — | *37.2°* |
+
+Not covered: the Tyrrhenian and the Strait of Sicily are scanned before AOS — the
+sub-track is already at 40.3°N when the link opens. The eastern basin (Aegean, Crete,
+Levantine) is unreachable from Stockholm at any time.
+
+The basin is scanned in the opening ~2 minutes at 11–17° link elevation, i.e. at
+maximum slant range. Partial granules there are expected and inherent to the geometry,
+not a pipeline regression.
+
+### Next Steps
+
+- [ ] Check cloud forecast for the western/central Med on 2026-08-30
+- [ ] Confirm `contactStatus` reaches `SCHEDULED`
+- [ ] Verify .pcap arrival after 14:12 CEST
+- [ ] Run SDR pipeline with the working CSPP recipe ([CSPP_SOLVED.md](CSPP_SOLVED.md))
+- [x] Fix `SVOM15`/`GMODO`/`GIGTO` constants in `scripts/viirs/` before the NASA path — **done 2026-08-27**, verified against contact #3's real `GMTCO`/`GITCO`
+- [ ] True-colour composite + I-band (375 m) look at the Adriatic/Naples area
 
 ---
 

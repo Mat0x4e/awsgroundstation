@@ -11,8 +11,8 @@
 
 data "archive_file" "aggregation_trigger" {
   type        = "zip"
-  source_dir  = "${path.module}/../../lambdas/aggregation_trigger"
-  output_path = "${path.module}/../../.build/aggregation_trigger.zip"
+  source_dir  = "${path.module}/../../../lambdas/aggregation_trigger"
+  output_path = "${path.module}/../../../.build/aggregation_trigger.zip"
 }
 
 ###############################################################################

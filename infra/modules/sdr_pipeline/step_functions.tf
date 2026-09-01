@@ -232,11 +232,19 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
         ToleratedFailurePercentage = 100
 
         ItemSelector = {
-          "chunk_key.$"    = "$$.Map.Item.Value"
-          "chunk_id.$"     = "$$.Map.Item.Index"
-          "contact_id.$"   = "$$.Execution.Input.contact_id"
-          "contact_date.$" = "$$.Execution.Input.contact_date"
-          "input_bucket.$" = "$$.Execution.Input.bucket"
+          "chunk_key.$" = "$$.Map.Item.Value"
+          "chunk_id.$"  = "$$.Map.Item.Index"
+          # Read from the state data, NOT $$.Execution.Input. contact_date does
+          # not exist in the execution input: the trigger supplies contact_time
+          # and BuildContactDate derives the date inside the machine. Reading it
+          # from the execution input failed the whole Map with States.Runtime
+          # "The JSONPath '$$.Execution.Input.contact_date' ... could not be
+          # found" (rehearsal, 2026-09-01). contact_id and bucket happen to be
+          # present in the input, but the post-ShapeInput state data is the
+          # authoritative copy, so all three are read consistently from it.
+          "contact_id.$"   = "$.contact_id"
+          "contact_date.$" = "$.contact_date"
+          "input_bucket.$" = "$.bucket"
           "output_bucket"  = aws_s3_bucket.sdr_output.id
           "kms_key_id"     = var.kms_key_arn
         }
@@ -423,7 +431,7 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
         Resource = "arn:aws:states:::aws-sdk:codebuild:startBuild"
         Parameters = {
           ProjectName       = aws_codebuild_project.sdr_pipeline.name
-          BuildspecOverride = file("${path.module}/../../buildspecs/aggregation.yml")
+          BuildspecOverride = file("${path.module}/../../../buildspecs/aggregation.yml")
           EnvironmentVariablesOverride = [
             {
               Name      = "RECEPTION_BUCKET"

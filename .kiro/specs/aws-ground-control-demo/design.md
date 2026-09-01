@@ -235,8 +235,8 @@ protogroundstation/
 ├── main.tf                          # Orchestration des modules
 ├── variables.tf                     # Variables d'entrée (région, feature flags)
 ├── outputs.tf                       # Sorties (ARN, noms, URLs)
-├── terraform.tfvars                 # Valeurs par défaut
-├── modules/
+├── infra/terraform.tfvars                 # Valeurs par défaut
+├── infra/modules/
 │   ├── security/                    # KMS, IAM, CloudTrail, SNS
 │   ├── s3_delivery/                 # Bucket réception, logging, lifecycle
 │   ├── mission_profile/             # Config Ground Station (awscc provider)

@@ -592,7 +592,7 @@ phases:
 ### 15. Terraform Module Structure
 
 ```
-modules/viirs_visualization/
+infra/modules/viirs_visualization/
 ├── main.tf              # Lambda function + CloudWatch log groups
 ├── codebuild.tf         # CodeBuild project + buildspec references
 ├── eventbridge.tf       # EventBridge rule (ObjectCreated on SDR output bucket)

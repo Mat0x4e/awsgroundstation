@@ -30,19 +30,43 @@ S3: {project}-sdr-output-{account_id}/contacts/{date}/{contact_id}/
   ├── chunks/chunk_XXX/  (SDR HDF5 + GEO HDF5 + dataset.json)
   ├── coordinates/       (geolocation JSON per chunk)
   ├── satdump/           (composites PNG + product.cbor)
-  └── manifest.json
+  └── (manifest.json : jamais produit — voir la note ci-dessous)
         │
-        ▼  EventBridge ObjectCreated (manifest.json ou composites PNG)
+        ▼  Step Functions (StartVisualization) — une invocation par contact
         │
 [CETTE SPEC — viirs_visualization module]
   Lambda orchestratrice → CodeBuild → S3 products/
 ```
 
+
+> **Révisé le 2026-09-01 — le déclenchement a changé.**
+>
+> La version initiale déclenchait sur un événement S3 `ObjectCreated` filtré sur
+> `manifest.json` **ou** `.png`. Deux problèmes :
+>
+> - **`manifest.json` n'est jamais produit.** Aucun étage du pipeline ne l'écrit
+>   (`scripts/generate_manifest.py` existe mais n'a jamais été câblé). Le filtre ne
+>   reposait donc en pratique que sur `.png`.
+> - **Chaque chunk écrit des centaines de composites PNG** (~9 150 objets par contact).
+>   Le jour où S3 → EventBridge a été activé sur ce bucket, chaque PNG est devenu une
+>   invocation de l'orchestrateur et donc un build CodeBuild : **~6 000 builds en une
+>   matinée**, jusqu'à saturer la file du compte
+>   (`Cannot have more than 100 builds in queue`) et faire échouer le pipeline SDR.
+>
+> Restreindre le motif ne suffisait pas : rien dans ce pipeline n'est écrit une seule
+> fois par contact — même un composite nommé apparaît une fois par chunk. Or
+> l'orchestrateur n'utilise pas l'objet déclencheur : il en extrait seulement
+> `contact_id` / `contact_date`, liste tout le préfixe et soumet **un** build.
+>
+> Le pipeline lui indique donc directement quel contact traiter, à la fin de
+> l'agrégation (`StartVisualization`). La règle EventBridge, sa cible et
+> `eventbridge = true` sur le bucket de sortie ont été supprimés.
+
 ## Architecture
 
 ```mermaid
 flowchart TD
-    A[S3: SDR Output Bucket<br/>contacts/{date}/{contact_id}/] -->|EventBridge<br/>ObjectCreated: manifest.json| B[Lambda: Visualization Orchestrator<br/>Python 3.12, 512 MB, 60s timeout]
+    A[Step Functions<br/>SDR pipeline] -->|StartVisualization<br/>bucket + contacts/{date}/{contact_id}/| B[Lambda: Visualization Orchestrator<br/>Python 3.12, 512 MB, 60s timeout]
 
     B -->|Detect path:<br/>SatDump composites?| C{Path Detection}
     C -->|viirs_rgb_*.png found| D[CodeBuild: SatDump Visualization<br/>BUILD_GENERAL1_MEDIUM]

@@ -311,7 +311,22 @@ protogroundstation/
 |-----------|------|
 | `aws_sqs_queue.processing` | File d'attente avec visibility timeout 360s, chiffrement KMS |
 | `aws_sqs_queue.dlq` | Dead Letter Queue (maxReceiveCount: 3) |
-| `aws_s3_bucket_notification` | Notification sur `s3:ObjectCreated:*` filtre `.cadu` |
+| `aws_s3_bucket_notification` | ~~Notification sur `s3:ObjectCreated:*` filtre `.cadu`~~ — **supprimé le 2026-09-01** (voir note) |
+
+> **Note 2026-09-01 — chaîne SQS/`.cadu` désactivée.**
+>
+> `enable_processing_pipeline = false` : ce module n'est pas déployé. Sa ressource
+> `aws_s3_bucket_notification` visait le **même bucket** que celle du module
+> `observability`. Or S3 n'autorise qu'**une seule** configuration de notification par
+> bucket, et `aws_s3_bucket_notification` gère la configuration entière : les deux
+> ressources s'effaçaient donc mutuellement. C'est ainsi que le bucket de réception
+> s'est retrouvé sans `eventbridge = true`, et qu'un passage complet (contact
+> `ba2c5446`, 43,1 Go) n'a jamais été traité.
+>
+> Propriétaire unique désormais :
+> `aws_s3_bucket_notification.reception_notify` dans `infra/modules/observability`.
+> Si ce pipeline est réactivé, ajouter un bloc `queue` **là**, sans recréer une
+> seconde ressource pour ce bucket.
 | `aws_lambda_function.data_processor` | Python 3.12, 512 MB, timeout 300s, batch SQS 10 |
 | `aws_s3_bucket.output` | Bucket de sortie SSE-KMS |
 | `aws_cloudwatch_metric_alarm.dlq_messages` | Alarme si messages dans DLQ |

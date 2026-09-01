@@ -304,7 +304,15 @@ Exécute CSPP SDR (CIMSS/NOAA) pour calibrer les RDR et produire les fichiers SD
 class CSPPProcessor:
     """Wrapper around CSPP SDR for RDR → SDR + GEO calibration."""
 
-    CSPP_HOME = "/opt/cspp-sdr"
+
+> **Corrigé le 2026-09-01.** Ce document indiquait `/opt/cspp-sdr` avec le script sous
+> `viirs/viirs_sdr.sh`. CSPP SDR 4.1 s'installe en réalité dans `/opt/SDR_4_1/` et le
+> script est `bin/viirs_sdr.sh`. `scripts/aggregation.sh` portait la même erreur et a
+> fait échouer une exécution complète avant d'être corrigé. Voir
+> [`../../../docs/DEPLOYMENT.md`](../../../docs/DEPLOYMENT.md).
+
+
+    CSPP_HOME = "/opt/SDR_4_1"
     EXPECTED_SDR_PATTERNS = {
         "I-band": "SVI0{1,2,3,4,5}_npp_d*_t*_*.h5",
         "M-band": "SVM{01-16}_npp_d*_t*_*.h5",
@@ -405,7 +413,7 @@ env:
   variables:
     SATDUMP_VERSION: "1.2.0"
     RTSTPS_HOME: "/opt/rt-stps"
-    CSPP_HOME: "/opt/cspp-sdr"
+    CSPP_HOME: "/opt/SDR_4_1"
 
 phases:
   pre_build:
@@ -464,7 +472,7 @@ version: 0.2
 
 env:
   variables:
-    CSPP_HOME: "/opt/cspp-sdr"
+    CSPP_HOME: "/opt/SDR_4_1"
 
 phases:
   pre_build:
@@ -690,14 +698,14 @@ RUN tar xzf /opt/rt-stps-7.x.tar.gz -C /opt/ && \
 # CSPP SDR (CIMSS/NOAA)
 COPY CSPP_SDR_*.tar.gz /opt/
 RUN tar xzf /opt/CSPP_SDR_*.tar.gz -C /opt/ && \
-    chmod +x /opt/cspp-sdr/viirs/*.sh
+    chmod +x /opt/SDR_4_1/bin/*.sh
 
 # Pipeline scripts
 COPY scripts/ /opt/scripts/
 RUN chmod +x /opt/scripts/*.py /opt/scripts/*.sh
 
-ENV PATH="/opt/satdump:/opt/rt-stps/bin:/opt/cspp-sdr/viirs:${PATH}"
-ENV CSPP_HOME="/opt/cspp-sdr"
+ENV PATH="/opt/satdump:/opt/rt-stps/bin:/opt/SDR_4_1/bin:${PATH}"
+ENV CSPP_HOME="/opt/SDR_4_1"
 ENV RTSTPS_HOME="/opt/rt-stps"
 ```
 

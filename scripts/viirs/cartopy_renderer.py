@@ -22,6 +22,7 @@ from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
 import cartopy.io.shapereader as shpreader
 
 from .models import BoundingBox, CBORMetadata, NASAMetadata
+from .scan_geometry import orient_for_display
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +315,7 @@ class CartopyRenderer:
         composite_type: str,
         metadata: CBORMetadata,
         output_path: Path,
+        north_up: bool = False,
     ) -> Path:
         """Render a SatDump composite by overlaying map features onto the
         native-resolution image in pixel space.
@@ -337,6 +339,10 @@ class CartopyRenderer:
             CBORMetadata instance for timestamp and satellite name.
         output_path:
             Destination PNG file path.
+        north_up:
+            True when *data* has already been placed geographically by
+            ``scan_geometry.resample_to_equirect``, and so must not be
+            flipped across track the way a raw swath is.
 
         Returns
         -------
@@ -351,16 +357,14 @@ class CartopyRenderer:
         # ── 1. Prepare image data ──────────────────────────────────────────
         if is_thermal:
             band = data[:, :, 0] if data.ndim == 3 else data
-            # SatDump descending pass: south at top → flipud; scan inverted → fliplr
-            display_data = np.flipud(np.fliplr(band))
+            display_data = orient_for_display(band, north_up)
         else:
             if data.ndim == 2:
                 rgb = np.stack([data, data, data], axis=-1)
             else:
                 rgb = data
             rgb = np.clip(rgb, 0.0, 1.0)
-            # SatDump descending pass correction
-            display_data = np.flipud(np.fliplr(rgb))
+            display_data = orient_for_display(rgb, north_up)
 
         H, W = display_data.shape[:2]
 

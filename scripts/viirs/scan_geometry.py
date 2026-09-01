@@ -501,3 +501,21 @@ def resample_to_equirect(
     )
 
     return _fill_small_holes(grid), (lat_min, lat_max, lon_min, lon_max)
+
+
+def orient_for_display(data: np.ndarray, north_up: bool) -> np.ndarray:
+    """Orient an array for a renderer whose y axis runs bottom-up.
+
+    A raw SatDump swath is stored in scan order, which for a descending pass
+    puts south at the top and reverses the scan across track, so it needs both
+    flips before display.
+
+    A grid that ``resample_to_equirect`` has produced is already north-up and
+    east-right. Flipping it across track mirrors the imagery about the middle
+    of its own bounding box: the map overlay, computed from geographic
+    coordinates, stays put while the coastlines underneath move -- which looks
+    like a swath curving the wrong way against a correctly drawn map.
+    """
+    if north_up:
+        return np.flipud(data)
+    return np.flipud(np.fliplr(data))

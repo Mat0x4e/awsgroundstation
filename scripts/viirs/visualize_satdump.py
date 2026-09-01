@@ -344,6 +344,7 @@ def main(argv: list[str] | None = None) -> int:
 
             # 4a-bis. Put every pixel where the geometry says it belongs.
             composite_bbox = bbox
+            north_up = False
             if geolocator is not None:
                 geometry = geolocator.locate(data.shape[0], data.shape[1])
                 resampled = resample_to_equirect(data, geometry)
@@ -353,6 +354,7 @@ def main(argv: list[str] | None = None) -> int:
                         lat_min=extent[0], lat_max=extent[1],
                         lon_min=extent[2], lon_max=extent[3],
                     )
+                    north_up = True
                     logger.info(
                         "  Geolocated: lat=[%.3f, %.3f] lon=[%.3f, %.3f]",
                         extent[0], extent[1], extent[2], extent[3],
@@ -365,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
                 composite_type=composite.composite_type,
                 metadata=cbor_meta,
                 output_path=png_path,
+                north_up=north_up,
             )
             logger.info("  PNG written: %s", png_path)
 

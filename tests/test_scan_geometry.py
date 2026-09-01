@@ -243,3 +243,55 @@ class TestResampling:
         filled = sg._fill_small_holes(grid.copy())
 
         assert np.isfinite(filled).all()
+
+
+class TestDisplayOrientation:
+    """A geolocated grid must not be flipped the way a raw swath is.
+
+    The renderer's y axis runs bottom-up, so the vertical flip is what puts
+    north on top and applies either way. The cross-track flip is the one that
+    matters: applied to a grid already placed geographically, it mirrors the
+    imagery about the middle of its own bounding box while the map overlay --
+    drawn from geographic coordinates -- stays put. The result looks like a
+    swath curving the wrong way under a correctly drawn map, which is exactly
+    what shipped before this was caught.
+    """
+
+    def test_raw_swath_is_flipped_both_ways(self):
+        data = np.array([[1, 2], [3, 4]])
+
+        out = sg.orient_for_display(data, north_up=False)
+
+        assert out.tolist() == [[4, 3], [2, 1]]
+
+    def test_geolocated_grid_is_only_flipped_vertically(self):
+        data = np.array([[1, 2], [3, 4]])
+
+        out = sg.orient_for_display(data, north_up=True)
+
+        assert out.tolist() == [[3, 4], [1, 2]]
+
+    def test_east_west_order_survives_for_a_geolocated_grid(self):
+        """West stays west. The regression this class exists for."""
+        west_to_east = np.arange(8).reshape(1, 8)
+
+        out = sg.orient_for_display(west_to_east, north_up=True)
+
+        assert out[0, 0] < out[0, -1]
+
+    def test_north_stays_on_top_either_way(self):
+        """Row 0 is north in a resampled grid, and the axis runs bottom-up."""
+        north_to_south = np.arange(4).reshape(4, 1)
+
+        for north_up in (True, False):
+            out = sg.orient_for_display(north_to_south, north_up=north_up)
+            assert out[-1, 0] == 0  # row 0 ends up last, i.e. drawn at the top
+
+    def test_rgb_channels_are_not_reordered(self):
+        data = np.zeros((2, 2, 3))
+        data[..., 1] = 1.0
+
+        out = sg.orient_for_display(data, north_up=True)
+
+        assert np.allclose(out[..., 1], 1.0)
+        assert np.allclose(out[..., 0], 0.0)

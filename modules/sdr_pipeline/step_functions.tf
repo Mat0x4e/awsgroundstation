@@ -1,8 +1,9 @@
 # step_functions.tf — Step Functions state machine for the SDR pipeline
 # Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6
 #
-# Flow: ListChunks → CheckProcessingMarker → WriteProcessingMarker
-#       → ParallelProcessing (Map) → CheckResults → FinalAggregation
+# Flow: DeriveDateOnly → DeriveDateParts → BuildContactDate → WaitForDelivery → ListChunks → ShapeInput
+#       → CheckChunksFound → CheckProcessingMarker → WriteProcessingMarker
+#       → ParallelProcessing (Map) → CheckResults → StartAggregationBuild
 #       → (success) or TotalFailure (SNS + Fail)
 # Idempotence: CheckProcessingMarker short-circuits if a .processing marker exists.
 
@@ -37,19 +38,149 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
   definition = jsonencode({
     Comment        = "NOAA-20 CADU-to-TIFF SDR pipeline — chunk processing + final aggregation"
     TimeoutSeconds = 5400
-    StartAt        = "ListChunks"
+    StartAt        = "DeriveDateOnly"
 
     States = {
 
-      # ── 1. ListChunks ──────────────────────────────────────────────────────
-      # Pass state: normalise the input into a canonical shape.
-      # Expected input: { contact_id, bucket, chunks: [...], contact_date }
-      ListChunks = {
+      # ── 1. Derive contact_date from the event timestamp ────────────────────
+      # The trigger supplies the contact id and the event time; the S3 layout is
+      # keyed by date, so "2026-09-06T11:57:59Z" has to become "2026/09/06".
+      # EventBridge input transformers substitute whole values and cannot
+      # reformat a timestamp, so it happens here.
+      #
+      # Three small Pass states rather than one expression: Step Functions
+      # rejects deeply nested intrinsics ("must be a valid JSONPath or a valid
+      # intrinsic function call"), so each step nests at most one call and the
+      # rest is plain JSONPath indexing.
+      #
+      # A contact straddling midnight UTC would have chunks under two date
+      # prefixes; NOAA-20 daytime passes over this station run ~10-12 UTC, so
+      # that case is not handled.
+      DeriveDateOnly = {
         Type    = "Pass"
-        Comment = "Validate and pass through input containing contact_id, bucket, chunks, contact_date"
-        Next    = "CheckProcessingMarker"
+        Comment = "2026-09-06T11:57:59Z -> 2026-09-06"
+        Parameters = {
+          "contact_id.$"   = "$.contact_id"
+          "bucket.$"       = "$.bucket"
+          "satellite_id.$" = "$.satellite_id"
+          "date_only.$"    = "States.ArrayGetItem(States.StringSplit($.contact_time, 'T'), 0)"
+        }
+        Next = "DeriveDateParts"
       }
 
+      DeriveDateParts = {
+        Type    = "Pass"
+        Comment = "2026-09-06 -> [2026, 09, 06]"
+        Parameters = {
+          "contact_id.$"   = "$.contact_id"
+          "bucket.$"       = "$.bucket"
+          "satellite_id.$" = "$.satellite_id"
+          "date_parts.$"   = "States.StringSplit($.date_only, '-')"
+        }
+        Next = "BuildContactDate"
+      }
+
+      BuildContactDate = {
+        Type    = "Pass"
+        Comment = "[2026, 09, 06] -> 2026/09/06, the prefix used throughout the pipeline"
+        Parameters = {
+          "contact_id.$"   = "$.contact_id"
+          "bucket.$"       = "$.bucket"
+          "satellite_id.$" = "$.satellite_id"
+          "date_parts.$"   = "$.date_parts"
+          "contact_date.$" = "States.Format('{}/{}/{}', $.date_parts[0], $.date_parts[1], $.date_parts[2])"
+        }
+        Next = "WaitForDelivery"
+      }
+      # ── 2. WaitForDelivery ─────────────────────────────────────────────────
+      # COMPLETED fires at LOS, but Ground Station is still flushing the last
+      # chunk: on contact ba2c5446 the final .pcap was written 19 s after LOS.
+      # Wait before listing so the chunk set is complete.
+      WaitForDelivery = {
+        Type    = "Wait"
+        Seconds = 120
+        Next    = "ListChunks"
+      }
+
+      # ── 3. ListChunks ──────────────────────────────────────────────────────
+      # Actually list them. This state was previously a Pass that assumed the
+      # caller supplied chunks[] -- true for a hand-built input, never true for
+      # an event-driven one.
+      #
+      # The contact id is in the OBJECT NAME, not a path segment (the key is
+      # year=Y/month=M/day=D/satellite=<sat>/<contactId>_<ts>_<uuid>.pcap), so
+      # prefixing with "<contactId>_" is what isolates one contact's chunks.
+      ListChunks = {
+        Type     = "Task"
+        Comment  = "List this contact's .pcap chunks in the reception bucket"
+        Resource = "arn:aws:states:::aws-sdk:s3:listObjectsV2"
+        Parameters = {
+          "Bucket.$" = "$.bucket"
+          "Prefix.$" = "States.Format('year={}/month={}/day={}/satellite={}/{}_', $.date_parts[0], $.date_parts[1], $.date_parts[2], $.satellite_id, $.contact_id)"
+        }
+        ResultSelector = {
+          "chunks.$" = "$.Contents[*].Key"
+        }
+        ResultPath = "$.listing"
+        Retry = [
+          {
+            ErrorEquals     = ["States.TaskFailed"]
+            IntervalSeconds = 10
+            MaxAttempts     = 3
+            BackoffRate     = 2.0
+          }
+        ]
+        Next = "ShapeInput"
+      }
+
+      # ── 4. ShapeInput ──────────────────────────────────────────────────────
+      # Flatten to the shape every downstream state already expects:
+      # { contact_id, bucket, contact_date, chunks[] }.
+      ShapeInput = {
+        Type    = "Pass"
+        Comment = "Normalise into { contact_id, bucket, contact_date, chunks }"
+        Parameters = {
+          "contact_id.$"   = "$.contact_id"
+          "bucket.$"       = "$.bucket"
+          "contact_date.$" = "$.contact_date"
+          "chunks.$"       = "$.listing.chunks"
+        }
+        Next = "CheckChunksFound"
+      }
+
+      # ── 5. CheckChunksFound ────────────────────────────────────────────────
+      # An empty listing means the contact delivered nothing (or the prefix is
+      # wrong). Fail loudly rather than running a Map over zero items and
+      # reporting success.
+      CheckChunksFound = {
+        Type    = "Choice"
+        Comment = "Abort if the contact produced no .pcap chunks"
+        Choices = [
+          {
+            Variable  = "$.chunks[0]",
+            IsPresent = true,
+            Next      = "CheckProcessingMarker"
+          }
+        ]
+        Default = "NoChunksFound"
+      }
+
+      NoChunksFound = {
+        Type     = "Task"
+        Comment  = "Publish an empty-contact failure to SNS and fail"
+        Resource = "arn:aws:states:::aws-sdk:sns:publish"
+        Parameters = {
+          TopicArn = var.sns_topic_arn
+          Message = {
+            "input.$" = "$$.Execution.Input"
+            "stage"   = "ListChunks"
+            "reason"  = "No .pcap objects found for this contact in the reception bucket"
+          }
+          Subject = "SDR Pipeline — contact delivered no data"
+        }
+        ResultPath = null
+        Next       = "FailExecution"
+      }
       # ── 2. CheckProcessingMarker ───────────────────────────────────────────
       # HeadObject on the .processing marker. If it exists the state machine
       # was already started for this contact — short-circuit via AlreadyProcessing.
@@ -269,29 +400,65 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
       CheckResults = {
         Type    = "Pass"
         Comment = "Always proceed to aggregation — handles partial results gracefully"
-        Next    = "FinalAggregation"
+        Next    = "StartAggregationBuild"
       }
 
       # ── 6. FinalAggregation ────────────────────────────────────────────────
-      # Invoke the Trigger Lambda which starts the EC2 aggregation instance and
-      # issues an SSM Run Command. Returns command_id and instance_id for polling.
-      FinalAggregation = {
+      # Aggregation runs as a CodeBuild job, NOT on the EC2 instance.
+      #
+      # CSPP's ancillary staging fetches from http://jpssdb.ssec.wisc.edu at run
+      # time. The EC2 aggregation instance has no route there (its security group
+      # is SSM outbound HTTPS only), so viirs_sdr.sh timed out five times over ~11
+      # minutes and then died inside its own error handler with
+      # "TypeError: object of type 'bool' has no len()". CodeBuild has egress and
+      # the sdr-pipeline image already carries CSPP 4.1.1 plus the J01 straylight
+      # LUTs. See CSPP_SOLVED.md req 2: "Run CSPP in CodeBuild, not EC2."
+      #
+      # The buildspec is read from buildspecs/aggregation.yml so the file that ran
+      # by hand for contact ba2c5446 is the same one the pipeline uses -- no
+      # second copy to drift.
+      StartAggregationBuild = {
         Type     = "Task"
-        Comment  = "Invoke Trigger Lambda to start EC2 aggregation and issue SSM Run Command"
-        Resource = "arn:aws:states:::lambda:invoke"
+        Comment  = "Start the CodeBuild aggregation job (CADU -> RT-STPS -> CSPP)"
+        Resource = "arn:aws:states:::aws-sdk:codebuild:startBuild"
         Parameters = {
-          FunctionName = aws_lambda_function.aggregation_trigger.arn
-          Payload = {
-            "bucket.$"       = "$.bucket"
-            "contact_id.$"   = "$.contact_id"
-            "contact_date.$" = "$.contact_date"
-          }
+          ProjectName       = aws_codebuild_project.sdr_pipeline.name
+          BuildspecOverride = file("${path.module}/../../buildspecs/aggregation.yml")
+          EnvironmentVariablesOverride = [
+            {
+              Name      = "RECEPTION_BUCKET"
+              "Value.$" = "$.bucket"
+              Type      = "PLAINTEXT"
+            },
+            {
+              Name  = "OUTPUT_BUCKET"
+              Value = aws_s3_bucket.sdr_output.id
+              Type  = "PLAINTEXT"
+            },
+            {
+              Name      = "CONTACT_ID"
+              "Value.$" = "$.contact_id"
+              Type      = "PLAINTEXT"
+            },
+            {
+              Name      = "CONTACT_DATE"
+              "Value.$" = "$.contact_date"
+              Type      = "PLAINTEXT"
+            }
+          ]
         }
         ResultSelector = {
-          "command_id.$"  = "$.Payload.command_id"
-          "instance_id.$" = "$.Payload.instance_id"
+          "build_id.$" = "$.Build.Id"
         }
-        ResultPath = "$.ssm"
+        ResultPath = "$.aggregation"
+        Retry = [
+          {
+            ErrorEquals     = ["CodeBuild.CodeBuildException", "States.TaskFailed"]
+            IntervalSeconds = 30
+            MaxAttempts     = 2
+            BackoffRate     = 2.0
+          }
+        ]
         Catch = [
           {
             ErrorEquals = ["States.ALL"]
@@ -299,30 +466,27 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
             ResultPath  = "$.error"
           }
         ]
-        Next = "WaitForSSM"
+        Next = "WaitForAggregation"
       }
 
-      # Wait 30 s before polling SSM command status
-      WaitForSSM = {
+      # Poll every 60 s: sdr_luts.sh alone runs ~10 min before RT-STPS starts.
+      WaitForAggregation = {
         Type    = "Wait"
-        Seconds = 30
-        Next    = "CheckSSMStatus"
+        Seconds = 60
+        Next    = "CheckAggregationBuild"
       }
 
-      # Poll SSM for the command invocation status
-      CheckSSMStatus = {
+      CheckAggregationBuild = {
         Type     = "Task"
-        Comment  = "Poll SSM Run Command status via AWS SDK integration"
-        Resource = "arn:aws:states:::aws-sdk:ssm:getCommandInvocation"
+        Comment  = "Poll the aggregation build status"
+        Resource = "arn:aws:states:::aws-sdk:codebuild:batchGetBuilds"
         Parameters = {
-          "CommandId.$"  = "$.ssm.command_id"
-          "InstanceId.$" = "$.ssm.instance_id"
+          "Ids.$" = "States.Array($.aggregation.build_id)"
         }
         ResultSelector = {
-          "status.$"         = "$.Status"
-          "status_details.$" = "$.StatusDetails"
+          "build_status.$" = "$.Builds[0].BuildStatus"
         }
-        ResultPath = "$.ssm_poll"
+        ResultPath = "$.aggregation_poll"
         Retry = [
           {
             ErrorEquals     = ["States.TaskFailed"]
@@ -331,33 +495,40 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
             BackoffRate     = 1.5
           }
         ]
-        Next = "EvaluateSSMStatus"
+        Next = "EvaluateAggregation"
       }
 
-      # Branch on SSM command status
-      EvaluateSSMStatus = {
+      EvaluateAggregation = {
         Type    = "Choice"
-        Comment = "Route based on SSM Run Command status"
+        Comment = "Route based on the aggregation build status"
         Choices = [
           {
-            Variable     = "$.ssm_poll.status"
-            StringEquals = "InProgress"
-            Next         = "WaitForSSM"
+            Variable     = "$.aggregation_poll.build_status"
+            StringEquals = "IN_PROGRESS"
+            Next         = "WaitForAggregation"
           },
           {
-            Variable     = "$.ssm_poll.status"
-            StringEquals = "Pending"
-            Next         = "WaitForSSM"
-          },
-          {
-            Variable     = "$.ssm_poll.status"
-            StringEquals = "Success"
+            Variable     = "$.aggregation_poll.build_status"
+            StringEquals = "SUCCEEDED"
             Next         = "PipelineSucceeded"
           }
         ]
-        Default = "AggregationFailure"
+        Default = "MarkAggregationFailed"
       }
 
+      # AggregationFailure publishes $.error to SNS. Reaching it from a Choice
+      # default leaves $.error unset, which fails the publish itself and hides the
+      # real outcome -- so populate it first.
+      MarkAggregationFailed = {
+        Type    = "Pass"
+        Comment = "Record why the aggregation build was considered failed"
+        Parameters = {
+          "Error"   = "AggregationBuildFailed"
+          "Cause.$" = "States.Format('CodeBuild aggregation build {} finished with status {}', $.aggregation.build_id, $.aggregation_poll.build_status)"
+        }
+        ResultPath = "$.error"
+        Next       = "AggregationFailure"
+      }
       # ── 7. PipelineSucceeded ───────────────────────────────────────────────
       PipelineSucceeded = {
         Type    = "Succeed"

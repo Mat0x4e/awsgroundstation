@@ -81,18 +81,20 @@ resource "aws_sqs_queue_policy" "processing" {
   })
 }
 
-# S3 bucket notification to SQS for .cadu objects
-resource "aws_s3_bucket_notification" "reception" {
-  bucket = var.reception_bucket_name
-
-  queue {
-    queue_arn     = aws_sqs_queue.processing.arn
-    events        = ["s3:ObjectCreated:*"]
-    filter_suffix = ".cadu"
-  }
-
-  depends_on = [aws_sqs_queue_policy.processing]
-}
+# S3 bucket notification to SQS for .cadu objects -- REMOVED DELIBERATELY.
+#
+# S3 supports one notification configuration per bucket, and
+# aws_s3_bucket_notification manages the whole thing. This resource and
+# modules/observability/main.tf both targeted the reception bucket, so whichever
+# applied last silently erased the other. That is how the bucket ended up with
+# only an SNS topic and no eventbridge = true, leaving the SDR pipeline with no
+# trigger at all (contact ba2c5446, 2026-08-31).
+#
+# The single owner is now aws_s3_bucket_notification.reception_notify in
+# modules/observability. If this pipeline is ever re-enabled
+# (enable_processing_pipeline = true, currently false), add a queue block THERE
+# and pass aws_sqs_queue.processing.arn in from the root module -- do not
+# reintroduce a second resource for this bucket.
 
 # Lambda function for data processing
 data "archive_file" "data_processor" {

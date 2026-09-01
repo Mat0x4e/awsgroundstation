@@ -205,3 +205,21 @@ resource "aws_s3_bucket_policy" "sdr_output" {
     ]
   })
 }
+
+# ---------------------------------------------------------------------------
+# SDR output bucket -> EventBridge
+#
+# modules/viirs_visualization/eventbridge.tf notes that this bucket "must have
+# EventBridge notifications enabled ... owned by the sdr_pipeline module", but
+# nothing ever set it, so groundstation-noaa20-viirs-trigger could never fire
+# and no visualization products were produced.
+#
+# As with the reception bucket, S3 permits one notification configuration per
+# bucket: keep this the single owner and add blocks here rather than declaring
+# aws_s3_bucket_notification for this bucket in another module.
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket_notification" "sdr_output" {
+  bucket = aws_s3_bucket.sdr_output.id
+
+  eventbridge = true
+}

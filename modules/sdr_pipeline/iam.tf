@@ -197,6 +197,16 @@ resource "aws_iam_role_policy" "sfn" {
         Action   = ["s3:ListBucket"]
         Resource = aws_s3_bucket.sdr_output.arn
       },
+
+      # ListChunks (s3:listObjectsV2) enumerates this contact's .pcap objects in
+      # the reception bucket. Without this the state machine cannot build the
+      # chunks[] array and the trigger is inert.
+      {
+        Sid      = "S3ListReceptionBucket"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = "arn:aws:s3:::${var.input_bucket_name}"
+      },
       # SNS — publish pipeline completion / failure notifications
       {
         Sid      = "SNSPublish"

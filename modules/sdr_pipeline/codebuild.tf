@@ -17,10 +17,15 @@ resource "aws_cloudwatch_log_group" "codebuild" {
 }
 
 resource "aws_codebuild_project" "sdr_pipeline" {
-  name           = "${var.project_name}-sdr-pipeline"
-  description    = "SDR pipeline chunk processing — DigIF to SDR+GEO via SatDump, RT-STPS, CSPP"
-  service_role   = aws_iam_role.codebuild.arn
-  build_timeout  = 90
+  name         = "${var.project_name}-sdr-pipeline"
+  description  = "SDR pipeline chunk processing — DigIF to SDR+GEO via SatDump, RT-STPS, CSPP"
+  service_role = aws_iam_role.codebuild.arn
+  # 180, matching the deployed project. Code said 90, which would have been a
+  # silent reduction on the next apply: per-chunk builds took ~50 min each on
+  # contact ba2c5446 (22 chunks, 19 concurrent), and the aggregation build runs
+  # sdr_luts.sh for ~10 min before RT-STPS and CSPP even start. 90 leaves little
+  # margin; the timeout is a runaway guard, not a scheduling target.
+  build_timeout  = 180
   queued_timeout = 30
 
   source {

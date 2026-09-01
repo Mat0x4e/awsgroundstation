@@ -2,7 +2,7 @@
 
 ## Overview
 
-Automated pipeline converting raw DigIF files (.pcap VITA-49) received via AWS Ground Station S3 Data Delivery into calibrated SDR + GEO (HDF5 Level 1) files. Architecture: S3 ObjectCreated → EventBridge → Step Functions (execution name = contact_id) → Map state with N × CodeBuild per chunk → Final CodeBuild aggregation. Single Docker image with all tools (Python extractor, SatDump v1.2.0, RT-STPS, CSPP SDR). Infrastructure deployed via Terraform in eu-central-1.
+Automated pipeline converting raw DigIF files (.pcap VITA-49) received via AWS Ground Station S3 Data Delivery into calibrated SDR + GEO (HDF5 Level 1) files. Architecture: Ground Station contact COMPLETED → EventBridge → Step Functions (lists the contact's chunks itself; idempotence via the S3 .processing marker) → Map state with N × CodeBuild per chunk → Final CodeBuild aggregation. Single Docker image with all tools (Python extractor, SatDump v1.2.0, RT-STPS, CSPP SDR). Infrastructure deployed via Terraform in eu-central-1.
 
 ## Tasks
 

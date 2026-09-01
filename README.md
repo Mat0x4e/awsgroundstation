@@ -5,13 +5,16 @@ Automated satellite data processing pipeline using AWS Ground Station, convertin
 ## Architecture
 
 ```
-AWS Ground Station (Hawaii/Ohio)
-        │ X-band downlink
-        ▼
-S3 Data Delivery (.pcap VITA-49 DigIF, ~40 GB per 10-min contact)
-        │ EventBridge trigger
-        ▼
-Step Functions → N × CodeBuild (parallel per chunk)
+AWS Ground Station (Hawaii/Ohio/Stockholm)
+        │ X-band downlink                    │ contact reaches COMPLETED
+        ▼                                    ▼
+S3 Data Delivery (.pcap VITA-49 DigIF)   EventBridge (once per contact)
+        ▲                                    │
+        │ listObjectsV2 after 120 s          ▼
+        └──────────────────────────── Step Functions
+                                             │
+                                             ▼
+                              N × CodeBuild (parallel per chunk)
         │
         ├── I/Q Extraction (Python) ─── .cs8
         ├── SatDump npp_hrd ─────────── .cadu
@@ -78,7 +81,8 @@ terraform apply plan.tfplan
 cd docker/sdr-pipeline
 bash build.sh
 
-# 4. Pipeline triggers automatically on new .pcap uploads via EventBridge
+# 4. Pipeline triggers automatically once the Ground Station contact reaches
+#    COMPLETED (all .pcap chunks delivered), via EventBridge
 # Or trigger manually:
 aws stepfunctions start-execution \
   --state-machine-arn "arn:aws:states:eu-central-1:471112743408:stateMachine:groundstation-noaa20-sdr-pipeline" \
@@ -127,7 +131,7 @@ terraform validate
 | ECR repository | `groundstation-noaa20-sdr-pipeline` |
 | State machine | `groundstation-noaa20-sdr-pipeline` |
 | CodeBuild project | `groundstation-noaa20-sdr-pipeline` |
-| EventBridge rule | `groundstation-noaa20-pcap-uploaded` |
+| EventBridge rule | `groundstation-noaa20-contact-completed-sdr` (per contact; `groundstation-noaa20-pcap-uploaded` is superseded and DISABLED) |
 | Region | `eu-central-1` |
 
 ## Specs

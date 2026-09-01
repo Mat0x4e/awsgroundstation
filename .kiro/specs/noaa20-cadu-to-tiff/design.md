@@ -35,9 +35,16 @@ Aggregation (single, after all chunks):
 
 5. **Traitement séquentiel avec upload intermédiaire dans chaque build** — À l'intérieur d'un build CodeBuild, les étapes s'exécutent séquentiellement : extraction → SatDump → **upload composites to S3** → RT-STPS → CSPP → upload SDR/GEO. Les composites SatDump sont uploadés immédiatement après SatDump, indépendamment du succès de RT-STPS/CSPP. Cela garantit que les composites sont disponibles dans S3 même si la chaîne NASA (RT-STPS/CSPP) échoue.
 
-6. **Déclenchement direct S3 → EventBridge → Step Functions** — Pas de Lambda orchestratrice ni de SQS intermédiaire. EventBridge rule capte l'événement S3 ObjectCreated et démarre directement l'exécution Step Functions.
+6. **Déclenchement direct EventBridge → Step Functions, une fois par contact** — Pas de Lambda orchestratrice ni de SQS intermédiaire. La règle EventBridge capte l'événement **Ground Station Contact State Change / COMPLETED** et démarre directement l'exécution Step Functions.
 
-7. **Idempotence via execution name Step Functions** — L'execution name = `contact_id`. Step Functions rejette automatiquement les exécutions dupliquées (même nom dans une fenêtre de 90 jours). S3 marker comme vérification secondaire.
+   > **Révisé le 2026-09-01.** La version initiale déclenchait sur S3 `ObjectCreated` (un `.pcap`). Deux raisons indépendantes l'en empêchent, toutes deux observées sur le contact `ba2c5446` (2026-08-31) :
+   >
+   > - **Forme.** La règle S3 émettait `{bucket, key, contact_id: <clé S3 entière>}`, alors que la state machine consomme `{contact_id, bucket, chunks[], contact_date}`. `ParallelProcessing` lit `ItemsPath "$.chunks"` : l'exécution échoue immédiatement avec `States.ReferencePathConflict — Unable to apply step "chunks"`.
+   > - **Chronologie.** Ground Station livre un `.pcap` toutes les ~30 s (22 objets sur ~10 min). Une exécution démarrée par le premier objet (~28 s après l'AOS) ne peut pas connaître la liste complète ; le dernier objet arrive ~19 s après le LOS. Le déclenchement par objet lancerait aussi 22 exécutions pour un seul passage.
+   >
+   > `COMPLETED` ne se déclenche qu'une fois, après la fin du contact, quand tous les chunks sont livrés. La state machine construit alors elle-même `chunks[]` via `s3:listObjectsV2` (état `ListChunks`), après une attente de 120 s.
+
+7. **Idempotence via le marker S3** — Le marker `s3://{output_bucket}/contacts/{contact_id}/.processing` (état `CheckProcessingMarker`) est le mécanisme réel. Une cible EventBridge **ne peut pas** fixer le nom d'exécution d'une state machine : Step Functions en génère un, donc l'unicité par `contact_id` n'est pas disponible. `COMPLETED` ne survenant qu'une fois par contact, le marker ne couvre en pratique qu'une redélivrance EventBridge.
 
 8. **Géolocalisation + manifeste dans un CodeBuild final** — Pas de Lambda post-processing séparée. Un dernier CodeBuild agrège les résultats, calcule la géolocalisation, et génère le manifest.json.
 
@@ -58,8 +65,10 @@ Aggregation (single, after all chunks):
 
 ```mermaid
 flowchart TD
-    A[S3: Reception Bucket<br/>aws-groundstation-demo-reception-471112743408<br/>.pcap files — VITA-49 DigIF] -->|S3 ObjectCreated event| B[EventBridge Rule<br/>filter: prefix + suffix .pcap]
-    B -->|StartExecution<br/>name = contact_id| C[Step Functions Standard:<br/>SDR Pipeline]
+    GS[AWS Ground Station<br/>contact] -->|Contact State Change<br/>COMPLETED| B[EventBridge Rule<br/>contact-completed-sdr]
+    GS -->|writes ~22 x .pcap<br/>one every 30 s| A[S3: Reception Bucket<br/>aws-groundstation-demo-reception-471112743408<br/>.pcap files — VITA-49 DigIF]
+    B -->|StartExecution<br/>contact_id + event time| C[Step Functions Standard:<br/>SDR Pipeline]
+    C -->|wait 120 s then<br/>listObjectsV2 by contact prefix| A
 
     C --> D[Map State: Parallel Processing<br/>Concurrency: 19]
 
@@ -93,7 +102,7 @@ flowchart TD
 
 | Ressource | Objectif |
 |---|---|
-| EventBridge Rule | Capte S3 ObjectCreated pour les .pcap, démarre Step Functions |
+| EventBridge Rule | Capte Ground Station Contact State Change / COMPLETED, démarre Step Functions (une fois par contact) |
 | Step Functions State Machine | Orchestre le pipeline complet (fan-out par chunk + agrégation finale) |
 | CodeBuild Project | Exécute le traitement par chunk (image Docker multi-outils) |
 | ECR Repository | Stocke l'image Docker (Python + SatDump + RT-STPS + CSPP) |
@@ -105,7 +114,7 @@ flowchart TD
 
 ### 1. EventBridge Rule (déclencheur S3 → Step Functions)
 
-Capture les événements S3 ObjectCreated sur le bucket de réception, filtre sur le préfixe de contact et le suffixe `.pcap`, et démarre directement une exécution Step Functions.
+Capture l'événement Ground Station `Contact State Change` avec `contactStatus: COMPLETED` et démarre directement une exécution Step Functions. Une seule exécution par contact, déclenchée après le LOS, quand les ~22 `.pcap` sont livrés.
 
 ```json
 {

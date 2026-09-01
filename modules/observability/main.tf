@@ -280,9 +280,22 @@ resource "aws_cloudwatch_event_target" "contact_completed_sns" {
   }
 }
 
-# S3 event notification for new objects in the reception bucket → SNS
+# S3 event notification for new objects in the reception bucket.
+#
+# S3 allows exactly ONE notification configuration per bucket, and
+# aws_s3_bucket_notification manages that entire configuration -- declaring the
+# resource twice for one bucket means the last apply silently drops the other
+# one's settings. This resource is the single owner for the reception bucket:
+# add blocks here rather than creating a second resource elsewhere.
+#
+# eventbridge = true is what makes S3 publish ObjectCreated to the default event
+# bus. Without it the sdr_pipeline module's groundstation-noaa20-pcap-uploaded
+# rule matches nothing and no pass is ever processed -- exactly what happened to
+# contact ba2c5446 on 2026-08-31: 43.1 GiB landed and sat there untouched.
 resource "aws_s3_bucket_notification" "reception_notify" {
   bucket = var.reception_bucket_name
+
+  eventbridge = true
 
   topic {
     topic_arn     = aws_sns_topic.contact_failures.arn

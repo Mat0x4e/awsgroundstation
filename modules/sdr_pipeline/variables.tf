@@ -28,3 +28,8 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "satellite_id" {
+  description = "NOAA-20 satellite UUID, used to build the S3 key prefix when listing a contact's .pcap chunks"
+  type        = string
+}

@@ -123,12 +123,30 @@ Diagram:
         AutoRight:
           Title: "DigIF 58.7 GB cross-region"
 
-    - Source: RawBucket
-      SourcePosition: E
+    # The pipeline is triggered by the Ground Station contact reaching COMPLETED,
+    # not by each .pcap landing: a pass writes ~22 objects over ~10 minutes, so a
+    # per-object trigger cannot know the full chunk list. Step Functions then
+    # lists the chunks back out of the bucket.
+    - Source: GroundStation
+      SourcePosition: SSE
       Target: EventBridge
-      TargetPosition: W
+      TargetPosition: NNW
       TargetArrowHead:
         Type: Open
+      Labels:
+        TargetRight:
+          Title: "contact COMPLETED"
+
+    - Source: EventBridge
+      SourcePosition: W
+      Target: RawBucket
+      TargetPosition: E
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetRight:
+          Title: "list chunks"
 
     - Source: EventBridge
       SourcePosition: E

@@ -101,6 +101,7 @@ module "sdr_pipeline" {
   input_bucket_name = module.s3_delivery.bucket_name
   kms_key_arn       = module.security.kms_key_arn
   sns_topic_arn     = module.security.sns_topic_arn
+  satellite_id      = var.satellite_id
   tags              = local.common_tags
 }
 

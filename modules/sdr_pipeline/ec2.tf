@@ -173,13 +173,9 @@ resource "aws_iam_instance_profile" "aggregation_ec2" {
 # checkov:skip=CKV_AWS_8: No user data required -- CSPP SDR and RT-STPS are
 # installed manually on the EBS volume after the first launch.
 resource "aws_instance" "aggregation" {
-  ami                    = data.aws_ami.amazon_linux_2023.id
-  instance_type          = "r6i.xlarge"
+  ami           = data.aws_ami.amazon_linux_2023.id
+  instance_type = "r6i.xlarge"
 
-  root_block_device {
-    volume_size = 300
-    volume_type = "gp3"
-  }
   subnet_id              = data.aws_subnets.default.ids[0]
   vpc_security_group_ids = [aws_security_group.aggregation_ec2.id]
   iam_instance_profile   = aws_iam_instance_profile.aggregation_ec2.name
@@ -188,9 +184,19 @@ resource "aws_instance" "aggregation" {
   # ec2:StartInstances. Terraform does not natively manage stopped state;
   # the instance is never running during terraform apply.
 
+  # Single root_block_device. There were previously TWO of these blocks (300 GB
+  # here, 100 GB below), which aws_instance rejects -- root_block_device is
+  # MaxItems:1 -- so terraform apply/plan failed outright and no change to this
+  # module could be deployed at all.
+  #
+  # volume_size is 300 to match the live volume. The deployed instance reports a
+  # 300 GB root (df: /dev/nvme0n1p1 300G, 71G used); EBS cannot shrink, so
+  # declaring 100 would force replacement -- and replacement destroys the
+  # hand-installed /opt/rt-stps and /opt/SDR_4_1 that no Terraform code
+  # provisions and that the aggregation depends on.
   root_block_device {
     volume_type           = "gp3"
-    volume_size           = 100
+    volume_size           = 300
     encrypted             = true
     kms_key_id            = var.kms_key_arn
     delete_on_termination = true
@@ -217,6 +223,11 @@ resource "aws_instance" "aggregation" {
   lifecycle {
     # Prevent Terraform from replacing the instance on AMI updates -- the EBS
     # volume with SDR_4_1_DB must be preserved.
-    ignore_changes = [ami]
+    #
+    # root_block_device is ignored for the same reason: the volume carries an
+    # RT-STPS and CSPP install that was done by hand and exists in no Terraform,
+    # Dockerfile or user_data. Any diff that forces a new volume silently throws
+    # that away. Rebuild the instance deliberately, not as a side effect.
+    ignore_changes = [ami, root_block_device]
   }
 }

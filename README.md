@@ -124,17 +124,26 @@ mkdir -p "$DEST"
 # Composites. chunk_0 is the first 30 s after AOS, so for a target at the southern
 # edge of reach (the Mediterranean from Stockholm) it is the chunk holding it.
 # Use a later chunk if the area of interest is later in the pass.
-aws s3 sync "s3://$BUCKET/contacts/$DATE/$CONTACT/satdump/chunk_0/VIIRS/"     "$DEST/VIIRS/"
-aws s3 sync "s3://$BUCKET/contacts/$DATE/$CONTACT/satdump/chunk_0/VIIRS-DNB/" "$DEST/VIIRS-DNB/"
+aws s3 sync "s3://$BUCKET/contacts/$DATE/$CONTACT/satdump/chunk_0/VIIRS/"     "$DEST/VIIRS/"     --exact-timestamps
+aws s3 sync "s3://$BUCKET/contacts/$DATE/$CONTACT/satdump/chunk_0/VIIRS-DNB/" "$DEST/VIIRS-DNB/" --exact-timestamps
 aws s3 cp   "s3://$BUCKET/contacts/$DATE/$CONTACT/satdump/chunk_0/dataset.json" "$DEST/dataset.json"
 
-# Rendered products (PNG + GeoTIFF + JSON sidecar).
-aws s3 sync "s3://$BUCKET/products/$DATE/$CONTACT/" "$DEST/products/"
+# Rendered products (PNG + GeoTIFF + JSON sidecar). --exact-timestamps matters:
+# a re-render produces sidecars of identical byte length, and plain sync skips
+# same-sized files, so you silently keep the previous run's bounding boxes.
+aws s3 sync "s3://$BUCKET/products/$DATE/$CONTACT/" "$DEST/products/" --exact-timestamps
 ```
 
 Do **not** sync `satdump/` wholesale — a contact holds ~9,000 PNGs across every
 instrument and all 22 chunks, ~4 GB. Nor `sdr/`/`rdr/`: those are multi-GB HDF5 and
 belong in S3.
+
+Then check what you actually have, rather than trusting the sync:
+
+```bash
+# the sidecar bounding box should match the render you just made
+cat "$DEST/products/"*true_color*.json
+```
 
 Record two things in [`docs/CONTACTS.md`](docs/CONTACTS.md) while the pass is fresh:
 which chunk the composites came from, and whether the JSON sidecars' `bounding_box`

@@ -3,7 +3,7 @@
 Goal: one daytime NOAA-20 contact that puts as much of the Mediterranean as possible
 into a single sunlit, many-granule VIIRS acquisition.
 
-Planner: [scripts/plan_pass.py](scripts/plan_pass.py) — SGP4 propagation + VIIRS swath
+Planner: [scripts/plan_pass.py](../scripts/plan_pass.py) — SGP4 propagation + VIIRS swath
 sweep + solar geometry, ranked against the windows AWS actually offers.
 
 **Status 2026-08-27: all AWS-side facts below verified against the API.**
@@ -139,7 +139,7 @@ chain, not the resolution.
 ## 6. Booking
 
 The scheduler cron is `DISABLED` in code
-([infra/modules/contact_scheduler/main.tf:44](infra/modules/contact_scheduler/main.tf#L44)) and must
+([infra/modules/contact_scheduler/main.tf:44](../infra/modules/contact_scheduler/main.tf#L44)) and must
 stay that way — re-enabling it via `terraform apply` previously booked two unintended
 paid contacts. **Reserve manually.**
 
@@ -177,14 +177,14 @@ assume roughly even odds. Booking 2026-08-31 does not preclude this.
 
 ## 8. Processing notes
 
-- Use the working CSPP recipe (see [CSPP_SOLVED.md](CSPP_SOLVED.md)) — keep the original
+- Use the working CSPP recipe (see [DEPLOYMENT.md](DEPLOYMENT.md)) — keep the original
   `RNSCA-RVIRS_j01_*.h5` filename, install the J01 LUTs, run `sdr_luts.sh` online in
   CodeBuild.
 - For anything ship-related, work in the **I-bands** (`SVI01`–`SVI05`, 375 m) with
   `GITCO` terrain-corrected geolocation, not the M-bands.
 - **Product names: resolved 2026-08-27.**
-  [scripts/viirs/geo_reader.py](scripts/viirs/geo_reader.py) and
-  [scripts/viirs/visualize_nasa.py](scripts/viirs/visualize_nasa.py) accept the real
+  [scripts/viirs/geo_reader.py](../scripts/viirs/geo_reader.py) and
+  [scripts/viirs/visualize_nasa.py](../scripts/viirs/visualize_nasa.py) accept the real
   CSPP names (`SVM15`/`GITCO`/`GMTCO`, `*-GEO-TC_All`) with the ellipsoid variants as
   fallback, terrain-corrected preferred. Verified end-to-end against contact #3's real
   `GMTCO`/`GITCO` from S3: (768, 3200) and (1536, 6400) per granule, sane lat/lon, zero

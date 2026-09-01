@@ -36,10 +36,9 @@ end-to-end sequence with real timings, and the constraints that shaped the desig
 | Document | Read it when |
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | You want the system in one picture and one sequence |
-| [`docs/CSPP_SOLVED.md`](docs/CSPP_SOLVED.md) | **Before touching CSPP.** The exact conditions it needs — J01 LUTs, `sdr_luts.sh` online, and the RDR filename rule that caused a multi-week dead end |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | **Before touching CSPP, or to see what is deployed.** The exact conditions CSPP needs — J01 LUTs, `sdr_luts.sh` online, and the RDR filename rule that caused a multi-week dead end — plus current deployment state and the hard-won specifics |
 | [`docs/MEDITERRANEAN_PASS.md`](docs/MEDITERRANEAN_PASS.md) | Planning a targeted acquisition: reachability, the ~10° Stockholm mask, the 7-day booking wall |
 | [`docs/CONTACTS.md`](docs/CONTACTS.md) | Which passes exist, what they contain, what they cost |
-| [`docs/DEPLOYMENT_STATUS.md`](docs/DEPLOYMENT_STATUS.md) | What is deployed and what is not — note its CSPP conclusions are superseded by `CSPP_SOLVED.md` |
 
 ## Quick start
 

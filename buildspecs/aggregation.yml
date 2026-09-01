@@ -37,7 +37,7 @@ phases:
       - chmod +x /tmp/aggregation.sh
       - test -x "${CSPP_HOME}/bin/viirs_sdr.sh" || { echo "CSPP missing from image"; exit 1; }
       - test -x "${RTSTPS_HOME}/bin/batch.sh" || { echo "RT-STPS missing from image"; exit 1; }
-      # CSPP_SOLVED.md req 1 -- J01 shipped LUTs. The image carries straylight and
+      # DEPLOYMENT.md req 1 -- J01 shipped LUTs. The image carries straylight and
       # ecotiles but NOT shipped_luts, so check_installation() aborts with
       # "Installation problem .../SDR_4_1_DB/package needs to exist". Do NOT also
       # extract straylight/static_tiles here: they are already in the image and the
@@ -45,7 +45,7 @@ phases:
       - aws s3 cp "s3://${OUTPUT_BUCKET}/software/CSPP_SDR_V4.1_static_luts_j01.tar.gz" /tmp/j01luts.tgz
       - tar xzf /tmp/j01luts.tgz -C /opt/ && rm -f /tmp/j01luts.tgz
       - test -d "${CSPP_HOME}/anc/static/shipped_luts/j01" || { echo "shipped_luts/j01 missing after extract"; exit 1; }
-      # CSPP_SOLVED.md req 2 -- populate the cache DB from jpssdb.ssec.wisc.edu.
+      # DEPLOYMENT.md req 2 -- populate the cache DB from jpssdb.ssec.wisc.edu.
       # This is the step that needs internet egress, and the reason aggregation
       # cannot run on the EC2 instance at all.
       - cd "${CSPP_HOME}" && timeout 2400 ./bin/sdr_luts.sh > /tmp/luts.log 2>&1; echo "sdr_luts exit $?"; tail -5 /tmp/luts.log

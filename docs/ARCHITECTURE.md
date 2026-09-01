@@ -116,7 +116,7 @@ design, so partial results still reach aggregation. Check the per-chunk `build_s
 
 - **CSPP needs the internet; the EC2 aggregation instance does not have it.** Its security
   group is SSM-outbound-only, so `sdr_luts.sh` times out and CSPP dies inside its own error
-  handler. Aggregation therefore runs in CodeBuild. See [`CSPP_SOLVED.md`](CSPP_SOLVED.md).
+  handler. Aggregation therefore runs in CodeBuild. See [`DEPLOYMENT.md`](DEPLOYMENT.md).
 - **The trigger is per contact, not per object.** A pass writes ~22 objects over ~10
   minutes; an execution started by the first cannot know the full list.
 - **S3 allows one notification configuration per bucket.** Two `aws_s3_bucket_notification`

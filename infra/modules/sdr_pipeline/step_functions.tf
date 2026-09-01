@@ -420,7 +420,7 @@ resource "aws_sfn_state_machine" "sdr_pipeline" {
       # minutes and then died inside its own error handler with
       # "TypeError: object of type 'bool' has no len()". CodeBuild has egress and
       # the sdr-pipeline image already carries CSPP 4.1.1 plus the J01 straylight
-      # LUTs. See CSPP_SOLVED.md req 2: "Run CSPP in CodeBuild, not EC2."
+      # LUTs. See DEPLOYMENT.md req 2: "Run CSPP in CodeBuild, not EC2."
       #
       # The buildspec is read from buildspecs/aggregation.yml so the file that ran
       # by hand for contact ba2c5446 is the same one the pipeline uses -- no

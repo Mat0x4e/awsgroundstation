@@ -88,7 +88,7 @@ renting one by the minute). Where a capability is not worth its price, say so.
 - **CSPP SDR WORKS.** The official NASA path is not a dead end. It produces
   calibrated Level 1 SDR + terrain-corrected per-pixel geolocation (sub-km).
   Root cause of the long struggle was mundane: `viirs_sdr.sh` reads the spacecraft
-  from the RDR **filename** (`_j01_`); renaming the RDR broke it. See docs/CSPP_SOLVED.md.
+  from the RDR **filename** (`_j01_`); renaming the RDR broke it. See docs/DEPLOYMENT.md.
   → Article 2 must present the NASA stack as **working**, with the difficulties
   compressed to a couple of lines of lessons.
 - **Delivered results to feature:**

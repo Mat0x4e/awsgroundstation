@@ -188,7 +188,7 @@ and the constraints behind it: [MEDITERRANEAN_PASS.md](MEDITERRANEAN_PASS.md).
 | **Expected Size** | ~45 GB (~21 files × 2.18 GB) |
 | **Estimated Cost** | ~$110 (on-demand narrowband X-band) |
 | **Scheduled By** | Manual `reserve-contact` (scheduler cron remains DISABLED) |
-| **Selected With** | [scripts/plan_pass.py](scripts/plan_pass.py) |
+| **Selected With** | [scripts/plan_pass.py](../scripts/plan_pass.py) |
 
 ### Expected Coverage
 
@@ -217,7 +217,7 @@ not a pipeline regression.
 - [ ] Check cloud forecast for the western/central Med on 2026-08-30
 - [ ] Confirm `contactStatus` reaches `SCHEDULED`
 - [ ] Verify .pcap arrival after 14:12 CEST
-- [ ] Run SDR pipeline with the working CSPP recipe ([CSPP_SOLVED.md](CSPP_SOLVED.md))
+- [ ] Run SDR pipeline with the working CSPP recipe ([DEPLOYMENT.md](DEPLOYMENT.md))
 - [x] Fix `SVOM15`/`GMODO`/`GIGTO` constants in `scripts/viirs/` before the NASA path — **done 2026-08-27**, verified against contact #3's real `GMTCO`/`GITCO`
 - [ ] True-colour composite + I-band (375 m) look at the Adriatic/Naples area
 

@@ -38,6 +38,8 @@ from viirs.satdump_visualizer import SatDumpVisualizer, NoCompositesError
 from viirs.cartopy_renderer import CartopyRenderer
 from viirs.metadata_generator import MetadataGenerator
 from viirs.geotiff_exporter import GeoTIFFExporter
+from viirs.scan_geometry import SwathGeolocator, resample_to_equirect
+from viirs.models import BoundingBox
 
 # ---------------------------------------------------------------------------
 # Logging — INFO to stdout so CodeBuild captures it in the build log
@@ -108,6 +110,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         required=False,
         default=None,
         help="Contact start time in HH:MM:SS UTC format (improves geolocation accuracy).",
+    )
+    parser.add_argument(
+        "--geolocate",
+        required=False,
+        choices=["auto", "off"],
+        default="auto",
+        help=(
+            "Place pixels using the CBOR ephemeris and scan model, instead of "
+            "stretching the image across a bounding box. 'auto' uses it when "
+            "the CBOR supports it and falls back otherwise."
+        ),
     )
     parser.add_argument(
         "--pass-duration-seconds",
@@ -277,6 +290,21 @@ def main(argv: list[str] | None = None) -> int:
     meta_gen = MetadataGenerator()
     geotiff_exp = GeoTIFFExporter() if geotiff_enabled else None
 
+    # True geolocation, when the CBOR carries what it needs. Each composite is
+    # then resampled onto a north-up grid whose extent *is* its bounding box,
+    # so everything downstream -- overlay, GeoTIFF corners, sidecar -- becomes
+    # correct without knowing anything about swath geometry.
+    geolocator = None
+    if args.geolocate == "auto":
+        geolocator = SwathGeolocator.from_projection_cfg(cbor_meta.projection_coords)
+        if geolocator is None:
+            logger.info("No usable scan geometry — keeping the bounding-box path")
+        else:
+            logger.info(
+                "Scan geometry available — %d ephemeris points, %.4f s per line",
+                len(geolocator.times), geolocator.line_period_seconds or float("nan"),
+            )
+
     # Derive datetime_utc string from CBOR timestamp for metadata
     if cbor_meta.timestamp is not None:
         try:
@@ -314,10 +342,26 @@ def main(argv: list[str] | None = None) -> int:
                 data.dtype,
             )
 
+            # 4a-bis. Put every pixel where the geometry says it belongs.
+            composite_bbox = bbox
+            if geolocator is not None:
+                geometry = geolocator.locate(data.shape[0], data.shape[1])
+                resampled = resample_to_equirect(data, geometry)
+                if resampled is not None:
+                    data, extent = resampled
+                    composite_bbox = BoundingBox(
+                        lat_min=extent[0], lat_max=extent[1],
+                        lon_min=extent[2], lon_max=extent[3],
+                    )
+                    logger.info(
+                        "  Geolocated: lat=[%.3f, %.3f] lon=[%.3f, %.3f]",
+                        extent[0], extent[1], extent[2], extent[3],
+                    )
+
             # 4b. Render with Cartopy overlays (Req 4.1)
             renderer.render_satdump(
                 data=data,
-                bbox=bbox,
+                bbox=composite_bbox,
                 composite_type=composite.composite_type,
                 metadata=cbor_meta,
                 output_path=png_path,
@@ -329,7 +373,7 @@ def main(argv: list[str] | None = None) -> int:
                 composite_type=composite.composite_type,
                 satellite=cbor_meta.satellite,
                 datetime_utc=datetime_utc,
-                bbox=bbox,
+                bbox=composite_bbox,
                 output_png=png_path,
             )
 
@@ -344,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
             if geotiff_enabled and geotiff_exp is not None:
                 geotiff_exp.export_satdump(
                     data=data,
-                    bbox=bbox,
+                    bbox=composite_bbox,
                     output_path=tif_path,
                 )
                 logger.info("  TIF written: %s", tif_path)

@@ -285,7 +285,8 @@ not a pipeline regression.
 - [x] Confirm the `--contact-time` geolocation fix on a rebuilt image — **done 2026-09-01**, bbox moved from the Caspian to Europe
 - [x] Fix the cross-track extension in `_from_tle` — **done 2026-09-01**, spherical arc + bearing split
 - [x] Re-render contact #5 and check the overlay — **done 2026-09-01 17:45**: lat 37.15–45.63, lon −2.85–32.34; Corsica/Sardinia, Barcelona and Rome fall where they belong
-- [ ] Optional next step for true georeferencing: `product.cbor`'s `projection_cfg.ephemeris` (30 points, ECI, spanning exactly the 29 s chunk) is usable once its timestamps are unwrapped — they are stored 2³² seconds low, reading as 1890. Rotating those to ECEF via GMST and using the `viirs_single_line` scan model would give a GCP warp instead of an axis-aligned box, which is the only way to fit a tilted swath (941 × 2,930 km box for a ~200 × 3,000 km strip)
+- [x] True georeferencing from `product.cbor` — **done 2026-09-01**. Pixels are now placed by the ephemeris and scan model and resampled onto a north-up grid, instead of being stretched across a bounding box. Land/sea agreement against known coastlines went from ~50% (chance) to **88%**; the sub-satellite track matches an independent SGP4 propagation to **0.8 km**. See [ARCHITECTURE.md](ARCHITECTURE.md) and `scripts/viirs/scan_geometry.py`
+- [ ] Residual: the along-track model treats every row as one line at a constant rate, ignoring VIIRS bow-tie overlap between scans, which grows toward the swath edge
 - [x] Fix `SVOM15`/`GMODO`/`GIGTO` constants in `scripts/viirs/` before the NASA path — **done 2026-08-27**, verified against contact #3's real `GMTCO`/`GITCO`
 - [ ] True-colour composite + I-band (375 m) look at the Adriatic/Naples area
 

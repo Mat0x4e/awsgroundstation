@@ -171,7 +171,7 @@ and the constraints behind it: [MEDITERRANEAN_PASS.md](MEDITERRANEAN_PASS.md).
 | Property | Value |
 |----------|-------|
 | **Contact ID** | `ba2c5446-280f-4985-8ad8-dced8ae8b616` |
-| **Status** | 📅 SCHEDULING (reserved 2026-08-27) |
+| **Status** | ✅ FLOWN 2026-08-31 — `COMPLETED` at the planned 51.23° |
 | **Satellite** | NOAA-20 (NORAD 43013) |
 | **Ground Station** | Stockholm 1 (`eu-north-1`) — the only onboarded antenna that reaches the Mediterranean |
 | **Max Elevation** | 51.23° |
@@ -184,11 +184,35 @@ and the constraints behind it: [MEDITERRANEAN_PASS.md](MEDITERRANEAN_PASS.md).
 | **Dataflow** | antenna-downlink (Stockholm 1, `eu-north-1`) → s3-recording (`eu-central-1`) |
 | **Data Format** | VITA-49 DigIF (raw digitized RF, .pcap) |
 | **S3 Destination** | `s3://aws-groundstation-demo-reception-471112743408/year=2026/month=08/day=31/satellite=33f035e1-73f7-47a5-9df8-fbc48636dca8/` |
-| **Expected File** | `ba2c5446-280f-4985-8ad8-dced8ae8b616_*.pcap` |
-| **Expected Size** | ~45 GB (~21 files × 2.18 GB) |
+| **Received** | 22 × `.pcap`, **43.1 GiB**, gapless 30 s cadence (first +28 s after AOS, last +19 s after LOS) |
 | **Estimated Cost** | ~$110 (on-demand narrowband X-band) |
 | **Scheduled By** | Manual `reserve-contact` (scheduler cron remains DISABLED) |
 | **Selected With** | [scripts/plan_pass.py](../scripts/plan_pass.py) |
+
+
+### Outcome — reception clean, target not calibrated
+
+| Stage | Result |
+|---|---|
+| Reception | 22 chunks, 43.1 GiB, no dropout |
+| SatDump | 22 × `npp_hrd.cadu` (53.6 MiB each) |
+| RT-STPS | 5 RDRs — VIIRS 639.5 MiB, CrIS 184.5, ROTCS 30.7, ATMS 2.9, RONPS 2.7 |
+| CSPP | 8 science granules in → **GEO for 4, calibrated SDR for 1** (35 files, 2.7 GiB) |
+
+**The calibrated granule does not cover the Mediterranean.** It spans 12:06:35–12:07:59 UTC,
+6m46s after AOS, over Scandinavia; the earliest product of any kind starts 12:02:20. The
+basin is scanned in the **first 10–115 s** of this contact, and those granules failed inside
+CSPP with `SDR_PREREQ_ABSENT VIIRS-SCIENCE-RDR` / `PRO_CROSSGRAN_FAIL` — the science RDR was
+too incomplete to calibrate.
+
+That is the predicted failure mode, not a surprise: the basin sits at the southern edge of
+Stockholm's reach and is scanned at 11.6–17.4° elevation at maximum slant range. The pass was
+still the right pick — it was the only offer of 32 putting the basin in the 375 m core swath.
+Retry booked as contact #6.
+
+This contact was also used for three pipeline rehearsals on 2026-09-01; products from those
+runs accumulate alongside the originals (RDR/SDR filenames embed a creation timestamp).
+Pre-rehearsal copies: `s3://groundstation-noaa20-sdr-output-471112743408/rehearsal-backup/2026-09-01/ba2c5446/`.
 
 ### Expected Coverage
 
@@ -261,3 +285,28 @@ Deployed 2026-06-25 via Terraform (`enable_sdr_pipeline = true`).
 | RT-STPS | 7.0 + Patch 1 | CADU → RDR (CCSDS → HDF5 Level 0) |
 | CSPP SDR | 4.1.1 | RDR → SDR + GEO (calibrated HDF5 Level 1) |
 | Python | 3.x | I/Q extraction, geolocation, manifest, metrics |
+
+---
+
+## Contact #6 — Mediterranean retry (scheduled)
+
+Second attempt at the objective contact #5 missed. Chosen on the metric that actually
+failed: link elevation **while the basin is scanned**.
+
+| Property | Value |
+|----------|-------|
+| **Contact ID** | `8fb38af8-080a-445a-bf10-50d14f4ba85e` |
+| **Status** | 📅 SCHEDULED (reserved 2026-08-31) |
+| **Ground Station** | Stockholm 1 (`eu-north-1`) |
+| **Max Elevation** | 61.27° (AWS) — planner computed 56.9°, a 4.4° spread worth watching |
+| **Visibility** | 2026-09-06 11:47:16 → 11:57:59 UTC (10m43s) |
+| **Pre/post pass** | 11:45:16 → 11:59:59 UTC |
+| **Basins** | 6 imaged, 5 in the 375 m core swath |
+| **Link over basin** | Gulf of Lion and Ligurian at **19.5°**, N. Adriatic **18.8°** (293 km off nadir) — against 11.6–17.4° on contact #5 |
+| **Best glint** | 39.3° — clean true-colour side of the glint conflict |
+| **Estimated Cost** | ~$110 |
+
+**Residual risk:** every offered Stockholm pass scans the basin in the first 5–115 s after
+AOS — structural, since the Mediterranean sits at the southern edge of reach. On contact #5
+nothing before ~AOS+2.5 min survived calibration. Higher elevation improves the link budget
+but does not move the basin out of that window.

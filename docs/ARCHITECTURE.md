@@ -31,6 +31,7 @@ sequenceDiagram
     participant SFN as Step Functions
     participant CB as CodeBuild
     participant S3O as S3 output
+    participant VIZ as VIIRS visualization
 
     Note over SAT,GS: T-7d  plan_pass.py ranks the offer set, reserve-contact
     SAT->>GS: T+0     AOS — X-band HRD, 15 Mbps
@@ -47,7 +48,7 @@ sequenceDiagram
     S3R-->>SFN: 22 chunk keys
     Note over SFN: .processing marker claims the contact
     SFN->>CB: Map fan-out, 19 concurrent
-    loop per chunk (~50 min each)
+    loop per chunk (9-39 min each, median 23)
         CB->>CB: VITA-49 → I/Q → SatDump (QPSK, Viterbi, Reed-Solomon)
         CB->>S3O: npp_hrd.cadu + composites
     end
@@ -56,8 +57,8 @@ sequenceDiagram
     CB->>CB: concat 22 CADU → RT-STPS → 5 RDR (~2.5 min)
     CB->>CB: CSPP viirs_sdr.sh → SDR + GEO
     CB->>S3O: RDR, SVI/SVM/GEO HDF5
-    S3O->>EB: object created
-    EB->>SFN: VIIRS visualization (GeoTIFF, PNG)
+    SFN->>VIZ: StartVisualization — one call per contact
+    VIZ->>CB: visualization build (GeoTIFF, PNG)
 ```
 
 ### Where the time goes
@@ -66,7 +67,7 @@ sequenceDiagram
 |---|---|---|
 | Contact | ~10 min | the only part that costs antenna time (~$110) |
 | Delivery settle | 120 s | last chunk landed 19 s after LOS; the wait is margin |
-| Chunk fan-out | ~50 min | 22 builds, 19 concurrent — wall-clock ≈ one build |
+| Chunk fan-out | ~40 min | 22 builds, 19 concurrent; measured 8.7 / 23.3 / 38.9 min (min / median / max) |
 | Aggregation | ~25 min | ~10 of it is `sdr_luts.sh` fetching ancillary |
 
 ---
@@ -105,6 +106,7 @@ stack is worth the trouble. See [`../articles/article-2-nasa-software.md`](../ar
 | `CheckProcessingMarker` / `WriteProcessingMarker` | Task | idempotence via `contacts/{id}/.processing` |
 | `ParallelProcessing` | Map | 19 concurrent, `ToleratedFailurePercentage: 100` |
 | `StartAggregationBuild` … `EvaluateAggregation` | Task/Wait/Choice | CodeBuild aggregation, polled |
+| `StartVisualization` | Task | invokes the VIIRS orchestrator directly — one call per contact. Catches `States.ALL` to success: products are already in S3, so a visualisation failure must not fail the run |
 | `MarkAggregationFailed` → `AggregationFailure` | Pass/Task | populate `$.error`, publish to SNS |
 
 **A green execution does not mean 22 good chunks.** The Map tolerates 100 % failure by
@@ -126,6 +128,10 @@ design, so partial results still reach aggregation. Check the per-chunk `build_s
   `year=Y/month=M/day=D/satellite=<sat>/<contactId>_<ts>_<uuid>.pcap`.
 - **Re-running a contact accumulates products.** RDR and SDR filenames embed a creation
   timestamp, so they never overwrite; only `.cadu` does.
+- **Visualisation is told, not triggered.** It was once driven by an S3 `ObjectCreated` rule
+  matching `.png`; a contact writes ~9,150 objects, so arming that bucket produced ~6,000
+  CodeBuild builds in a morning and exhausted the account build queue. Nothing this pipeline
+  writes is one-per-contact, so no filter fixes it — the state machine calls the orchestrator.
 - **The EC2 aggregation instance carries a hand-installed `/opt/rt-stps` and
   `/opt/SDR_4_1`** that exist in no Terraform, Dockerfile or user_data. Replacing the
   instance destroys them, which is why `ignore_changes` covers `root_block_device`.
@@ -137,7 +143,7 @@ design, so partial results still reach aggregation. Check the per-chunk `build_s
 | Item | Approx. |
 |---|---|
 | Antenna time (10 min, on-demand) | $110–130 |
-| CodeBuild (~1,100 build-minutes) | the largest variable |
+| CodeBuild (~490 build-minutes: 471 chunks + ~22 aggregation) | the largest variable |
 | Cross-region transfer (43 GB) | ~$1 |
 | S3 storage | ~$1/month per retained pass |
 

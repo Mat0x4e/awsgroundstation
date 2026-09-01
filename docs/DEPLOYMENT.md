@@ -109,7 +109,7 @@ mosaic is capped by link margin, not by CSPP.**
 | RT-STPS | Working — 5 RDRs (VIIRS, CrIS, ATMS, 2×OMPS) from concatenated CADU |
 | CSPP SDR | Working **in CodeBuild** (see recipe above) |
 | Trigger | `groundstation-noaa20-contact-completed-sdr`, once per contact. `…-pcap-uploaded` superseded, DISABLED |
-| VIIRS visualisation | Lambda + CodeBuild + ECR deployed; both buckets now emit EventBridge events |
+| VIIRS visualisation | Lambda + CodeBuild + ECR deployed. Invoked by the state machine (`StartVisualization`), **not** by S3 events — the output bucket deliberately emits none |
 | Contact scheduler | **DISABLED on purpose.** Enabling it previously booked two unintended paid contacts. Reserve manually. |
 | CloudTrail, contact_scheduler resources | Declared in Terraform, deliberately **not applied** |
 

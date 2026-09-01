@@ -8,6 +8,26 @@ sweep + solar geometry, ranked against the windows AWS actually offers.
 
 **Status 2026-08-27: all AWS-side facts below verified against the API.**
 
+> **Outcome, 2026-08-31 — the pass flew and the basin did not calibrate.**
+>
+> Reception was clean: 22 chunks, 43.1 GiB, no dropout, `COMPLETED` at the planned 51.23°.
+> RT-STPS produced a 639.5 MiB VIIRS RDR holding 8 science granules. CSPP geolocated 4 and
+> **calibrated 1** — spanning 12:06:35–12:07:59 UTC, 6m46s after AOS, over Scandinavia.
+> No calibrated product and no geolocation covers the Mediterranean; the earliest product of
+> any kind starts 12:02:20, and the basin is scanned in the first 10–115 s.
+>
+> The early granules failed with `SDR_PREREQ_ABSENT VIIRS-SCIENCE-RDR` — too little intact
+> science RDR to calibrate. **§3 predicted exactly this**: the basin is scanned at 11.6–17.4°
+> elevation at maximum slant range, "the regime that produced partial granules on contacts
+> #1–#4". The geometry was chosen correctly and the link budget still lost.
+>
+> **Retry booked: contact #6 `8fb38af8-080a-445a-bf10-50d14f4ba85e`, 2026-09-06
+> 11:47:16–11:57:59 UTC**, AWS max elevation 61.27°, 6 basins / 5 in core swath. Selected on
+> the metric that actually failed — the basin is scanned at 18.8–19.5° rather than 11.6–17.4°.
+> The residual risk is unchanged and structural: every offered pass scans the basin in the
+> opening ~2 minutes, and on #5 nothing before ~AOS+2.5 min survived. See
+> [CONTACTS.md](CONTACTS.md#contact-6--mediterranean-retry-scheduled).
+
 ---
 
 ## 1. The reachability constraint

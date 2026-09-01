@@ -112,7 +112,31 @@ class TestFrames:
 
 class TestSwathGeolocator:
     def test_nadir_lands_on_the_sub_satellite_point(self):
+        """The nadir ray must hit the ground directly beneath the satellite.
+
+        Checked against the satellite's own position at that row's time, so
+        the assertion holds whatever row-order convention is in force.
+        """
         geo = sg.SwathGeolocator.from_projection_cfg(_contact5_cfg())
+
+        # A single row sits at the centre of the ephemeris window.
+        when = geo.row_times(1)[0]
+        position, _ = geo._state_at(np.array([when]))
+        expected_lat, expected_lon = sg.ecef_to_geodetic(
+            sg.eci_to_ecef(position[0], when + geo.rotation_epoch_offset)
+        )
+
+        lat, lon = geo.subsatellite_track(1)
+
+        assert lat[0] == pytest.approx(float(expected_lat), abs=0.05)
+        assert lon[0] == pytest.approx(float(expected_lon), abs=0.05)
+
+    def test_nadir_track_matches_the_real_pass(self):
+        """Contact #5's track, against SGP4: still the anchor for the frame."""
+        geo = sg.SwathGeolocator.from_projection_cfg(
+            _contact5_cfg(), time_increases_with_row=True
+        )
+        geo.line_period_seconds = None  # span the ephemeris, so row 0 is its start
 
         lat, lon = geo.subsatellite_track(2)
 
@@ -138,7 +162,31 @@ class TestSwathGeolocator:
 
         times = geo.row_times(256)
 
-        assert times[-1] - times[0] == pytest.approx(255 * 0.0555, rel=1e-6)
+        assert abs(times[-1] - times[0]) == pytest.approx(255 * 0.0555, rel=1e-6)
+
+    def test_rows_are_centred_in_the_ephemeris_window(self):
+        """The ephemeris carries margin either side of the imagery.
+
+        Clocking from the window's start instead leaves contact #5's strip
+        about 50 km south of where the coastlines say it belongs.
+        """
+        geo = sg.SwathGeolocator.from_projection_cfg(_contact5_cfg())
+
+        times = geo.row_times(256)
+
+        ephemeris_mid = 0.5 * (geo.times[0] + geo.times[-1])
+        assert 0.5 * (times[0] + times[-1]) == pytest.approx(ephemeris_mid, abs=1e-6)
+
+    def test_row_order_follows_the_convention(self):
+        geo_forward = sg.SwathGeolocator.from_projection_cfg(
+            _contact5_cfg(), time_increases_with_row=True
+        )
+        geo_reverse = sg.SwathGeolocator.from_projection_cfg(
+            _contact5_cfg(), time_increases_with_row=False
+        )
+
+        assert geo_forward.row_times(8)[0] < geo_forward.row_times(8)[-1]
+        assert geo_reverse.row_times(8)[0] > geo_reverse.row_times(8)[-1]
 
     def test_rows_span_the_ephemeris_when_no_line_rate_is_given(self):
         cfg = _contact5_cfg()
@@ -148,7 +196,7 @@ class TestSwathGeolocator:
 
         times = geo.row_times(256)
 
-        assert times[-1] - times[0] == pytest.approx(29.0, rel=1e-6)
+        assert abs(times[-1] - times[0]) == pytest.approx(29.0, rel=1e-6)
 
     def test_aggregation_zones_widen_pixels_toward_nadir(self):
         """3:1 aggregation at nadir, 1:1 at the edge, so nadir pixels are wider."""

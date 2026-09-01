@@ -184,18 +184,20 @@ class SwathGeolocator:
         cls,
         cfg: Optional[dict],
         scan_direction: int = -1,
-        time_increases_with_row: bool = True,
+        time_increases_with_row: bool = False,
     ) -> Optional["SwathGeolocator"]:
         """Build from a SatDump ``projection_cfg``, or None when unusable.
 
         The two defaults are storage conventions, not geometry, so they were
-        settled against the imagery rather than derived: classify pixels as
-        land or sea by colour, and check them against known coastlines.
-        ``scan_direction=-1`` wins in every band of the swath by a wide
-        margin. ``time_increases_with_row=True`` -- row 0 is the first scan
-        line acquired, as a streaming decoder would write it -- agrees 90% of
-        the time near nadir, where the model is exact, against 79% for the
-        alternative.
+        settled against rasterised Natural Earth coastlines: classify every
+        swath pixel as land or sea by colour, look up what is actually at its
+        computed position, and score the correlation.
+
+        ``scan_direction=-1`` is unambiguous -- the alternative scores no
+        correlation at all (MCC -0.09 against +0.65). ``time_increases_with_row
+        =False`` wins by MCC 0.738 to 0.599; an earlier default of True came
+        from a coarser land/sea reference that could not resolve the ~50 km
+        difference between them.
         """
         if not cfg:
             return None
@@ -320,16 +322,26 @@ class SwathGeolocator:
     def row_times(self, height: int) -> np.ndarray:
         """Acquisition time of each image row.
 
-        A composite does not necessarily span the whole ephemeris window. The
-        CBOR gives the line rate directly -- ``scan_time`` divided by
-        ``interpolate_timestamps`` lines per scan, 0.0555 s for VIIRS -- so
-        when it is known the rows are clocked at that rate from the start of
-        the ephemeris. Stretching the rows across the full window instead put
-        contact #5's 14.2 s of imagery over 29 s, a 2x along-track scale error
-        that no rigid shift can absorb.
+        A composite does not span the whole ephemeris window, and does not
+        start at its beginning. The CBOR gives the line rate -- ``scan_time``
+        divided by ``interpolate_timestamps`` lines per scan, 0.0555 s for
+        VIIRS -- so the rows are clocked at that rate and **centred** in the
+        ephemeris window, which carries margin either side of the imagery.
+
+        Contact #5 shows why both parts matter. Its 256 rows are 14.2 s of
+        imagery inside a 29 s ephemeris: spreading them over the whole window
+        is a 2x along-track scale error, and clocking them correctly but from
+        the window's start leaves the strip ~50 km south of where it belongs.
+        Centring puts it right, and matches the offset found empirically
+        against coastlines (+8 s measured, +7.4 s predicted).
         """
         if self.line_period_seconds:
-            times = self.times[0] + np.arange(height) * self.line_period_seconds
+            span = (height - 1) * self.line_period_seconds
+            midpoint = 0.5 * (self.times[0] + self.times[-1])
+            times = (
+                midpoint - span / 2.0
+                + np.arange(height) * self.line_period_seconds
+            )
         else:
             times = np.linspace(self.times[0], self.times[-1], height)
         return times if self.time_increases_with_row else times[::-1]

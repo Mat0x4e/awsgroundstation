@@ -30,6 +30,44 @@ fi
 # Ensure output directory exists
 mkdir -p "${OUTPUT_DIR}"
 
+# ---------------------------------------------------------------------------
+# TLE provisioning.
+#
+# SatDump resolves satellite positions through a TLE, and its own updater
+# fetches CelesTrak over plain http at startup. That fetch fails in CodeBuild:
+# "0 TLEs loaded! ... Error updating TLEs. Not updated."
+#
+# Without a TLE for NORAD 43013 the composites still decode, so this went
+# unnoticed for months -- but projection resolves every ground control point to
+# the same place, so the bounds collapse to the whole globe, the output is
+# sized 32000x16000 and SatDump segfaults (2026-09-01).
+#
+# --tle_override makes SatDump load exactly this file and skip its network
+# update entirely. Prefer a fresh fetch; fall back to the TLE baked into the
+# image, which is only ever a propagation accuracy question, never a crash.
+# ---------------------------------------------------------------------------
+BUNDLED_TLE="$(dirname "$0")/tle/noaa20.tle"
+TLE_FILE="${OUTPUT_DIR}/noaa20.tle"
+NORAD=43013
+
+if curl -fsSL --max-time 20 --retry 2 \
+        "https://celestrak.org/NORAD/elements/gp.php?CATNR=${NORAD}&FORMAT=tle" \
+        -o "${TLE_FILE}.fetched" 2>/dev/null \
+   && grep -q "^1 ${NORAD}" "${TLE_FILE}.fetched" \
+   && grep -q "^2 ${NORAD}" "${TLE_FILE}.fetched"; then
+    mv "${TLE_FILE}.fetched" "${TLE_FILE}"
+    echo "[SatDump] TLE: fetched fresh from CelesTrak"
+elif [ -s "$BUNDLED_TLE" ]; then
+    rm -f "${TLE_FILE}.fetched"
+    cp "$BUNDLED_TLE" "$TLE_FILE"
+    echo "[SatDump] TLE: CelesTrak unreachable, using bundled ${BUNDLED_TLE}"
+else
+    echo "[ERROR] No TLE available and none bundled at ${BUNDLED_TLE}"
+    echo "[ERROR] Projection would collapse to global bounds and crash"
+    exit 1
+fi
+echo "[SatDump] TLE epoch line: $(sed -n '2p' "$TLE_FILE" | cut -c19-32)"
+
 echo "[SatDump] Processing: ${INPUT_CS8}"
 echo "[SatDump] Output dir: ${OUTPUT_DIR}"
 
@@ -37,6 +75,7 @@ echo "[SatDump] Output dir: ${OUTPUT_DIR}"
 satdump npp_hrd baseband "${INPUT_CS8}" "${OUTPUT_DIR}" \
     --samplerate 34312500 \
     --baseband_format cs8 \
+    --tle_override "${TLE_FILE}" \
     2>&1 | tee "${OUTPUT_DIR}/satdump.log"
 
 EXIT_CODE=${PIPESTATUS[0]}

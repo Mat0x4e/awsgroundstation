@@ -83,11 +83,13 @@ flowchart LR
     CADU -->|"RT-STPS jpss1.xml"| RDR["RDR HDF5 — Level 0<br/>raw counts, 640 MiB VIIRS"]
     RDR -->|"CSPP viirs_sdr.sh"| SDR["SDR + GEO HDF5 — Level 1<br/>radiances + per-pixel lat/lon"]
     SDR -->|project| TIF["GeoTIFF<br/>sub-km geolocation"]
-    CADU -->|"SatDump render"| PNG["composite PNG<br/>display only, 100–300 km error"]
+    CADU -->|"SatDump render"| PNG["composite PNG<br/>display image, uncalibrated<br/>georeferenced by SatDump itself"]
 ```
 
-The lower branch is what open source alone gives you; the upper branch is why the NASA
-stack is worth the trouble. See [`../articles/article-2-nasa-software.md`](../articles/article-2-nasa-software.md).
+The lower branch is what open source gives you: display imagery, georeferenced by
+SatDump's own scan model. The upper branch is why the NASA stack is still worth the
+trouble — calibrated physical radiances and terrain-corrected per-pixel coordinates,
+rather than a raytrace of the nominal scan geometry. See [`../articles/article-2-nasa-software.md`](../articles/article-2-nasa-software.md).
 
 ---
 

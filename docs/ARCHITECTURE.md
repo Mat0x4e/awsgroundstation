@@ -166,6 +166,20 @@ against the products prefix, never the execution status.
   matching `.png`; a contact writes ~9,150 objects, so arming that bucket produced ~6,000
   CodeBuild builds in a morning and exhausted the account build queue. Nothing this pipeline
   writes is one-per-contact, so no filter fixes it — the state machine calls the orchestrator.
+- **The SDR image is built by a CodeBuild project that exists in no Terraform.**
+  `satdump-noaa20-processing` (role `codebuild-satdump-role`) is privileged, takes its
+  buildspec as an override at `start-build`, and pulls ~10.4 GB of vendor artifacts from
+  `s3://groundstation-noaa20-sdr-output-471112743408/docker-build/`. Its role could not
+  read that prefix — the S3 statement covered only the reception bucket — so on
+  2026-09-01 a read-only statement was added by hand (`ReadDockerBuildArtifacts` /
+  `ListDockerBuildArtifacts`, `GetObject` + `ListBucket` scoped to `docker-build/*`).
+  None of this is in code, so a `terraform apply` will neither create nor repair it.
+  Build it with:
+
+  ```bash
+  aws codebuild start-build --project-name satdump-noaa20-processing     --buildspec-override "$(cat buildspecs/docker_build_sdr.yml)"     --environment-variables-override "name=REPO_BRANCH,value=<branch>,type=PLAINTEXT"
+  ```
+
 - **The EC2 aggregation instance carries a hand-installed `/opt/rt-stps` and
   `/opt/SDR_4_1`** that exist in no Terraform, Dockerfile or user_data. Replacing the
   instance destroys them, which is why `ignore_changes` covers `root_block_device`.

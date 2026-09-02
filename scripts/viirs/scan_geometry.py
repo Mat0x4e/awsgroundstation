@@ -202,21 +202,27 @@ class SwathGeolocator:
     def from_projection_cfg(
         cls,
         cfg: Optional[dict],
-        scan_direction: int = -1,
-        time_increases_with_row: bool = False,
+        scan_direction: int = 1,
+        time_increases_with_row: bool = True,
     ) -> Optional["SwathGeolocator"]:
         """Build from a SatDump ``projection_cfg``, or None when unusable.
 
-        The two defaults are storage conventions, not geometry, so they were
+        The two defaults are storage conventions, not geometry. They are
         settled against rasterised Natural Earth coastlines: classify every
         swath pixel as land or sea by colour, look up what is actually at its
         computed position, and score the correlation.
 
-        ``scan_direction=-1`` is unambiguous -- the alternative scores no
-        correlation at all (MCC -0.09 against +0.65). ``time_increases_with_row
-        =False`` wins by MCC 0.738 to 0.599; an earlier default of True came
-        from a coarser land/sea reference that could not resolve the ~50 km
-        difference between them.
+        Measured on this code as assembled, ``scan_direction=1`` with
+        ``time_increases_with_row=True`` scores 90.6% agreement (MCC 0.741),
+        with the best rigid offset at exactly zero. The other three
+        combinations score 85.2%, 52.3% and 52.2% -- the last two being no
+        correlation at all, i.e. a swath rotated 180 degrees.
+
+        These values were briefly shipped inverted. The measurement that chose
+        them had been taken through a monkeypatched ``row_times`` in a test
+        script rather than against the class, and the two differed by exactly
+        that rotation. Re-measure here, not in a harness, if either default is
+        ever revisited.
         """
         if not cfg:
             return None

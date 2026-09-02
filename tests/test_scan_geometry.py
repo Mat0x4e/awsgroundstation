@@ -177,6 +177,20 @@ class TestSwathGeolocator:
         ephemeris_mid = 0.5 * (geo.times[0] + geo.times[-1])
         assert 0.5 * (times[0] + times[-1]) == pytest.approx(ephemeris_mid, abs=1e-6)
 
+    def test_defaults_are_the_measured_orientation(self):
+        """Pins the conventions that were once shipped inverted.
+
+        Against rasterised Natural Earth coastlines these score 90.6%
+        agreement (MCC 0.741); rotating the swath 180 degrees -- which is what
+        flipping both of these does -- scores 52%, i.e. no correlation. The
+        wrong values shipped because the measurement was taken through a
+        patched row_times in a test script rather than against the class.
+        """
+        geo = sg.SwathGeolocator.from_projection_cfg(_contact5_cfg())
+
+        assert geo.scan_direction == 1
+        assert geo.time_increases_with_row is True
+
     def test_row_order_follows_the_convention(self):
         geo_forward = sg.SwathGeolocator.from_projection_cfg(
             _contact5_cfg(), time_increases_with_row=True

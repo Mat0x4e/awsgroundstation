@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 510" width="940" height="510" font-family="Helvetica,Arial,sans-serif">
+<style>.lbl{font-size:13px;fill:#1a2b3c}.sub{font-size:11px;fill:#5b6b7b}.ttl{font-size:15px;font-weight:600;fill:#1a2b3c}.ray{stroke:#2f6fb2;stroke-width:1.1;opacity:.55}.edge{stroke:#1b4f80;stroke-width:1.8}.nadir{stroke:#1b4f80;stroke-width:1.8;stroke-dasharray:5 4}</style>
+<rect width="940" height="510" fill="#ffffff"/>
+<path d="M 120.9 401.2 A 1500.0 1500.0 0 0 1 819.1 401.2" fill="none" stroke="#7c8b99" stroke-width="2"/>
+<path d="M 120.9 401.2 A 1500.0 1500.0 0 0 1 819.1 401.2 L 819.1 510 L 120.9 510 Z" fill="#eef2f5"/>
+<path d="M 470.0 239.7 L 470.0 360.0 A 1500.0 1500.0 0 0 0 347.7 365.0 Z" fill="#cfe3f5" opacity=".75"/>
+<path d="M 470.0 239.7 L 470.0 360.0 A 1500.0 1500.0 0 0 1 592.3 365.0 Z" fill="#cfe3f5" opacity=".75"/>
+<path d="M 470.0 239.7 L 347.7 365.0 A 1500.0 1500.0 0 0 0 264.4 374.2 Z" fill="#e3eef8" opacity=".75"/>
+<path d="M 470.0 239.7 L 592.3 365.0 A 1500.0 1500.0 0 0 1 675.6 374.2 Z" fill="#e3eef8" opacity=".75"/>
+<path d="M 470.0 239.7 L 264.4 374.2 A 1500.0 1500.0 0 0 0 120.9 401.2 Z" fill="#f2f6fa" opacity=".75"/>
+<path d="M 470.0 239.7 L 675.6 374.2 A 1500.0 1500.0 0 0 1 819.1 401.2 Z" fill="#f2f6fa" opacity=".75"/>
+<line x1="470.0" y1="239.7" x2="120.9" y2="401.2" class="edge"/>
+<line x1="470.0" y1="239.7" x2="186.9" y2="387.0" class="ray"/>
+<line x1="470.0" y1="239.7" x2="233.5" y2="378.8" class="ray"/>
+<line x1="470.0" y1="239.7" x2="269.5" y2="373.5" class="ray"/>
+<line x1="470.0" y1="239.7" x2="298.9" y2="369.8" class="ray"/>
+<line x1="470.0" y1="239.7" x2="323.8" y2="367.1" class="ray"/>
+<line x1="470.0" y1="239.7" x2="345.5" y2="365.2" class="ray"/>
+<line x1="470.0" y1="239.7" x2="364.8" y2="363.7" class="ray"/>
+<line x1="470.0" y1="239.7" x2="382.4" y2="362.6" class="ray"/>
+<line x1="470.0" y1="239.7" x2="398.7" y2="361.7" class="ray"/>
+<line x1="470.0" y1="239.7" x2="414.0" y2="361.0" class="ray"/>
+<line x1="470.0" y1="239.7" x2="428.6" y2="360.6" class="ray"/>
+<line x1="470.0" y1="239.7" x2="442.7" y2="360.2" class="ray"/>
+<line x1="470.0" y1="239.7" x2="456.4" y2="360.1" class="ray"/>
+<line x1="470.0" y1="239.7" x2="470.0" y2="360.0" class="nadir"/>
+<line x1="470.0" y1="239.7" x2="483.6" y2="360.1" class="ray"/>
+<line x1="470.0" y1="239.7" x2="497.3" y2="360.2" class="ray"/>
+<line x1="470.0" y1="239.7" x2="511.4" y2="360.6" class="ray"/>
+<line x1="470.0" y1="239.7" x2="526.0" y2="361.0" class="ray"/>
+<line x1="470.0" y1="239.7" x2="541.3" y2="361.7" class="ray"/>
+<line x1="470.0" y1="239.7" x2="557.6" y2="362.6" class="ray"/>
+<line x1="470.0" y1="239.7" x2="575.2" y2="363.7" class="ray"/>
+<line x1="470.0" y1="239.7" x2="594.5" y2="365.2" class="ray"/>
+<line x1="470.0" y1="239.7" x2="616.2" y2="367.1" class="ray"/>
+<line x1="470.0" y1="239.7" x2="641.1" y2="369.8" class="ray"/>
+<line x1="470.0" y1="239.7" x2="670.5" y2="373.5" class="ray"/>
+<line x1="470.0" y1="239.7" x2="706.5" y2="378.8" class="ray"/>
+<line x1="470.0" y1="239.7" x2="753.1" y2="387.0" class="ray"/>
+<line x1="470.0" y1="239.7" x2="819.1" y2="401.2" class="edge"/>
+<circle cx="470.0" cy="239.7" r="6" fill="#1b4f80"/>
+<text class="lbl" x="482.0" y="233.7">NOAA-20</text>
+<text class="sub" x="482.0" y="248.7">824 km, position and velocity from the product file</text>
+<text class="lbl" x="408.8" y="383.2" text-anchor="middle">3:1</text>
+<text class="lbl" x="531.2" y="383.2" text-anchor="middle">3:1</text>
+<line x1="592.3" y1="365.0" x2="592.3" y2="373.0" stroke="#7c8b99"/>
+<text class="sub" x="592.3" y="405.0" text-anchor="middle">32° · 520 km</text>
+<text class="lbl" x="306.0" y="391.0" text-anchor="middle">2:1</text>
+<text class="lbl" x="634.0" y="391.0" text-anchor="middle">2:1</text>
+<line x1="675.6" y1="374.2" x2="675.6" y2="382.2" stroke="#7c8b99"/>
+<text class="sub" x="675.6" y="414.2" text-anchor="middle">45° · 876 km</text>
+<text class="lbl" x="192.3" y="407.9" text-anchor="middle">1:1</text>
+<text class="lbl" x="747.7" y="407.9" text-anchor="middle">1:1</text>
+<line x1="819.1" y1="401.2" x2="819.1" y2="409.2" stroke="#7c8b99"/>
+<text class="sub" x="819.1" y="441.2" text-anchor="middle">56° · 1,496 km</text>
+<text class="sub" x="470.0" y="400.0" text-anchor="middle">nadir</text>
+<line x1="120.9" y1="484" x2="819.1" y2="484" stroke="#1b4f80" stroke-width="1.2"/>
+<line x1="120.9" y1="479" x2="120.9" y2="489" stroke="#1b4f80" stroke-width="1.2"/>
+<line x1="819.1" y1="479" x2="819.1" y2="489" stroke="#1b4f80" stroke-width="1.2"/>
+<rect x="352.0" y="473" width="236" height="22" fill="#ffffff"/>
+<text class="lbl" x="470.0" y="488" text-anchor="middle">swath ≈ 2,993 km</text>
+<text class="ttl" x="24" y="30">Cross-track scan geometry: one row of a VIIRS composite</text>
+<text class="sub" x="24" y="50">Each ray is intersected with the WGS84 ellipsoid to give one pixel a latitude and longitude.</text>
+<text class="sub" x="24" y="68">Detector aggregation changes a pixel's angular width three times per side, so column index is not linear in scan angle.</text>
+</svg>

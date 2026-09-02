@@ -150,6 +150,12 @@ against the products prefix, never the execution status.
   build time by [`docker/sdr-pipeline/enable_satdump_projection.py`](../docker/sdr-pipeline/enable_satdump_projection.py),
   and `scripts/viirs/projected_reader.py` reads them. The GeoTIFF carries its own
   extent, so nothing downstream needs to know any geometry.
+- **SatDump needs a TLE, and its own updater cannot reach CelesTrak from CodeBuild.**
+  Composites decode without one, so `0 TLEs loaded!` sat in every chunk log for months
+  harmlessly; projection then resolves every control point to the same place, collapses
+  the bounds to the whole globe and segfaults on a 32000×16000 allocation.
+  `scripts/satdump_process.sh` passes `--tle_override`, which loads a specific file and
+  skips the network update entirely. Details in [SATDUMP.md](SATDUMP.md).
 - **`scripts/viirs/scan_geometry.py` is a deprecated fallback**, used only for products
   decoded before projection was enabled. It reconstructs SatDump's model from outside
   and is less accurate: it cannot apply the roll/yaw corrections, and it rebuilds line

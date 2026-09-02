@@ -126,8 +126,16 @@ mosaic is capped by link margin, not by CSPP.**
 
 | Path | Accuracy | Why |
 |---|---|---|
-| SatDump composites | 100–300 km | TLE-only; 5 s timing error ≈ 40 km nadir shift; no terrain correction; linear geo→pixel mapping against a curvilinear bowtie scan |
+| SatDump composites, stretched over a bounding box | 100–300 km | **Superseded 2026-09-01.** TLE-only; 5 s timing error ≈ 40 km nadir shift; no terrain correction; linear geo→pixel mapping against a curvilinear bowtie scan |
+| SatDump composites, `scan_geometry` fallback | ~tens of km | Per-pixel raytrace from the CBOR ephemeris, resampled north-up. Measured 90.5% land/sea agreement (MCC 0.738) against Natural Earth coastlines. Cannot apply SatDump's roll/yaw corrections and does not model bow-tie overlap, which grows toward the swath edge |
+| SatDump's own projection | not yet measured | SatDump raytraces each line with the real per-scan timestamps and pointing corrections. Requires a TLE — see [SATDUMP.md](SATDUMP.md) |
 | CSPP SDR + GITCO/GMTCO | sub-km | NOAA per-pixel, terrain-corrected lat/lon |
+
+Geolocation accuracy is measured, not asserted: classify swath pixels as land or
+sea by colour, look up what is actually at each computed position in a rasterised
+Natural Earth mask, and correlate. Coarser references — a handful of land/sea
+boxes, or colour-scoring the rendered PNG — proved unable to distinguish a
+correct swath from one flipped end to end.
 
 ---
 

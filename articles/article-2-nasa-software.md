@@ -75,6 +75,29 @@ The software can only calibrate what the antenna cleanly heard, so a pass's valu
 - **High elevation and clean RF.** Calibration is all-or-nothing per granule: a partial granule from RF packet loss cannot be calibrated and is dropped. A high-max-elevation pass keeps the spacecraft above the horizon longer on a stronger link, so more complete granules survive. Contact #3, at night and from a comparable raw RDR, yielded just one usable thermal granule.
 - **A long enough pass to fill granules.** Granules are ~85 seconds each, so short or low passes produce fewer complete ones. The mosaic you can build is capped by how many contiguous granules the pass delivered — by what the antenna heard, not by what the software can do.
 
+## Glossary
+
+Terms introduced in this part. [Part 1's glossary](./article-1-cloud-opensource.md#glossary) covers the reception and demodulation vocabulary — DigIF, CADU, swath, nadir, ephemeris and the rest — which is not repeated here.
+
+| Term | Meaning |
+|---|---|
+| **Direct broadcast** | The satellite transmitting continuously to whoever is listening, rather than storing data for a scheduled dump to an agency ground station. It is what makes a private receiver possible at all |
+| **RT-STPS** | Real-Time Software Telemetry Processing System (NASA): demultiplexes CADU frames per instrument and reassembles CCSDS packets into Level 0 files |
+| **CSPP** | Community Satellite Processing Package (University of Wisconsin/CIMSS): turns Level 0 into calibrated, geolocated Level 1 products |
+| **Level 0 / Level 1** | Processing levels. Level 0 is raw instrument counts as downlinked; Level 1 is those counts converted to physical units and tied to positions on the ground |
+| **RDR** | Raw Data Record — the JPSS name for the Level 0 product RT-STPS writes |
+| **SDR** | Sensor Data Record — the JPSS Level 1 product: calibrated radiances and brightness temperatures. Note the collision with "software-defined radio", which this is not |
+| **GEO file** | The geolocation companion to an SDR, holding latitude and longitude for every pixel. `GITCO` for the imaging bands, `GMTCO` for the moderate ones |
+| **Radiance** | The physical quantity the instrument measures — energy per area, solid angle and wavelength — as opposed to a display value stretched for contrast |
+| **Brightness temperature** | An infrared radiance expressed as the temperature a perfect emitter would need to produce it. Convenient because it reads directly as degrees |
+| **Terrain correction** | Adjusting a pixel's coordinates for the elevation of the ground it fell on. A ray traced to a smooth ellipsoid misplaces a mountainside; the "TC" in `GITCO`/`GMTCO` |
+| **Granule** | The unit CSPP calibrates, ~85 seconds of continuous VIIRS data. Calibration is all-or-nothing per granule: an incomplete one is dropped rather than partially processed |
+| **HDF5** | The self-describing container format RDR, SDR and GEO products use, holding multi-dimensional arrays with their metadata |
+| **CCSDS** | The space-agency packet standards the downlink follows; RT-STPS reassembles these packets from the frame stream |
+| **Pseudo-noise (PN) scrambling** | A known bit pattern XORed onto the downlink to keep the signal spectrally well-behaved. Removing it twice is the same as not removing it — hence `PnEncoded="false"` once SatDump has already done it |
+| **Calibration LUT** | Lookup tables converting raw counts to radiances, updated as the instrument ages. CSPP fetches them from `jpssdb.ssec.wisc.edu`, which is why the step needs network egress |
+| **CrIS / ATMS / OMPS** | The other JPSS instruments carried in the same downlink — an infrared sounder, a microwave sounder, and an ozone mapper. RT-STPS separates them from VIIRS |
+
 ---
 
 *Figures: architecture diagram generated with [awslabs/diagram-as-code](https://github.com/awslabs/diagram-as-code) from [`diagrams/article-2-nasa-stack.yaml`](diagrams/article-2-nasa-stack.yaml); the file-transformation diagram renders natively on GitHub/GitLab — export it as an image (e.g. via mermaid.live) before publishing to Medium or dev.to. The full CSPP recipe is in [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md).*

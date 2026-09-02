@@ -1,18 +1,28 @@
 """VIIRS GEO HDF5 file reader for per-pixel geolocation.
 
-Handles opening CSPP-produced VIIRS GEO HDF5 files (GIGTO for I-band,
-GMODO for M-band), extracting Latitude and Longitude datasets, and
+Handles opening CSPP-produced VIIRS GEO HDF5 files (GITCO for I-band,
+GMTCO for M-band), extracting Latitude and Longitude datasets, and
 masking invalid pixels (fill values below -900).
 
-Typical CSPP HDF5 structure::
+CSPP SDR 4.1.1 emits terrain-corrected geolocation by default, so GITCO/GMTCO
+with the ``*-GEO-TC_All`` groups are the names actually produced. The ellipsoid
+variants (GIGTO/GMODO, ``*-GEO_All``) are accepted as a fallback.
+
+Verified against real CSPP output from contact #3 (2026-06-30): GMTCO reads as
+(768, 3200) and GITCO as (1536, 6400) per granule.
+
+Actual CSPP HDF5 structure::
 
     All_Data/
-        VIIRS-IMG-GEO_All/
+        VIIRS-IMG-GEO-TC_All/       # GITCO, terrain-corrected (preferred)
             Latitude    # float32 per-pixel latitudes
             Longitude   # float32 per-pixel longitudes
-        VIIRS-MOD-GEO_All/
+        VIIRS-MOD-GEO-TC_All/       # GMTCO, terrain-corrected (preferred)
             Latitude    # float32 per-pixel latitudes
             Longitude   # float32 per-pixel longitudes
+
+    # fallback, ellipsoid geolocation:
+    #   VIIRS-IMG-GEO_All/ (GIGTO), VIIRS-MOD-GEO_All/ (GMODO)
 """
 
 from __future__ import annotations
@@ -48,10 +58,12 @@ class GEOReader:
 
     Constants
     ---------
-    IBAND_GROUP : str
-        HDF5 group name for I-band geolocation (GIGTO files).
-    MBAND_GROUP : str
-        HDF5 group name for M-band geolocation (GMODO files).
+    IBAND_GROUPS : tuple[str, ...]
+        Candidate HDF5 group names for I-band geolocation, terrain-corrected
+        first: GITCO then GIGTO.
+    MBAND_GROUPS : tuple[str, ...]
+        Candidate HDF5 group names for M-band geolocation, terrain-corrected
+        first: GMTCO then GMODO.
     INVALID_THRESHOLD : float
         Pixel values below this threshold are masked as invalid.
         NASA VIIRS GEO fill values are typically -999.3 or -999.9.
@@ -71,17 +83,18 @@ class GEOReader:
     def read_iband(
         self, h5_path: Path
     ) -> tuple[np.ma.MaskedArray, np.ma.MaskedArray]:
-        """Open a GIGTO GEO HDF5 file and return I-band lat/lon arrays.
+        """Open a GITCO/GIGTO GEO HDF5 file and return I-band lat/lon arrays.
 
         Extracts ``Latitude`` and ``Longitude`` from the
-        ``VIIRS-IMG-GEO_All`` group, casts to float32, and masks pixels
-        whose value is less than -900.  The resulting arrays match the
-        spatial dimensions of the corresponding I-band SDR data.
+        ``VIIRS-IMG-GEO-TC_All`` group (falling back to ``VIIRS-IMG-GEO_All``),
+        casts to float32, and masks pixels whose value is less than -900.  The
+        resulting arrays match the spatial dimensions of the corresponding
+        I-band SDR data — (1536, 6400) for one granule.
 
         Parameters
         ----------
         h5_path:
-            Path to the VIIRS I-band GEO HDF5 file (GIGTO).
+            Path to the VIIRS I-band GEO HDF5 file (GITCO, or GIGTO).
 
         Returns
         -------
@@ -93,25 +106,26 @@ class GEOReader:
         Raises
         ------
         InvalidGEOFileError
-            If the file does not contain the ``VIIRS-IMG-GEO_All`` group
-            under ``All_Data/``.
+            If the file contains neither the ``VIIRS-IMG-GEO-TC_All`` nor the
+            ``VIIRS-IMG-GEO_All`` group under ``All_Data/``.
         """
         return self._read_latlon(h5_path, self.IBAND_GROUPS)
 
     def read_mband(
         self, h5_path: Path
     ) -> tuple[np.ma.MaskedArray, np.ma.MaskedArray]:
-        """Open a GMODO GEO HDF5 file and return M-band lat/lon arrays.
+        """Open a GMTCO/GMODO GEO HDF5 file and return M-band lat/lon arrays.
 
         Extracts ``Latitude`` and ``Longitude`` from the
-        ``VIIRS-MOD-GEO_All`` group, casts to float32, and masks pixels
-        whose value is less than -900.  The resulting arrays match the
-        spatial dimensions of the corresponding M-band SDR data.
+        ``VIIRS-MOD-GEO-TC_All`` group (falling back to ``VIIRS-MOD-GEO_All``),
+        casts to float32, and masks pixels whose value is less than -900.  The
+        resulting arrays match the spatial dimensions of the corresponding
+        M-band SDR data — (768, 3200) for one granule.
 
         Parameters
         ----------
         h5_path:
-            Path to the VIIRS M-band GEO HDF5 file (GMODO).
+            Path to the VIIRS M-band GEO HDF5 file (GMTCO, or GMODO).
 
         Returns
         -------
@@ -123,8 +137,8 @@ class GEOReader:
         Raises
         ------
         InvalidGEOFileError
-            If the file does not contain the ``VIIRS-MOD-GEO_All`` group
-            under ``All_Data/``.
+            If the file contains neither the ``VIIRS-MOD-GEO-TC_All`` nor the
+            ``VIIRS-MOD-GEO_All`` group under ``All_Data/``.
         """
         return self._read_latlon(h5_path, self.MBAND_GROUPS)
 

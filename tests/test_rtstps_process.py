@@ -7,8 +7,12 @@ Covers:
 
 Strategy:
     - subprocess.run is mocked to avoid needing RT-STPS installed.
-    - Real .h5 files are created in tmp_path so that _validate_output and
+    - Real .h5 files are created on disk so that _validate_output and
       _find_rdr_files exercise their actual logic.
+    - Those files go in the *sibling* ``data/`` directory, not the working
+      directory: RT-STPS's bundled config/jpss1.xml declares
+      ``<RDR ... directory="../data"/>``, so RDRs land next to the cwd rather
+      than inside it. See the ``rtstps_dirs`` fixture.
 """
 
 import subprocess
@@ -56,25 +60,50 @@ def processor() -> RTSTPSProcessor:
     return RTSTPSProcessor()
 
 
+@pytest.fixture
+def rtstps_dirs(tmp_path) -> tuple[Path, Path]:
+    """Mirror RT-STPS's real on-disk layout.
+
+    ``batch.sh`` runs with ``cwd=<work>`` and the bundled ``config/jpss1.xml``
+    writes RDRs to ``../data`` — a *sibling* of the working directory. The
+    deployed ``aggregation.sh`` depends on exactly this: it runs batch.sh from
+    ``/opt/rt-stps`` and collects ``/opt/data``.
+
+    Nesting both under a per-test ``tmp_path`` also keeps the data directory
+    isolated. Passing ``tmp_path`` itself as the working directory would make
+    the scanned path ``<pytest-root>/data``, shared by every test in the run.
+
+    Returns:
+        ``(work, data)`` — pass ``work`` to ``process()``, create fixture .h5
+        files in ``data``.
+    """
+    work = tmp_path / "rt-stps"
+    data = tmp_path / "data"
+    work.mkdir()
+    data.mkdir()
+    return work, data
+
+
 # ---------------------------------------------------------------------------
 # Test 1 — Req 3.3 (VIIRS present): process() returns a valid RTSTPSResult
 # ---------------------------------------------------------------------------
 
-def test_process_returns_result_when_viirs_files_exist(tmp_path, processor):
-    """When VIIRS .h5 files are present in output_dir, process() returns an
-    RTSTPSResult with viirs_granules > 0 and 'VIIRS' in instruments_found.
+def test_process_returns_result_when_viirs_files_exist(rtstps_dirs, processor):
+    """When VIIRS .h5 files are present in RT-STPS's data dir, process() returns
+    an RTSTPSResult with viirs_granules > 0 and 'VIIRS' in instruments_found.
 
     **Validates: Requirements 3.3**
     """
+    work, data = rtstps_dirs
     # Create fake VIIRS RDR files (names contain "VIIRS" — matches the pattern)
-    _touch_h5(tmp_path, "VIIRS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
-    _touch_h5(tmp_path, "VIIRS_npp_d20240101_t0001200_e0002399_b00001_c00000.h5")
+    _touch_h5(data, "VIIRS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
+    _touch_h5(data, "VIIRS_npp_d20240101_t0001200_e0002399_b00001_c00000.h5")
     # Also create ATMS and CrIS files so only VIIRS is the focus here
-    _touch_h5(tmp_path, "ATMS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
-    _touch_h5(tmp_path, "CrIS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
+    _touch_h5(data, "ATMS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
+    _touch_h5(data, "CrIS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
 
     with patch("subprocess.run", return_value=_make_completed_process(0)):
-        result = processor.process("input.cadu", str(tmp_path))
+        result = processor.process("input.cadu", str(work))
 
     assert isinstance(result, RTSTPSResult)
     assert result.viirs_granules == 2, (
@@ -90,42 +119,68 @@ def test_process_returns_result_when_viirs_files_exist(tmp_path, processor):
 # Test 2 — Req 3.3 (VIIRS absent): process() raises NoVIIRSDataError
 # ---------------------------------------------------------------------------
 
-def test_process_raises_no_viirs_error_when_no_viirs_files(tmp_path, processor):
-    """When the output directory contains ATMS/CrIS files but NO VIIRS files,
+def test_process_raises_no_viirs_error_when_no_viirs_files(rtstps_dirs, processor):
+    """When the data directory contains ATMS/CrIS files but NO VIIRS files,
     process() must raise NoVIIRSDataError — treating the absence of VIIRS as a
     complete failure and stopping processing.
 
     **Validates: Requirements 3.3**
     """
+    work, data = rtstps_dirs
     # Only non-critical instruments present — no VIIRS
-    _touch_h5(tmp_path, "ATMS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
-    _touch_h5(tmp_path, "CrIS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
+    _touch_h5(data, "ATMS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
+    _touch_h5(data, "CrIS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
 
     with patch("subprocess.run", return_value=_make_completed_process(0)):
         with pytest.raises(NoVIIRSDataError) as exc_info:
-            processor.process("input.cadu", str(tmp_path))
+            processor.process("input.cadu", str(work))
 
-    assert str(tmp_path) in str(exc_info.value), (
-        "NoVIIRSDataError message should include the output directory path"
+    message = str(exc_info.value)
+    assert str(work) in message, (
+        "NoVIIRSDataError message should name the working directory it was given"
+    )
+    assert str(data) in message, (
+        "NoVIIRSDataError message should name the directory actually scanned, "
+        f"so the ../data indirection is visible when debugging. Got: {message}"
     )
 
 
-def test_process_raises_no_viirs_error_when_output_dir_is_empty(tmp_path, processor):
+def test_process_raises_no_viirs_error_when_data_dir_is_empty(rtstps_dirs, processor):
     """When RT-STPS produces no output files at all, process() raises NoVIIRSDataError.
 
     **Validates: Requirements 3.3, 3.4**
     """
-    # tmp_path is empty — no .h5 files
+    work, _data = rtstps_dirs  # data dir exists but is empty
     with patch("subprocess.run", return_value=_make_completed_process(0)):
         with pytest.raises(NoVIIRSDataError):
-            processor.process("input.cadu", str(tmp_path))
+            processor.process("input.cadu", str(work))
+
+
+def test_process_scans_sibling_data_dir_not_working_dir(rtstps_dirs, processor):
+    """Regression guard for the ../data contract.
+
+    RDRs written *into* the working directory must NOT be picked up: RT-STPS's
+    config/jpss1.xml sends them to ``../data``. A change that made process()
+    scan output_dir would silently pass every other test in this file while
+    breaking against real RT-STPS output.
+
+    **Validates: Requirements 3.3**
+    """
+    work, _data = rtstps_dirs
+    # Decoys in the working directory — the wrong place.
+    _touch_h5(work, "VIIRS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
+    _touch_h5(work, "ATMS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
+
+    with patch("subprocess.run", return_value=_make_completed_process(0)):
+        with pytest.raises(NoVIIRSDataError):
+            processor.process("input.cadu", str(work))
 
 
 # ---------------------------------------------------------------------------
 # Test 3 — Req 3.5: non-critical instrument warnings when ATMS or CrIS absent
 # ---------------------------------------------------------------------------
 
-def test_process_warns_when_atms_missing_but_viirs_present(tmp_path, processor):
+def test_process_warns_when_atms_missing_but_viirs_present(rtstps_dirs, processor):
     """When VIIRS is present but ATMS is absent, process() must:
       1. Emit a UserWarning via warnings.warn (not raise an exception)
       2. Include the warning message in result.warnings
@@ -133,14 +188,15 @@ def test_process_warns_when_atms_missing_but_viirs_present(tmp_path, processor):
 
     **Validates: Requirements 3.5**
     """
-    _touch_h5(tmp_path, "VIIRS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
-    _touch_h5(tmp_path, "CrIS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
+    work, data = rtstps_dirs
+    _touch_h5(data, "VIIRS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
+    _touch_h5(data, "CrIS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
     # ATMS intentionally absent
 
     with patch("subprocess.run", return_value=_make_completed_process(0)):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            result = processor.process("input.cadu", str(tmp_path))
+            result = processor.process("input.cadu", str(work))
 
     # Processing should not raise — ATMS is non-critical
     assert isinstance(result, RTSTPSResult)
@@ -158,19 +214,20 @@ def test_process_warns_when_atms_missing_but_viirs_present(tmp_path, processor):
     )
 
 
-def test_process_warns_when_cris_missing_but_viirs_present(tmp_path, processor):
+def test_process_warns_when_cris_missing_but_viirs_present(rtstps_dirs, processor):
     """When VIIRS is present but CrIS is absent, process() must warn and continue.
 
     **Validates: Requirements 3.5**
     """
-    _touch_h5(tmp_path, "VIIRS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
-    _touch_h5(tmp_path, "ATMS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
+    work, data = rtstps_dirs
+    _touch_h5(data, "VIIRS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
+    _touch_h5(data, "ATMS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
     # CrIS intentionally absent
 
     with patch("subprocess.run", return_value=_make_completed_process(0)):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            result = processor.process("input.cadu", str(tmp_path))
+            result = processor.process("input.cadu", str(work))
 
     assert isinstance(result, RTSTPSResult)
 
@@ -181,19 +238,20 @@ def test_process_warns_when_cris_missing_but_viirs_present(tmp_path, processor):
     assert any("CrIS" in msg for msg in result.warnings)
 
 
-def test_process_warns_for_both_atms_and_cris_when_both_absent(tmp_path, processor):
+def test_process_warns_for_both_atms_and_cris_when_both_absent(rtstps_dirs, processor):
     """When VIIRS is present but both ATMS and CrIS are absent, process() emits
     two separate UserWarnings and records both in result.warnings.
 
     **Validates: Requirements 3.5**
     """
-    _touch_h5(tmp_path, "VIIRS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
+    work, data = rtstps_dirs
+    _touch_h5(data, "VIIRS_npp_d20240101_t0000000_e0001199_b00001_c00000.h5")
     # Neither ATMS nor CrIS present
 
     with patch("subprocess.run", return_value=_make_completed_process(0)):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            result = processor.process("input.cadu", str(tmp_path))
+            result = processor.process("input.cadu", str(work))
 
     assert isinstance(result, RTSTPSResult)
     assert result.viirs_granules >= 1

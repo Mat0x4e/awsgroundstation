@@ -321,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"Missing I-band files — I1:{len(i1_files)} I2:{len(i2_files)} I3:{len(i3_files)}"
             )
         if not igeo_files:
-            raise FileNotFoundError("No I-band GEO files (GIGTO) found")
+            raise FileNotFoundError("No I-band GEO files (GITCO, or GIGTO) found")
 
         logger.info("True Color — reading I1/I2/I3 reflectance (%d granules each)", len(i1_files))
         i1 = _read_reflectance_concat(sdr_reader, i1_files)
@@ -412,9 +412,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if not m15_files:
-            raise FileNotFoundError("No M15 files (SVOM15) found")
+            raise FileNotFoundError("No M15 files (SVM15, or SVOM15) found")
         if not mgeo_files:
-            raise FileNotFoundError("No M-band GEO files (GMODO) found")
+            raise FileNotFoundError("No M-band GEO files (GMTCO, or GMODO) found")
 
         logger.info("Thermal — reading M15 radiance (%d granules)", len(m15_files))
         radiance = _read_radiance_concat(sdr_reader, m15_files)

@@ -1,8 +1,8 @@
 # Getting Labelled Earth Images from Space — Part 2: What the NASA Stack Adds
 
-[Part 1](./article-1-cloud-opensource.md) built a cloud pipeline that turns raw NOAA-20 radio signals into VIIRS imagery for about $160 a pass, and ended by correcting its own conclusion: the open-source stack does locate its imagery, once you use the scan model it already ships instead of stretching pixels across an estimated bounding box.
+[Part 1](./article-1-cloud-opensource.md) built a cloud pipeline that turns raw NOAA-20 radio signals into located VIIRS imagery for about $160 a pass, geolocated by raytracing the published scan model against the satellite state SatDump records.
 
-What it still does not give you is **calibration** — its composites are display images, not physical measurements — or **terrain-corrected coordinates for every pixel**. That is what the agencies' own software adds, and it is a different kind of claim: not "roughly here" made precise, but radiances you can do science on, each with its own latitude and longitude. The result, from the same 13-minute pass:
+What that layer does not give you is **calibration** — its composites are display images, not physical measurements — or **terrain-corrected coordinates for every pixel**. That is what the agencies' own software adds, and it is a different kind of claim: not "roughly here" made precise, but radiances you can do science on, each carrying its own latitude and longitude, corrected for the ground beneath. The result, from the same 13-minute pass:
 
 ![Contact #2 true colour with coastline overlay](../output/contact-02_ohio-1_2026-06-23/NASA-SDR/noaa20_viirs_truecolor_overlay_contact02.png)
 

@@ -34,6 +34,39 @@ Add a `project` block to a composite and SatDump reprojects it, writing
   happens as part of pipeline processing. Reprojecting an old contact means
   re-running SatDump over its chunks.
 
+### Composite projection does not work at 1.2.2 — parked 2026-09-02
+
+Enabling it segfaults every chunk, and the cause is inside SatDump rather than
+in our configuration.
+
+`make_composite_from_product` sets the composite's timestamps to the correlated
+intersection of its channels' arrays, and for VIIRS those are **per scan** — 16
+values for a 256-row image. `projectImg` passes them through unchanged, and
+`viirs_proj.h` rejects any row past the end of the array
+(`if (y >= timestamps.size()) return 1`). With GCPs sampled every 100 rows,
+almost nothing resolves:
+
+```
+Solving TPS equations for 0 GCPs...
+(E) Failure solving!
+Final Bounds are : 179, 89 - -179, -89     <- fell back to the whole globe
+"width": -22375.0, "height": -11125.0      <- negative
+Warping size 32000x16000                   <- then SIGSEGV
+```
+
+The `interpolate_timestamps: 32` and `interpolate_timestamps_scantime: 0.0555`
+settings exist to expand per-scan to per-line, but they do not reach this path.
+
+`enable_satdump_projection.py` therefore ships in the image but **is not run**
+by the Dockerfile. Re-enable it when SatDump is next upgraded and re-test on a
+single chunk before any fan-out; the script fails loudly if the config layout
+has moved, which it did between 1.2.2 and master.
+
+Worth knowing before retrying: `project_channels` projects individual channels
+instead of composites, but it draws timestamps from `get_timestamps(chanid)` —
+the same per-scan arrays — so it likely fails the same way, and would yield
+per-channel rasters rather than composites.
+
 ## The VIIRS scan model is published
 
 `resources/projections_settings/jpss1_viirs.json` is exactly what ends up in
@@ -75,9 +108,11 @@ Error updating TLEs. Not updated.
 ```
 
 **Composites decode fine without a TLE**, so this sat in every chunk log for
-months with no visible effect. Projection does not: every ground control point
-resolves to the same place, so the bounds collapse to the whole globe, the
-output is sized 32000×16000, and SatDump segfaults.
+months with no visible effect. Projection does not: with no TLE every ground
+control point resolves to the same place, and the run ends in the same global
+bounds and segfault described above. Fixing the TLE is necessary but not
+sufficient — with `1 TLEs loaded!` the composite path still resolves 0 GCPs,
+for the separate timestamp reason.
 
 `--tle_override <file>` loads exactly that file and **skips the network update
 entirely** (`src-core/init.cpp`, `tle_file_override`). That is what
@@ -85,11 +120,13 @@ entirely** (`src-core/init.cpp`, `tle_file_override`). That is what
 a fresh TLE over https and falls back to `scripts/tle/noaa20.tle` baked into
 the image, refusing to run with no TLE at all.
 
-## Two CBOR quirks, relevant only to the deprecated fallback
+## Two CBOR quirks, in the path that actually runs
 
-`scripts/viirs/scan_geometry.py` reconstructs the model from outside and is
-kept only for products decoded before projection was enabled. Two things it
-had to discover, documented nowhere upstream:
+`scripts/viirs/scan_geometry.py` reconstructs the model from outside. It was
+written as a fallback and is, while SatDump's own projection is parked, the
+active geolocation path — measured at 90.5% land/sea agreement (MCC 0.738)
+against Natural Earth coastlines. Two things it had to discover, documented
+nowhere upstream:
 
 - **Ephemeris timestamps are 2³² seconds low** — they read as year 1890. Add
   4294967296 and they match the acquisition time in `dataset.json`.

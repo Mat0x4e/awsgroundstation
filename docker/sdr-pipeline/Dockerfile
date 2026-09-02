@@ -51,13 +51,13 @@ RUN apt-get update && \
     rm /tmp/satdump_1.2.2_ubuntu_22.04_amd64.deb && \
     rm -rf /var/lib/apt/lists/*
 
-# Let SatDump georeference its own composites. It ships the VIIRS scan model
-# (resources/projections_settings/jpss1_viirs.json) and holds the per-scan
-# timestamps, so it raytraces each line with the right pointing. Doing it
-# downstream means reimplementing a model that is already in this image.
-# Writes rgb_<name>_projected.tif beside each composite. See docs/ARCHITECTURE.md.
+# SatDump can georeference its own composites, and enable_satdump_projection.py
+# turns that on. It is deliberately NOT run: at 1.2.2 the composite projection
+# path receives per-scan timestamps for a per-line image, resolves 0 GCPs, falls
+# back to global bounds and segfaults on a 32000x16000 allocation. Verified
+# 2026-09-02; see docs/SATDUMP.md. The script ships so the next SatDump upgrade
+# can try again -- it fails loudly if the config layout moved.
 COPY enable_satdump_projection.py /opt/scripts/enable_satdump_projection.py
-RUN python3 /opt/scripts/enable_satdump_projection.py
 
 # -------------------------------------------------------------------
 # RT-STPS 7.0 + Patch 1 (NASA/CIMSS) — CADU → RDR (HDF5 Level 0)

@@ -1,12 +1,12 @@
 # Getting Labelled Earth Images from Space — Part 2: What the NASA Stack Adds
 
-[Part 1](./article-1-cloud-opensource.md) built a cloud pipeline that turns raw NOAA-20 radio signals into VIIRS imagery for about $160 a pass, with one limit: map overlays landed 100–300 km from the terrain, because the composites carry no per-pixel coordinates.
+[Part 1](./article-1-cloud-opensource.md) built a cloud pipeline that turns raw NOAA-20 radio signals into VIIRS imagery for about $160 a pass, and ended by correcting its own conclusion: the open-source stack does locate its imagery, once you use the scan model it already ships instead of stretching pixels across an estimated bounding box.
 
-This part closes that gap with the software the agencies use themselves. The result, from the same 13-minute pass:
+What it still does not give you is **calibration** — its composites are display images, not physical measurements — or **terrain-corrected coordinates for every pixel**. That is what the agencies' own software adds, and it is a different kind of claim: not "roughly here" made precise, but radiances you can do science on, each with its own latitude and longitude. The result, from the same 13-minute pass:
 
 ![Contact #2 true colour with coastline overlay](../output/contact-02_ohio-1_2026-06-23/NASA-SDR/noaa20_viirs_truecolor_overlay_contact02.png)
 
-Hudson Bay, the Great Lakes, Florida, Cuba and the Bahamas, each sitting on its own coastline. Same antenna, same $130 of downlink, same zero licence fees — the error went from 100–300 km to **sub-kilometre**.
+Hudson Bay, the Great Lakes, Florida, Cuba and the Bahamas, each sitting on its own coastline. Same antenna, same $130 of downlink, same zero licence fees — and every pixel carrying its own terrain-corrected coordinate, accurate to **sub-kilometre**, rather than a scan model's estimate of where the swath fell.
 
 ## Two chains, two file trails
 
@@ -21,7 +21,7 @@ flowchart TD
     CS8 -->|"SatDump: QPSK + Viterbi + Reed-Solomon"| CADU
 
     subgraph OS["Open-source path — Part 1"]
-      PNG["composite PNG<br/>display image · pixels only<br/>coordinates estimated from orbit<br/>→ 100–300 km error"]
+      PNG["composite PNG<br/>display image, uncalibrated<br/>located by SatDump's scan model"]
     end
     subgraph NASA["NASA path — Part 2"]
       RDR["RDR HDF5 · Level 0<br/>raw counts, per instrument"]
@@ -34,7 +34,7 @@ flowchart TD
     CADU -->|"RT-STPS: demux + CCSDS reassembly"| RDR
 ```
 
-[SatDump](./article-1-cloud-opensource.md) renders CADUs straight to composite PNGs — display images whose pixels are correct but whose coordinates are attached afterwards by propagating the orbit, which is where the 100–300 km error lives. The NASA chain instead keeps the science all the way down: RDRs hold raw counts, SDRs hold calibrated physical radiances, and GEO files hold terrain-corrected latitude and longitude for *every pixel*.
+[SatDump](./article-1-cloud-opensource.md) renders CADUs straight to composite PNGs — display images, located by raytracing the nominal scan geometry. That is enough to put a coastline in the right place; it is not a measurement. The NASA chain instead keeps the science all the way down: RDRs hold raw counts, SDRs hold calibrated physical radiances, and GEO files hold terrain-corrected latitude and longitude for *every pixel* — accounting for the terrain the scan model assumes away.
 
 ## What the official chain produces
 
@@ -65,7 +65,7 @@ That last requirement is the durable lesson, and it survives the fact that the c
 
 ## What it's worth
 
-The value is easy to state: the same pass and the same free software, with per-pixel geolocation improved by two to three orders of magnitude — from 100–300 km to sub-kilometre. The cost was entirely engineering time; the compute is ~14 CodeBuild minutes on top of a $160 pass.
+The value is easy to state, and worth stating carefully. Against a bounding-box stretch, this is a two-to-three order of magnitude improvement in geolocation. Against the open-source path done properly, the gain is narrower and different in kind: sub-kilometre terrain-corrected coordinates per pixel instead of a scan-model estimate, and calibrated radiances instead of display images. The first is what makes overlays trustworthy at full resolution; the second is what makes the data science rather than pictures. The cost was entirely engineering time; the compute is ~14 CodeBuild minutes on top of a $160 pass.
 
 ## What makes a contact worth processing
 

@@ -44,15 +44,21 @@ For contact #2, 27 containers ran at once. Roughly **ten minutes after the trigg
 
 That is the capability, stated plainly: raw RF to satellite imagery, automated, on rented hardware, with no software licence cost. The honest per-pass total is closer to **$160 than $130**, because 27 parallel `general1.2xlarge` containers are roughly 140 build-minutes — the compute is a quarter of the bill again, and it is DigIF that put it there.
 
-## The limit: pixels are easy, coordinates are hard
+## The limit that wasn't the tool's
 
-*Labelled* is where this approach stops. An image becomes useful when geography is attached, and that requires knowing where each pixel is.
+*Labelled* is where this first attempt stopped. An image becomes useful when geography is attached, and that requires knowing where each pixel is.
 
-SatDump's composites are plain pixel grids with no per-pixel latitude and longitude. The pipeline estimated the swath's extent by propagating the orbit from public TLE data with SGP4. The result: overlays landed **100–300 km from the actual terrain**, and coastlines visibly did not align. The approach is also fragile — a 5-second error in assumed pass time moves the ground track ~40 km, and VIIRS's curved "bowtie" scan makes any linear pixel-to-ground mapping wrong by construction.
+SatDump renders composites as plain pixel grids, so the pipeline attached coordinates afterwards: estimate the swath's extent by propagating the orbit from public TLE data with SGP4, then stretch the image across that box. Overlays landed **100–300 km from the actual terrain**, and coastlines visibly did not align. The approach is fragile by construction — a 5-second error in assumed pass time moves the ground track ~40 km, and VIIRS's curved "bowtie" scan means no linear pixel-to-ground mapping can be right.
 
-So: about $160 per pass and zero licence fees buys a working path from radio waves to imagery, but not an accurate answer to *where*.
+The conclusion drawn at the time was that open source gets you pixels but not coordinates. That conclusion was wrong, and the way it was wrong is the more useful lesson.
 
-The standard answer to that is NASA's own processing software, which produces calibrated Level 1 products with terrain-corrected coordinates for every pixel. That is Part 2.
+SatDump ships the VIIRS scan model itself — the ±56° scan, the detector aggregation zones, the spacecraft pointing corrections — and stores a timestamp for every scan inside its own output. Ask it, and it will raytrace each scan line to the ellipsoid and write a georeferenced GeoTIFF. Nobody asked it. The 100–300 km was a property of the integration, not of the tool: a bounding box where a scan model was already available, three files away, in a repository that was already open in the browser.
+
+Rebuilt on the geometry rather than the bounding box, the same free software puts coastlines on the imagery — measured at 90% agreement between what the pixels show and what is actually at each computed position, with no detectable systematic offset.
+
+So the honest statement of the limit is narrower: about $160 per pass and zero licence fees buys a working path from radio waves to *located* imagery. What it does not buy is **calibration** — composites are display images, not physical measurements — nor the terrain-corrected, per-pixel geolocation that science products carry.
+
+That is what NASA's own processing software adds, and that is Part 2.
 
 ---
 

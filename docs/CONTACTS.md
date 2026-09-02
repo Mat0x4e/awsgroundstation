@@ -130,7 +130,7 @@
 | Property | Value |
 |----------|-------|
 | Status | Rendered at native resolution (3200×272 px) |
-| Known limitation | Cartographic overlay alignment is imprecise (~100-300 km offset) due to TLE-only geolocation without CPM correction |
+| Known limitation | Overlay alignment imprecise (~100-300 km) **as rendered at the time** — the swath was stretched across a TLE-estimated bounding box. Superseded 2026-09-01 by per-pixel geolocation ([SATDUMP.md](SATDUMP.md)); re-rendering this contact would fix it |
 | Products in S3 | `products/2026/06/30/1ae80d1d-.../viirs_satdump_true_color_*.png` |
 
 ---

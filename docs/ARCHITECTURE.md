@@ -143,7 +143,7 @@ against the products prefix, never the execution status.
   defects hid in that gap until 2026-09-01: a wrong script path, the NASA path reading
   `chunks/` instead of `sdr/` under pre-J01 filenames, and a SatDump sync that produced a
   nested tree the non-recursive composite discovery could not see.
-- **SatDump georeferences its own composites; we do not.** It ships the VIIRS scan
+- **SatDump could georeference its own composites, but not at 1.2.2 (parked 2026-09-02).** It ships the VIIRS scan
   model (`resources/projections_settings/jpss1_viirs.json` — aggregation zones in
   `forced_gcps_x`, 112° scan, `roll_offset` -0.05, `yaw_offset` 0.15) and holds the
   per-scan timestamps inside the product, so it raytraces every line with the right
@@ -151,15 +151,19 @@ against the products prefix, never the execution status.
   write `rgb_<name>_projected.tif`, an equirectangular GeoTIFF; that is done at image
   build time by [`docker/sdr-pipeline/enable_satdump_projection.py`](../docker/sdr-pipeline/enable_satdump_projection.py),
   and `scripts/viirs/projected_reader.py` reads them. The GeoTIFF carries its own
-  extent, so nothing downstream needs to know any geometry.
+  extent, so nothing downstream needs to know any geometry. **That script is not
+  run by the Dockerfile**: at 1.2.2 the composite path resolves 0 GCPs and
+  segfaults ([SATDUMP.md](SATDUMP.md)). Until a SatDump upgrade fixes it, the
+  fallback below is the active path — `projected_reader` simply finds no files
+  and says so in the log.
 - **SatDump needs a TLE, and its own updater cannot reach CelesTrak from CodeBuild.**
   Composites decode without one, so `0 TLEs loaded!` sat in every chunk log for months
   harmlessly; projection then resolves every control point to the same place, collapses
   the bounds to the whole globe and segfaults on a 32000×16000 allocation.
   `scripts/satdump_process.sh` passes `--tle_override`, which loads a specific file and
   skips the network update entirely. Details in [SATDUMP.md](SATDUMP.md).
-- **`scripts/viirs/scan_geometry.py` is a deprecated fallback**, used only for products
-  decoded before projection was enabled. It reconstructs SatDump's model from outside
+- **`scripts/viirs/scan_geometry.py` is the active geolocation path**, and a fallback only
+  in intent: it is what runs while SatDump's own projection is parked. It reconstructs SatDump's model from outside
   and is less accurate: it cannot apply the roll/yaw corrections, and it rebuilds line
   times from a rate where SatDump has the real per-scan timestamps. Three things in it
   are still worth knowing, because they are documented nowhere: the CBOR ephemeris

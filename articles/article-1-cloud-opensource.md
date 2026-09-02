@@ -78,24 +78,41 @@ Both are what NASA's own direct-broadcast software adds. That is Part 2.
 
 ## Glossary
 
+### Orbit and delivery
+
 | Term | Meaning |
 |---|---|
-| **VIIRS** | Visible Infrared Imaging Radiometer Suite — the imager aboard NOAA-20, scanning a ~3,000 km swath across the ground track |
+| **Sun-synchronous orbit** | An orbit whose plane precesses with the Sun, so the spacecraft crosses each latitude at the same local solar time every pass — which is why a daytime node is always sunlit |
 | **HRD** | High Rate Data, the ~15 Mbps X-band broadcast carrying VIIRS and the other instruments |
-| **DigIF** | Digital Intermediate Frequency: AWS delivers raw digitized spectrum rather than a demodulated bitstream |
-| **VITA-49** | The packet format that DigIF spectrum arrives in, with signal metadata in separate context packets |
+| **DigIF** | Digital Intermediate Frequency: AWS delivers raw digitized spectrum rather than a demodulated bitstream, so demodulation becomes yours to do |
+| **VITA-49** | The packet format DigIF spectrum arrives in, with signal metadata in separate context packets |
+
+### The signal chain
+
+| Term | Meaning |
+|---|---|
 | **I/Q** | In-phase and quadrature samples — the complex representation of a radio signal. Written here as `.cs8`, 8-bit signed pairs |
 | **QPSK** | Quadrature Phase Shift Keying, the downlink's modulation; demodulation recovers bits from I/Q |
-| **Viterbi / Reed-Solomon** | The two error-correction stages: convolutional decoding, then block correction of the remaining byte errors |
-| **CADU** | Channel Access Data Unit — a fixed-length CCSDS frame, the first clean digital product of the chain |
-| **Composite** | An image built from several instrument bands (True Color = three reflective bands), stretched for display |
-| **Sun-synchronous orbit** | An orbit whose plane precesses with the Sun, so the spacecraft crosses each latitude at the same local solar time every pass |
+| **Viterbi / Reed-Solomon** | The two error-correction stages: convolutional decoding, then block correction of the byte errors that survive it |
+| **CADU** | Channel Access Data Unit — a fixed-length CCSDS frame, and the first clean digital product of the chain |
+
+### Instrument and scan geometry
+
+| Term | Meaning |
+|---|---|
+| **VIIRS** | Visible Infrared Imaging Radiometer Suite — the imager aboard NOAA-20, sweeping a ~3,000 km swath across the ground track |
 | **Nadir** | The point directly beneath the spacecraft; scan angle is measured from it |
 | **Swath** | The strip of ground one scan covers, here ±56° either side of nadir |
-| **Detector aggregation** | VIIRS combines several samples into one pixel near nadir (3:1), fewer further out (2:1, then 1:1), to keep ground resolution roughly even |
+| **Detector aggregation** | VIIRS combines several samples into one pixel near nadir (3:1), fewer further out (2:1, then 1:1), keeping ground resolution roughly even — and making column index non-linear in scan angle |
+| **Composite** | An image built from several instrument bands (True Color = three reflective bands), stretched for display rather than measured |
+
+### Positioning and output
+
+| Term | Meaning |
+|---|---|
 | **Ephemeris** | Satellite position and velocity over time — here recorded per scan in SatDump's product file |
 | **TLE** | Two-Line Element set, a compact orbit description propagated with SGP4 to get position at a given time |
-| **WGS84** | The reference ellipsoid coordinates are expressed against; the look ray is intersected with it |
+| **WGS84** | The reference ellipsoid coordinates are expressed against; each look ray is intersected with it |
 | **Equirectangular** | A projection mapping latitude and longitude directly to y and x — the north-up grid composites are resampled onto |
 | **GeoTIFF** | A TIFF carrying its own georeferencing, so other tools can place it without external metadata |
 

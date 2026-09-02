@@ -93,6 +93,31 @@
 | State machine | `groundstation-noaa20-sdr-pipeline` |
 | Parallel chunks | 27 |
 
+### VIIRS visualisation — re-rendered 2026-09-02
+
+Originally rendered 2026-06-26 by stretching the composite across an estimated
+bounding box: a full-width rectangle, `unknown` for the acquisition time, no
+sidecar, and coastlines drawn where the imagery was not. Re-rendered through
+the per-pixel path in `products/2026/06/23/7903eb3f-.../`:
+
+| | Original (2026-06-26) | Re-rendered (2026-09-02) |
+|---|---|---|
+| Acquisition time | `unknown` | `2026-06-23T18:30:45Z` |
+| Extent | full-width rectangle | lat 13.95–19.09, lon −92.04 to −63.94 |
+| Land/sea agreement | not measurable (uncorrelated) | 82.9%, MCC +0.370 |
+| Residual rigid offset | 100–300 km | ~0.2° (≈22 km) south |
+
+The originals are kept at
+`products-archive/2026-06-26-bbox-era/2026/06/23/7903eb3f-.../`, and one is
+kept locally as an exhibit under
+`output/contact-02_ohio-1_2026-06-23/products-2026-06-bbox-era/`.
+
+MCC is lower here than contact #5's 0.783 without implying worse geolocation:
+this scene is 20% land against 30%, its features are small islands where a
+given error costs more correlation, and Caribbean cloud removes much of the
+sample. The residual is visible in the render — Jamaica's land sits just south
+of its outline.
+
 ---
 
 ## Contact #3

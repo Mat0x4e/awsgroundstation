@@ -141,15 +141,23 @@ against the products prefix, never the execution status.
   defects hid in that gap until 2026-09-01: a wrong script path, the NASA path reading
   `chunks/` instead of `sdr/` under pre-J01 filenames, and a SatDump sync that produced a
   nested tree the non-recursive composite discovery could not see.
-- **Composites are geolocated, not stretched.** `scripts/viirs/scan_geometry.py` puts
-  every pixel where the CBOR ephemeris and the VIIRS scan model say it belongs, then
-  resamples onto a north-up grid whose extent *is* the bounding box — so the overlay,
-  the GeoTIFF corners and the JSON sidecar are all correct without any of them knowing
-  about swath geometry. Three things in that file are non-obvious and were each
-  established against contact #5: the ephemeris timestamps are 2³² s low; the frame
-  they describe was rotated with that *wrapped* clock, so undoing it needs the raw
-  stamp; and rows are clocked at the CBOR's own line rate, not spread across the
-  ephemeris window. Getting any of the three wrong moves the imagery by 100 km or more.
+- **SatDump georeferences its own composites; we do not.** It ships the VIIRS scan
+  model (`resources/projections_settings/jpss1_viirs.json` — aggregation zones in
+  `forced_gcps_x`, 112° scan, `roll_offset` -0.05, `yaw_offset` 0.15) and holds the
+  per-scan timestamps inside the product, so it raytraces every line with the right
+  pointing. Adding a `project` block to a composite in `satdump_cfg.json` makes it
+  write `rgb_<name>_projected.tif`, an equirectangular GeoTIFF; that is done at image
+  build time by [`docker/sdr-pipeline/enable_satdump_projection.py`](../docker/sdr-pipeline/enable_satdump_projection.py),
+  and `scripts/viirs/projected_reader.py` reads them. The GeoTIFF carries its own
+  extent, so nothing downstream needs to know any geometry.
+- **`scripts/viirs/scan_geometry.py` is a deprecated fallback**, used only for products
+  decoded before projection was enabled. It reconstructs SatDump's model from outside
+  and is less accurate: it cannot apply the roll/yaw corrections, and it rebuilds line
+  times from a rate where SatDump has the real per-scan timestamps. Three things in it
+  are still worth knowing, because they are documented nowhere: the CBOR ephemeris
+  timestamps are 2³² s low; the frame they describe was rotated with that *wrapped*
+  clock, so undoing it needs the raw stamp; and the composite is cropped relative to
+  the bands whose timestamps it carries. Do not extend it — fix the SatDump config.
 - **SatDump output is per chunk, not per contact.** Composites live at
   `satdump/chunk_N/<INSTRUMENT>/`, one set per 30 s of downlink. `chunk_0` is the first
   30 s after AOS. The visualiser globs a flat directory, so the buildspec stages the

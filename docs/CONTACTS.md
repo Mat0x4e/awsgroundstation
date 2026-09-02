@@ -286,7 +286,7 @@ not a pipeline regression.
 - [x] Fix the cross-track extension in `_from_tle` — **done 2026-09-01**, spherical arc + bearing split
 - [x] Re-render contact #5 and check the overlay — **done 2026-09-01**. First attempt looked right and was not: the renderer mirrored the geolocated grid across track (`np.fliplr`, correct for a raw swath, wrong once pixels are placed geographically) while the overlay stayed correct, so the map was right and the ground under it was reversed. Scoring the *delivered* PNG rather than the pre-render grid is what caught it — 50.8%, i.e. chance. Fixed in `cf2dacf`
 - [x] True georeferencing from `product.cbor` — **done 2026-09-01**. Pixels are now placed by the ephemeris and scan model and resampled onto a north-up grid, instead of being stretched across a bounding box. Land/sea agreement against known coastlines went from ~50% (chance) to **88%**; the sub-satellite track matches an independent SGP4 propagation to **0.8 km**. See [ARCHITECTURE.md](ARCHITECTURE.md) and `scripts/viirs/scan_geometry.py`
-- [ ] Residual: the along-track model treats every row as one line at a constant rate, ignoring VIIRS bow-tie overlap between scans, which grows toward the swath edge
+- [ ] Re-run SatDump over contact #5's 22 chunks on an image built with projection enabled, so the composites are georeferenced by SatDump itself rather than by the fallback
 - [x] Fix `SVOM15`/`GMODO`/`GIGTO` constants in `scripts/viirs/` before the NASA path — **done 2026-08-27**, verified against contact #3's real `GMTCO`/`GITCO`
 - [ ] True-colour composite + I-band (375 m) look at the Adriatic/Naples area
 

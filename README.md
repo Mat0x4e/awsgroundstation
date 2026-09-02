@@ -25,7 +25,7 @@ end-to-end sequence with real timings, and the constraints that shaped the desig
 | [`docs/`](docs/) | Architecture, operational runbooks, contact log (below) |
 | [`scripts/`](scripts/) | Pass planner, I/Q extraction, aggregation, VIIRS visualisation |
 | [`buildspecs/`](buildspecs/) | CodeBuild buildspecs; `aggregation.yml` is read by Terraform via `file()` |
-| [`docker/`](docker/) | Image definitions — SatDump, RT-STPS, CSPP SDR in one image |
+| [`docker/`](docker/) | Image definitions — SatDump, RT-STPS, CSPP SDR in one image. `sdr-pipeline/enable_satdump_projection.py` turns on SatDump's own georeferencing at build time |
 | [`lambdas/`](lambdas/) | Lambda handlers (scheduler, aggregation trigger, VIIRS orchestrator) |
 | [`articles/`](articles/) | Write-ups of the project, with their own `awsdac` figures |
 | [`tests/`](tests/) | pytest suite |

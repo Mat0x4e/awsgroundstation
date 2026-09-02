@@ -1,7 +1,26 @@
 """Per-pixel geolocation of a SatDump VIIRS swath, from the CBOR ephemeris.
 
-Why this exists
----------------
+DEPRECATED -- fallback only
+---------------------------
+SatDump georeferences its own composites when its config carries a ``project``
+block, and those ``rgb_<name>_projected.tif`` files are the geolocation of
+record; see ``projected_reader`` and ``docker/sdr-pipeline/enable_satdump_projection.py``.
+It owns the model this module reconstructs -- ``resources/projections_settings/
+jpss1_viirs.json`` and ``plugins/jpss_support/.../viirs_proj.h`` -- including
+two things reachable only from inside it:
+
+* the pointing corrections ``roll_offset`` -0.05 and ``yaw_offset`` 0.15, which
+  nothing here applies;
+* the per-scan timestamps SatDump stores in the product's ``images[]`` entries
+  (17 values 1.7866 s apart, expanded by ``interpolate_timestamps_scantime``),
+  where this module reconstructs line times from a rate and a centring rule,
+  and the composite is cropped relative to the bands those timestamps belong to.
+
+Keep it for products decoded before projection was enabled. Do not extend it;
+fix the SatDump config instead.
+
+Why it exists at all
+--------------------
 The pipeline used to render a swath into an axis-aligned latitude/longitude
 box and stretch it linearly. No box can fit a swath: the image is a curved,
 tilted strip roughly 3,000 km across and 200 km along, and the box enclosing

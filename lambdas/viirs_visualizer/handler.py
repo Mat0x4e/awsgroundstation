@@ -51,6 +51,7 @@ phases:
           --include "*/VIIRS/*.png"
           --include "*/VIIRS/*.cbor"
           --include "*/VIIRS/*.georef"
+          --include "*/VIIRS/*_projected.tif"
       # SatDumpVisualizer.discover_composites globs its input dir non-recursively,
       # so flatten the per-chunk folders into it. Lowest chunk number wins each
       # name: chunk_0 is the first 30 s after AOS, the southernmost part of the

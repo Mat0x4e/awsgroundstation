@@ -39,6 +39,7 @@ from viirs.cartopy_renderer import CartopyRenderer
 from viirs.metadata_generator import MetadataGenerator
 from viirs.geotiff_exporter import GeoTIFFExporter
 from viirs.scan_geometry import SwathGeolocator, resample_to_equirect
+from viirs.projected_reader import find_projected, read_projected
 from viirs.models import BoundingBox
 
 # ---------------------------------------------------------------------------
@@ -186,6 +187,88 @@ def _resolve_bbox(
 # Main orchestration
 # ---------------------------------------------------------------------------
 
+def _render_projected(
+    projected,
+    cbor_meta,
+    args,
+    output_dir: Path,
+    contact_id: str,
+    geotiff_enabled: bool,
+) -> int:
+    """Publish composites SatDump has already georeferenced.
+
+    Each GeoTIFF carries its own extent, so there is no bounding box to guess
+    and no resampling to do: the array is already north-up equirectangular.
+    """
+    renderer = CartopyRenderer()
+    meta_gen = MetadataGenerator()
+    geotiff_exp = GeoTIFFExporter() if geotiff_enabled else None
+
+    datetime_utc = "unknown"
+    if cbor_meta.timestamp is not None:
+        try:
+            datetime_utc = cbor_meta.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except AttributeError:
+            datetime_utc = "unknown"
+    elif args.contact_time:
+        datetime_utc = f"{args.contact_date.replace('/', '-')}T{args.contact_time}Z"
+
+    success = failure = 0
+    for composite in projected:
+        slug = _composite_slug(composite.composite_type)
+        png_name = f"viirs_satdump_{slug}_{contact_id}.png"
+        json_name = f"viirs_satdump_{slug}_{contact_id}.json"
+        tif_name = f"viirs_satdump_{slug}_{contact_id}.tif"
+        png_path = output_dir / png_name
+        tif_path = output_dir / tif_name
+
+        bbox = BoundingBox(
+            lat_min=composite.lat_min,
+            lat_max=composite.lat_max,
+            lon_min=composite.lon_min,
+            lon_max=composite.lon_max,
+        )
+        logger.info("Processing projected composite: %s → %s", composite.composite_type, png_name)
+
+        try:
+            renderer.render_satdump(
+                data=composite.data,
+                bbox=bbox,
+                composite_type=composite.composite_type,
+                metadata=cbor_meta,
+                output_path=png_path,
+                north_up=True,
+            )
+            logger.info("  PNG written: %s", png_path)
+
+            metadata_dict = meta_gen.generate_satdump(
+                composite_type=composite.composite_type,
+                satellite=cbor_meta.satellite,
+                datetime_utc=datetime_utc,
+                bbox=bbox,
+                output_png=png_path,
+            )
+            metadata_dict["geolocation"] = "satdump_projected"
+            if geotiff_enabled:
+                metadata_dict["geotiff_file"] = tif_name
+            meta_gen.save(metadata_dict, png_path)
+            logger.info("  JSON written: %s", output_dir / json_name)
+
+            if geotiff_enabled and geotiff_exp is not None:
+                geotiff_exp.export_satdump(
+                    data=composite.data, bbox=bbox, output_path=tif_path
+                )
+                logger.info("  TIF written: %s", tif_path)
+
+            success += 1
+        except Exception as exc:  # noqa: BLE001 - one composite must not sink the rest
+            logger.error("  Failed on %s: %s", composite.composite_type, exc, exc_info=True)
+            failure += 1
+
+    logger.info("Projected composites: %d succeeded, %d failed", success, failure)
+    return 0 if success else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the SatDump visualization pipeline.
 
@@ -227,6 +310,33 @@ def main(argv: list[str] | None = None) -> int:
     # -----------------------------------------------------------------------
     # Step 2 — Discover composites (Req 1.1, 4.1)
     # -----------------------------------------------------------------------
+    # SatDump georeferences its own composites when its config carries a
+    # `project` block: it owns the VIIRS scan model and the per-scan
+    # timestamps, so those GeoTIFFs are the geolocation of record. Everything
+    # below them -- CBOR bbox, scan_geometry, resampling -- is the fallback
+    # for products decoded before that was enabled.
+    projected = []
+    if args.geolocate != "off":
+        for path in find_projected(input_dir):
+            composite = read_projected(path)
+            if composite is not None:
+                projected.append(composite)
+
+    if projected:
+        logger.info(
+            "Using %d SatDump-projected composite(s): %s",
+            len(projected), [c.composite_type for c in projected],
+        )
+        return _render_projected(
+            projected, cbor_meta, args, output_dir, contact_id, geotiff_enabled
+        )
+
+    logger.info(
+        "No SatDump-projected composites in %s — falling back to local "
+        "geolocation, which is less accurate (see docs/ARCHITECTURE.md)",
+        input_dir,
+    )
+
     visualizer = SatDumpVisualizer()
     try:
         composites = visualizer.discover_composites(input_dir)

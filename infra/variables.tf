@@ -60,6 +60,20 @@ variable "enable_sdr_pipeline" {
   default     = false
 }
 
+variable "enable_sync_pipeline" {
+  description = <<-EOT
+    Whether to create the synchronous reception pipeline resources (dedicated
+    demod/decode mission profile, receiver EC2, and post-contact processing).
+    Fully separate from enable_sdr_pipeline's async DigIF pipeline -- both can
+    be enabled simultaneously against the same satellite, each with its own
+    mission profile. Requires ground_station_enabled = true and
+    enable_sdr_pipeline = true (the sync pipeline reuses the SDR pipeline's
+    ECR image for its CSPP-only CodeBuild step).
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "satellite_norad_id" {
   description = "NORAD catalog ID for the target satellite"
   type        = number

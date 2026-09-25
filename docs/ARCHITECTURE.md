@@ -13,6 +13,11 @@ AWS does not supply: the **orbital model** that decides which contact is worth b
 (`scripts/plan_pass.py`), the **TLE** it propagates, and the **CSPP calibration LUTs** that
 turn raw counts into physical radiances.
 
+Everything below describes the DigIF reception path (`enable_sdr_pipeline`), the one that
+has actually flown. A second, live demod/decode path exists alongside it — see
+[`SYNC_PIPELINE.md`](SYNC_PIPELINE.md) — under its own mission profile, so a contact's
+reservation ARN, not a global switch, decides which one runs.
+
 ---
 
 ## The cinematic — one contact, end to end

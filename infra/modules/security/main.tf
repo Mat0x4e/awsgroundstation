@@ -79,6 +79,27 @@ resource "aws_kms_key" "groundstation" {
             "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:*"
           }
         }
+      },
+      {
+        # CloudWatch Alarms (modules/sync_pipeline/monitoring.tf) publish to
+        # aws_sns_topic.contact_notifications as the cloudwatch.amazonaws.com
+        # service principal, not via an assumed IAM role -- since the topic is
+        # KMS-encrypted, that principal needs its own key grant to do so.
+        Sid    = "AllowCloudWatchAlarmsEncryption"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudwatch.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey*"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
       }
     ]
   })
@@ -302,6 +323,37 @@ resource "aws_sns_topic" "contact_notifications" {
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-${var.environment}-contact-notifications"
+  })
+}
+
+# Allows CloudWatch Alarms (e.g. modules/sync_pipeline/monitoring.tf's receiver
+# auto-recovery / Lambda-error / Step Functions-failure alarms) to publish to
+# this shared topic. CloudWatch Alarms call sns:Publish as the
+# cloudwatch.amazonaws.com service principal directly, not via an assumed IAM
+# role, so this resource-based grant (plus the matching KMS key statement
+# above) is required even though other publishers here (Step Functions,
+# the scheduler Lambda) only need the caller-side IAM grants they already have.
+resource "aws_sns_topic_policy" "contact_notifications" {
+  arn = aws_sns_topic.contact_notifications.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowCloudWatchAlarmsPublish"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudwatch.amazonaws.com"
+        }
+        Action   = "sns:Publish"
+        Resource = aws_sns_topic.contact_notifications.arn
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      }
+    ]
   })
 }
 

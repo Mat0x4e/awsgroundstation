@@ -119,6 +119,27 @@ module "viirs_visualization" {
   tags                   = local.common_tags
 }
 
+module "sync_pipeline" {
+  count  = var.enable_sync_pipeline ? 1 : 0
+  source = "./modules/sync_pipeline"
+
+  project_name           = var.project_name
+  environment            = var.environment
+  account_id             = data.aws_caller_identity.current.account_id
+  satellite_norad_id     = var.satellite_norad_id
+  satellite_id           = var.satellite_id
+  satellite_onboarded    = var.satellite_onboarded
+  groundstation_role_arn = module.security.groundstation_role_arn
+  kms_key_arn            = module.security.kms_key_arn
+  kms_key_id             = module.security.kms_key_id
+  sns_topic_arn          = module.security.sns_topic_arn
+  # var.enable_sdr_pipeline must be true when enable_sync_pipeline is true (see
+  # variables.tf) -- this reuses the SDR pipeline's ECR image rather than
+  # building a second one, so there is nothing to fall back to if it's absent.
+  sdr_pipeline_ecr_repository_url = var.enable_sdr_pipeline ? module.sdr_pipeline[0].ecr_repository_url : ""
+  tags                            = local.common_tags
+}
+
 module "observability" {
   source = "./modules/observability"
 

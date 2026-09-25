@@ -62,3 +62,23 @@ output "aggregation_trigger_lambda_function_name" {
   description = "Function name of the aggregation Trigger Lambda (when SDR pipeline is enabled)"
   value       = var.enable_sdr_pipeline ? module.sdr_pipeline[0].aggregation_trigger_lambda_function_name : null
 }
+
+output "sync_pipeline_mission_profile_arn" {
+  description = "ARN of the synchronous NOAA-20 Ground Station mission profile (when sync pipeline is enabled)"
+  value       = var.enable_sync_pipeline ? module.sync_pipeline[0].mission_profile_arn : null
+}
+
+output "sync_pipeline_output_bucket_name" {
+  description = "Name of the sync pipeline output S3 bucket (when sync pipeline is enabled)"
+  value       = var.enable_sync_pipeline ? module.sync_pipeline[0].output_bucket_name : null
+}
+
+output "sync_pipeline_receiver_instance_id" {
+  description = "ID of the sync receiver EC2 instance (when sync pipeline is enabled)"
+  value       = var.enable_sync_pipeline ? module.sync_pipeline[0].receiver_instance_id : null
+}
+
+output "sync_pipeline_state_machine_arn" {
+  description = "ARN of the sync pipeline Step Functions state machine (when sync pipeline is enabled)"
+  value       = var.enable_sync_pipeline ? module.sync_pipeline[0].state_machine_arn : null
+}

@@ -41,6 +41,7 @@ end-to-end sequence with real timings, and the constraints that shaped the desig
 | [`docs/MEDITERRANEAN_PASS.md`](docs/MEDITERRANEAN_PASS.md) | Planning a targeted acquisition: reachability, the ~10° Stockholm mask, the 7-day booking wall |
 | [`docs/CONTACTS.md`](docs/CONTACTS.md) | Which passes exist, what they contain, what they cost |
 | [`docs/SATDUMP.md`](docs/SATDUMP.md) | **Before touching geolocation.** What SatDump already does — it georeferences its own composites, publishes the VIIRS scan model, stores per-scan timestamps, and needs a TLE — with the upstream file paths to check |
+| [`docs/SYNC_PIPELINE.md`](docs/SYNC_PIPELINE.md) | The second, live demod/decode reception path (not yet flown) — architecture, how it differs from the DigIF pipeline above, and how to pick which one runs for a given contact |
 
 ## Quick start
 

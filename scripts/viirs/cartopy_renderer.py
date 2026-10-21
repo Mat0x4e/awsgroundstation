@@ -606,6 +606,10 @@ class CartopyRenderer:
 
         if is_thermal:
             band = data[:, :, 0] if data.ndim == 3 else data
+            # Guard against non-finite lat/lon coordinates (Bug #2 fix).
+            # pcolormesh forbids NaN/inf in coordinate arrays; mask them so
+            # pcolormesh skips non-finite cells instead of raising ValueError.
+            lat, lon, band = _sanitise_thermal_coords(lat, lon, band)
             vmin_k, vmax_k = self.NASA_THERMAL_RANGE
             pcm = ax.pcolormesh(
                 lon,
@@ -674,6 +678,45 @@ class CartopyRenderer:
 def _round_to(value: float, step: float) -> float:
     """Round *value* down to the nearest multiple of *step*."""
     return np.floor(value / step) * step
+
+
+def _sanitise_thermal_coords(
+    lat: np.ndarray,
+    lon: np.ndarray,
+    band: np.ndarray,
+) -> tuple[np.ma.MaskedArray, np.ma.MaskedArray, np.ma.MaskedArray]:
+    """Mask non-finite values in pcolormesh coordinate arrays (Bug #2 fix).
+
+    pcolormesh forbids non-finite (NaN/inf) values in its x/y coordinate
+    arrays and raises ValueError on any such input.  The visualize_nasa
+    orchestrator fills masked geo pixels with np.nan before calling
+    render_nasa, so the thermal branch must sanitise coordinates before
+    passing them to pcolormesh.
+
+    A combined finite mask is built from lat AND lon; cells that are
+    non-finite in either coordinate are masked in all three arrays so
+    pcolormesh skips them cleanly.
+
+    Parameters
+    ----------
+    lat, lon:
+        Per-pixel latitude/longitude float32 arrays (H, W), possibly
+        containing NaN or inf at masked/edge pixels.
+    band:
+        Per-pixel brightness temperature float32 array (H, W).
+
+    Returns
+    -------
+    tuple of three np.ma.MaskedArray
+        (lat, lon, band) with non-finite positions masked.
+    """
+    finite = np.isfinite(lat) & np.isfinite(lon)
+    invalid = ~finite
+    return (
+        np.ma.masked_where(invalid, lat),
+        np.ma.masked_where(invalid, lon),
+        np.ma.masked_where(invalid, band),
+    )
 
 
 def _format_cbor_datetime(metadata: CBORMetadata) -> str:

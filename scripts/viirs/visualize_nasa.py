@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -90,6 +91,78 @@ def _find_hdf5_files(input_dir: Path, *prefixes: str) -> list[Path]:
     for prefix in prefixes:
         matches.update(input_dir.rglob(f"{prefix}_*.h5"))
     return sorted(matches)
+
+
+# ---------------------------------------------------------------------------
+# Granule-token helpers (Bug #1 fix)
+# ---------------------------------------------------------------------------
+
+# CSPP filenames follow: <PRODUCT>_<sat>_d<YYYYMMDD>_t<HHMMSSS>_e<HHMMSSS>_...
+# The granule-start token is the 't' field, e.g. t2049455.
+_CSPP_TOKEN_RE = re.compile(r"_t(\d{7})_")
+
+
+def _parse_granule_token(path: Path) -> str | None:
+    """Extract the tHHMMSSS granule-start token from a CSPP HDF5 filename.
+
+    Returns the 7-digit token string (e.g. '2049455') or None if the filename
+    does not match the CSPP naming convention.
+    """
+    m = _CSPP_TOKEN_RE.search(path.name)
+    return m.group(1) if m else None
+
+
+def _reconcile_granule_sets(*file_lists: list[Path]) -> tuple[list[Path], ...]:
+    """Return sub-lists whose granule tokens appear in ALL input lists.
+
+    Implements the band/geo reconciliation required when the SDR discovery
+    produces band granule counts that differ from geo granule counts (e.g.
+    contact-7: 1 SVI granule vs 5 GITCO granules).  Only granules with a
+    token present in EVERY list are returned; orphan granules are dropped and
+    a warning is logged.
+
+    Parameters
+    ----------
+    *file_lists:
+        Two or more lists of HDF5 file paths, e.g. (i1_files, igeo_files) or
+        (i1_files, i2_files, i3_files, igeo_files).
+
+    Returns
+    -------
+    tuple[list[Path], ...]
+        One filtered, token-sorted list per input list.
+    """
+    # Build token -> path maps for each list
+    token_maps: list[dict[str, Path]] = []
+    for flist in file_lists:
+        tmap: dict[str, Path] = {}
+        for f in flist:
+            tok = _parse_granule_token(f)
+            if tok is not None:
+                tmap[tok] = f
+            else:
+                logger.warning("Could not parse granule token from %s -- skipping", f.name)
+        token_maps.append(tmap)
+
+    # Intersection of all token sets
+    common = set(token_maps[0].keys())
+    for tmap in token_maps[1:]:
+        common &= set(tmap.keys())
+
+    # Log dropped granules
+    for i, tmap in enumerate(token_maps):
+        dropped = set(tmap.keys()) - common
+        if dropped:
+            logger.warning(
+                "Reconcile: dropped %d orphan granule(s) from list %d (tokens: %s)",
+                len(dropped), i, ", ".join(sorted(dropped)),
+            )
+
+    # Return sorted-by-token sub-lists in the same order as the inputs
+    result = []
+    for tmap in token_maps:
+        result.append(sorted((tmap[t] for t in common), key=lambda p: _parse_granule_token(p) or ""))
+    return tuple(result)
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +349,28 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # -----------------------------------------------------------------------
+    # Step 1b — Reconcile band and geo granule sets (Bug #1 fix)
+    # Only keep granules whose tHHMMSSS token appears in BOTH the band set
+    # AND the matching geo set.  Orphan geo granules (e.g. contact-7's 5 GITCO
+    # vs 1 SVI granule) are dropped to prevent broadcast errors.
+    # -----------------------------------------------------------------------
+    if i1_files and i2_files and i3_files and igeo_files:
+        i1_files, i2_files, i3_files, igeo_files = _reconcile_granule_sets(
+            i1_files, i2_files, i3_files, igeo_files
+        )
+        logger.info(
+            "After reconcile (True Color) — I1:%d I2:%d I3:%d IGEO:%d",
+            len(i1_files), len(i2_files), len(i3_files), len(igeo_files),
+        )
+
+    if m15_files and mgeo_files:
+        m15_files, mgeo_files = _reconcile_granule_sets(m15_files, mgeo_files)
+        logger.info(
+            "After reconcile (Thermal) — M15:%d MGEO:%d",
+            len(m15_files), len(mgeo_files),
+        )
+
+    # -----------------------------------------------------------------------
     # Step 2 — Extract NASA metadata from the first available SDR file
     # -----------------------------------------------------------------------
     meta_gen = MetadataGenerator()
@@ -333,20 +428,14 @@ def main(argv: list[str] | None = None) -> int:
 
         if destripe_enabled:
             logger.info("True Color — applying destripe to I1/I2/I3")
-            # contrast_stretch returns plain ndarray; destripe expects ndarray in [0,1].
-            # Re-wrap as masked arrays so assemble_true_color receives the right type.
-            i1 = np.ma.masked_array(
-                img_renderer.destripe(img_renderer.contrast_stretch(i1)),
-                mask=np.ma.getmaskarray(i1),
-            )
-            i2 = np.ma.masked_array(
-                img_renderer.destripe(img_renderer.contrast_stretch(i2)),
-                mask=np.ma.getmaskarray(i2),
-            )
-            i3 = np.ma.masked_array(
-                img_renderer.destripe(img_renderer.contrast_stretch(i3)),
-                mask=np.ma.getmaskarray(i3),
-            )
+            # Destripe on RAW reflectance (Bug #3 fix): do NOT contrast-stretch
+            # first.  The pre-stretch was zeroing masked pixels, corrupting the
+            # per-detector column medians.  destripe() now handles masked arrays
+            # (uses np.ma.median) and preserves the mask.  The single
+            # contrast_stretch happens inside assemble_true_color.
+            i1 = img_renderer.destripe(i1)
+            i2 = img_renderer.destripe(i2)
+            i3 = img_renderer.destripe(i3)
 
         logger.info("True Color — assembling RGB")
         rgb_data = img_renderer.assemble_true_color(i1, i2, i3)

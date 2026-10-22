@@ -170,3 +170,41 @@ for MP in 2e719f99-35f5-4720-b974-ba177036c1ee 32a1fdbb-99f1-413d-8905-436c5fccb
     --query 'length(contactList)' --output text
 done
 ```
+
+## Conformance check vs. the AWS reference template (did we configure it correctly?)
+
+Before concluding "onboarding," we verified our deployment against AWS's own reference,
+"Public broadcast satellite utilizing a dataflow endpoint (demodulated and decoded)"
+(https://docs.aws.amazon.com/ground-station/latest/ug/examples.pbs-dataflow-endpoint-demod-decode.html),
+which is explicitly the JPSS-1/NOAA-20 + RT-STPS use case. Result: our demod/decode config and
+mission-profile edge match the reference essentially exactly, so a config defect is NOT the cause
+of the zero AVAILABLE windows.
+
+Live-verified (get-config / get-mission-profile, 2026-10-22):
+
+| Reference element | Our live value | Match |
+|---|---|---|
+| AntennaDownlinkDemodDecodeConfig center freq / BW / pol | 7812 MHz / 30 MHz / RIGHT_HAND | exact |
+| Demod QPSK: CFR center 7812 +/-250 kHz; STR 15 Msps +/-0.75 ksps; RRC rolloff 0.5 | identical JSON | exact |
+| Decode graph: I/Q-Ingress -> IQ-Recombiner -> CCSDS_171_133_VITERBI_DECODER(ONE_HALF) -> NRZ_M_DECODER -> UNCODED_FRAMES_EGRESS | identical node graph | exact |
+| TrackingConfig Autotrack PREFERRED | PREFERRED | exact |
+| MissionProfile dataflow edge: <demod-decode cfg>/UncodedFramesEgress -> dataflow-endpoint cfg | identical | exact |
+| DataflowEndpointConfig -> named endpoint in a DataflowEndpointGroup on the receiver ENI | present (endpoint ...-sync-endpoint, group on receiver ENI) | yes |
+| GS DataDelivery service role (ENI create/delete) | groundstation_role_arn on the endpoint group security_details | yes |
+
+Non-material deviations (deliberate; do NOT affect contact eligibility):
+- Receiver software install: AWS template uses EC2 UserData (ddx_streams + configure_streams.py +
+  save_default_config.py); we install RT-STPS + listener by hand on the EBS volume (same pattern
+  as our async aggregation box). GS only requires that a dataflow-endpoint listener is reachable
+  on the ENI:port named in the dataflow endpoint group.
+- Instance/network: reference m5.4xlarge in a dedicated VPC + cluster placement group; we use
+  c6i.xlarge in the default VPC with a stable secondary ENI (REL-6 fixed-IP). Immaterial.
+- Durations: reference pre/post 120/180 (endpoint group) and 120/60 (mission profile); ours
+  600/120. A longer pre-pass is our choice (no S3 buffer); it does not affect whether windows
+  are offered.
+
+Why this matters: the config that Ground Station evaluates for demod/decode eligibility (the
+antenna-downlink-demod-decode config + the mission-profile edge) is byte-for-byte the AWS JPSS-1
+template at our frequency. With the config ruled out as the cause, the remaining variable is the
+one the reference itself flags in its closing note -- "If ... JPSS-1/NOAA-20 ... are not onboarded
+to your account, see Onboard satellite." i.e. demod/decode onboarding for NOAA-20 on this account.

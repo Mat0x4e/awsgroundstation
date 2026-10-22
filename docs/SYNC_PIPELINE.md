@@ -91,6 +91,16 @@ sequenceDiagram
   aggregation step starts.
 - **Packet format is not fully verified.** See the open risk below.
 
+## Blocker -- onboarding (read this first)
+
+As of 2026-10-22, Ground Station offers **zero schedulable (AVAILABLE) windows** for the sync
+demod/decode mission profile on this account, while the async DigIF profile returns many for the
+same satellite/station/window. NOAA-20 appears onboarded for DigIF but NOT for the
+antenna-downlink-demod-decode dataflow (public broadcast demod/decode is gated separately). No
+sync contact has ever been scheduled. The sync path therefore cannot be flown or validated until
+onboarding is resolved with AWS -- the risk below is moot until then. Full evidence + reproduce
+steps: `docs/SYNC_ONBOARDING_INVESTIGATION.md`.
+
 ## Open risk — packet format unverified
 
 `scripts/sync_receiver_listen.py` assumes the demod/decode `UncodedFramesEgress` stream

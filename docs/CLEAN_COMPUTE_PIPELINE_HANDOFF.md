@@ -131,3 +131,126 @@ aws stepfunctions start-execution --state-machine-arn <sdr-pipeline arn> --input
   Never edit infra/Python directly. Agents run Terraform plan-only; operator applies (SSO + spend).
 - `bash scripts/*.sh` from PowerShell may not inherit the refreshed SSO token — run AWS CLI
   directly in PowerShell if a `bash`-wrapped command fails with `InvalidToken` (see aws-knowledge.md).
+
+## Session update -- 2026-10-22 (Stage 3 delivered + cleanup)
+
+Stage 3 (task 10: visualization render -> Batch) is DONE, APPLIED to the live account, and
+VALIDATED on contact-7 for both render branches. Several Stage-2/OE-1 open items were also
+closed. Resume context below.
+
+### What was done this session (all applied to account 471112743408, eu-central-1)
+
+1. **Stage 3 (a) render Batch job definition + IAM** -- `infra/modules/batch_compute/`.
+   - New `render` job definition on the EXISTING on-demand CE + `agg-queue` (render is a single
+     job, not a fan-out -- reused the CE/queue, no new ones). Rev 1 live.
+   - Targets the DEDICATED `groundstation-noaa20-viirs-visualization` ECR image (NOT the
+     sdr-pipeline image). command = ["/bin/bash","/opt/scripts/viirs/render_entrypoint.sh"];
+     image-baked, no S3 bootstrap fetch (unlike the aggregation job def).
+   - Dedicated least-privilege render JOB role (S3 ro contacts/*, rw products/*, ECR pull viirs
+     repo, KMS, logs, PutMetricData conditioned to namespace SDRPipeline) + a dedicated render
+     EXECUTION role scoped to the viirs repo (the shared batch_execution role is sdr-scoped).
+
+2. **Stage 3 (b) Lambda strangler swap** -- `lambdas/viirs_visualizer/handler.py` +
+   `infra/modules/viirs_visualization/`.
+   - viirs-orchestrator now dispatches via `batch.submit_job` behind the `RENDER_COMPUTE` env
+     flag (default "codebuild"; set to "batch" when enable_batch_compute=true). CodeBuild path
+     is KEPT intact (strangler) until task 13.
+   - All render env passed via ContainerOverrides.Environment -- never Ref:: (canary gotcha #6).
+   - Lambda IAM gained batch:SubmitJob (agg-queue + render jobdef) and iam:PassRole on the two
+     render roles (conditioned iam:PassedToService=ecs-tasks.amazonaws.com). New Lambda env:
+     RENDER_COMPUTE, ENABLE_DESTRIPE, KMS_KEY_ID, BATCH_JOB_QUEUE, BATCH_JOB_DEFINITION.
+   - Deterministic render Batch ARNs added to root locals (cycle-break, same pattern as Stage
+     1/2); viirs image URL wired into module.batch_compute (acyclic one-way edge).
+   - Tests: viirs suite 23/23 green. (The ~20 full-suite failures are PRE-EXISTING missing
+     native deps -- matplotlib/sgp4/cartopy -- confirmed identical on the stashed baseline.)
+
+3. **Stage 3 (c) image rebuild** -- rebuilt `viirs-visualization:latest` so render_entrypoint.sh
+   and the task-9 NASA fixes are actually in the render runtime.
+
+4. **Stage 3 (d) validation on contact-7** (`dcef1518-c454-401f-bdcd-dc2e73fe89a5`, 2026/10/17):
+   - satdump branch (dispatched via the live Lambda): SUCCEEDED, ProductsWritten=11.
+   - nasa branch (direct submit; _detect_path prioritises satdump so nasa needs a direct run):
+     SUCCEEDED, ProductsWritten=14.
+   - Verified by COMPLETION evidence (ProductsWritten emitted post-sync, "render_entrypoint.sh
+     complete", fresh products/2026/10/17/.../ timestamps), not merely exit code.
+
+5. **Cleanup / docs:**
+   - ADR-001 status Proposed -> Accepted (2026-10-22) with the real contact-7 bake-off numbers.
+   - Deleted the dead out-of-band CodeBuild project `satdump-noaa20-processing` + its orphaned
+     role `codebuild-satdump-role` (not in IaC, superseded by the IaC sdr-docker-build project
+     and the Batch fan-out; idle since 2026-09-02). Trimmed the stale import/rename comment in
+     `sdr_pipeline/codebuild_image.tf`.
+   - Steering: added the "image-build source ref must hold the code before Batch validation"
+     learning to `.kiro/steering/aws-knowledge.md` (see the CRITICAL gotcha below).
+
+### CRITICAL gotcha discovered (do not repeat)
+The `viirs-docker-build` CodeBuild project builds from GitHub `sourceVersion=main`, but the
+Stage-3 code (render_entrypoint.sh, NASA fixes) lived only on branch `med-pass-cspp-codebuild`.
+The first rebuild produced an image from `main` WITHOUT render_entrypoint.sh -> every render job
+failed with "/opt/scripts/viirs/render_entrypoint.sh: No such file or directory". Fix: commit +
+push the branch, then rebuild pinned to it: `aws codebuild start-build --project-name
+groundstation-noaa20-viirs-docker-build --source-version med-pass-cspp-codebuild`. A container
+job runs IMAGE-BAKED code, so the image-build source ref is part of the deploy. Once this merges
+to `main`, a default rebuild from `main` is correct again. Full writeup in aws-knowledge.md.
+
+### Current architecture (as deployed 2026-10-22) -- tested [T] vs untested [U]
+See `docs/Asciiart-archi.txt` "TARGET" diagram -- it now matches reality EXCEPT render uses the
+DEDICATED viirs-visualization image (not the shared sdr-pipeline image).
+
+```
+  Ground Station -> EventBridge
+     |
+     +-- ASYNC (DigIF): SFN sdr_pipeline
+     |     Map -> SubmitBatchChunk (Batch SPOT, chunk job)            [T] contact-7: 50/50 chunks
+     |     CheckResults -> SubmitBatchAggregation (RTSTPS=on)         [T] contact-7: async agg OK
+     |                     Batch ON-DEMAND, aggregation job
+     |
+     +-- SYNC (demod): SFN sync_pipeline
+           FinishReceiver (RT-STPS on receiver EC2, TimeoutSeconds=1800)  [--] unchanged/proven
+           SubmitBatchAggregation (RTSTPS=off, RDR->CSPP)             [U] NOT run on real data
+                     Batch ON-DEMAND, aggregation job (no inner TO; jobdef 3600s)
+
+  (both async+sync) SDR+GEO -> S3
+     |
+  Lambda viirs-orchestrator (RENDER_COMPUTE=batch) -> batch.submit_job [T] Lambda->Batch dispatch
+     |                                                                 [U] codebuild fallback path
+  Batch ON-DEMAND render job (render_entrypoint.sh, DEDICATED viirs image)
+     RENDER_BRANCH=satdump  [T] contact-7 ProductsWritten=11
+     RENDER_BRANCH=nasa     [T] contact-7 ProductsWritten=14
+     |
+  products/ -> png + geotiff + json   (NASA fixes live in rebuilt image)
+```
+
+TESTED [T]:   Stage 1 fan-out (Spot) . Stage 2 async aggregation . Stage 3 render both branches .
+              Lambda->Batch dispatch . dedicated viirs image + render roles.
+UNTESTED [U]: Stage 2 SYNC aggregation (RTSTPS=off) -- blocked on a real/replayed sync RDR set;
+              CodeBuild render fallback (retained but not re-exercised since the flip).
+UNCHANGED [--]: receiver EC2 live-demod + RT-STPS-on-EC2. The 1800s timeout is on that RT-STPS
+              receiver step (~2 min typical), NOT on aggregation -- reviewed, no change needed.
+
+### OPEN ITEMS after this session (priority order)
+1. **Stage 2 sync-branch runtime validation (STILL OPEN, now the top blocker).** The RTSTPS=off
+   RDR->CSPP path is coded + deployed + flag-gated but never run on real data. Needs a real sync
+   contact OR a replayed sync RDR set staged under sync_output/contacts/.../rdr/. Until it passes,
+   do NOT retire the `groundstation-noaa20-sync-aggregation` CodeBuild project (task 8).
+2. **Task 13 -- retire the viirs-visualization CodeBuild project.** Deferred deliberately: keep
+   the CodeBuild render fallback until the Batch render path has run for several REAL production
+   contacts (not just the contact-7 re-render). Flip is reversible via RENDER_COMPUTE.
+3. **Merge PR #2** (`med-pass-cspp-codebuild` -> `main`). After merge, the default
+   viirs-docker-build (sourceVersion=main) rebuilds the correct image; the --source-version
+   workaround is then unnecessary.
+4. **ADR-002 numbers (optional, task 15.2).** ADR-001 is now Accepted with real numbers; ADR-002
+   is already Accepted(direction). Add the measured Stage-3 render timings if desired.
+
+### How to re-validate the render path quickly (no full pipeline re-run)
+contact-7 inputs already exist in S3 (satdump/ composites + sdr/ HDF5). To re-render:
+- satdump: invoke the Lambda with {bucket:<sdr-output>, key:contacts/2026/10/17/<id>/manifest.json}
+  (it detects satdump and submits a Batch render job).
+- nasa: submit the render job directly (satdump wins _detect_path when both inputs exist):
+  `aws batch submit-job --job-queue groundstation-noaa20-agg-queue --job-definition
+   groundstation-noaa20-render --job-name render-<id>-nasa --container-overrides <env json with
+   RENDER_BRANCH=nasa, INPUT_BUCKET, INPUT_PREFIX=contacts/2026/10/17/<id>, CONTACT_ID,
+   CONTACT_DATE=2026/10/17, KMS_KEY_ID, ENABLE_GEOTIFF=true, ENABLE_DESTRIPE=true,
+   CONTACT_TIME="", CHUNK_DURATION_S="">`
+Then confirm fresh objects under products/2026/10/17/<id>/ and ProductsWritten in the render log
+group /aws/batch/groundstation-noaa20-render.

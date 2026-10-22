@@ -2,7 +2,15 @@
 VIIRS Visualization Orchestrator Lambda
 
 Detects the visualization path (SatDump vs NASA) from files in the contact
-folder and submits the appropriate CodeBuild job.
+folder and dispatches a render job on the compute selected by RENDER_COMPUTE:
+  * "codebuild" (default) — the legacy inline-buildspec CodeBuild path.
+  * "batch"               — an AWS Batch job running render_entrypoint.sh,
+                            driven entirely by containerOverrides environment.
+
+Strangler migration (Clean Compute Pipeline, ADR-002, Stage 3b): the Batch
+path is added behind the RENDER_COMPUTE env flag while the CodeBuild path is
+kept fully intact until the Batch path is validated (task d). Nothing in the
+CodeBuild path changes.
 
 Design reference: .kiro/specs/noaa20-viirs-visualization/design.md §1
 Requirements: 11.1, 11.2, 11.3, 11.5
@@ -31,6 +39,12 @@ logger.setLevel(logging.INFO)
 # these buildspecs just orchestrate the download → render → upload workflow.
 # ---------------------------------------------------------------------------
 
+# RETAINED FOR THE LEGACY CODEBUILD STRANGLER PATH ONLY. The render logic has
+# been relocated to scripts/viirs/render_entrypoint.sh (RENDER_BRANCH=satdump),
+# which the AWS Batch path (RENDER_COMPUTE=batch) uses. This inline buildspec is
+# kept because the still-active CodeBuild dispatch and its structural-contract
+# tests reference it; it will be removed when the CodeBuild project is retired
+# (task 13), after the Batch path is validated. Do not delete it in this change.
 SATDUMP_BUILDSPEC = """version: 0.2
 
 env:
@@ -89,6 +103,12 @@ phases:
       - echo "Visualization complete"
 """
 
+# RETAINED FOR THE LEGACY CODEBUILD STRANGLER PATH ONLY. The render logic has
+# been relocated to scripts/viirs/render_entrypoint.sh (RENDER_BRANCH=nasa),
+# which the AWS Batch path (RENDER_COMPUTE=batch) uses. This inline buildspec is
+# kept because the still-active CodeBuild dispatch and its structural-contract
+# tests reference it; it will be removed when the CodeBuild project is retired
+# (task 13), after the Batch path is validated. Do not delete it in this change.
 NASA_BUILDSPEC = """version: 0.2
 
 env:
@@ -151,12 +171,22 @@ class NoVisualizableDataError(Exception):
 
 
 class VisualizationOrchestrator:
-    """Detects visualization path and submits CodeBuild job.
+    """Detects visualization path and dispatches a render job.
+
+    The render compute is selected by RENDER_COMPUTE (strangler switch):
+        "codebuild" (default) — legacy inline-buildspec CodeBuild build.
+        "batch"               — AWS Batch job running render_entrypoint.sh.
 
     Environment variables consumed:
-        INPUT_BUCKET     — SDR output bucket name
-        CODEBUILD_PROJECT — CodeBuild project name
-        ENABLE_GEOTIFF   — "true" or "false"
+        INPUT_BUCKET          — SDR output bucket name (required)
+        RENDER_COMPUTE        — "codebuild" (default) or "batch"
+        ENABLE_GEOTIFF        — "true" or "false"
+        ENABLE_DESTRIPE       — "true" or "false" (nasa branch; always passed to Batch)
+        KMS_KEY_ID            — CMK ARN / key id for SSE-KMS uploads (Batch path)
+        CODEBUILD_PROJECT     — CodeBuild project name (CodeBuild path only; optional
+                                so a batch-only deployment that omits it still builds)
+        BATCH_JOB_QUEUE       — Batch job queue (Batch path)
+        BATCH_JOB_DEFINITION  — Batch job definition (Batch path)
     """
 
     # Glob patterns matched against the basename of each S3 key.
@@ -178,16 +208,38 @@ class VisualizationOrchestrator:
         s3_client=None,
         codebuild_client=None,
         cloudwatch_client=None,
+        batch_client=None,
         input_bucket: Optional[str] = None,
         codebuild_project: Optional[str] = None,
         enable_geotiff: Optional[str] = None,
+        enable_destripe: Optional[str] = None,
+        kms_key_id: Optional[str] = None,
+        render_compute: Optional[str] = None,
+        batch_job_queue: Optional[str] = None,
+        batch_job_definition: Optional[str] = None,
     ) -> None:
         self._s3 = s3_client or boto3.client("s3")
         self._cb = codebuild_client or boto3.client("codebuild")
         self._cw = cloudwatch_client or boto3.client("cloudwatch")
+        self._batch = batch_client or boto3.client("batch")
         self._input_bucket = input_bucket or os.environ["INPUT_BUCKET"]
-        self._codebuild_project = codebuild_project or os.environ["CODEBUILD_PROJECT"]
+        # Tolerant resolution: a batch-only deployment may omit CODEBUILD_PROJECT,
+        # so default to "" instead of crashing at construction. The CodeBuild path
+        # still works when the var is set; the Batch path never reads it.
+        self._codebuild_project = codebuild_project or os.environ.get("CODEBUILD_PROJECT", "")
         self._enable_geotiff = (enable_geotiff or os.environ.get("ENABLE_GEOTIFF", "false")).lower()
+        self._enable_destripe = (enable_destripe or os.environ.get("ENABLE_DESTRIPE", "true")).lower()
+        # KMS_KEY_ID defaults to "" — the CodeBuild path never read it from the
+        # Lambda (the buildspec takes it from its own env), so an empty default
+        # keeps the CodeBuild path's behaviour identical. The Batch path passes it
+        # through to render_entrypoint.sh (which requires it on both branches).
+        self._kms_key_id = kms_key_id if kms_key_id is not None else os.environ.get("KMS_KEY_ID", "")
+        # Strangler switch: "codebuild" (default) or "batch".
+        self._render_compute = (render_compute or os.environ.get("RENDER_COMPUTE", "codebuild")).lower()
+        self._batch_job_queue = batch_job_queue if batch_job_queue is not None else os.environ.get("BATCH_JOB_QUEUE", "")
+        self._batch_job_definition = (
+            batch_job_definition if batch_job_definition is not None else os.environ.get("BATCH_JOB_DEFINITION", "")
+        )
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -239,19 +291,34 @@ class VisualizationOrchestrator:
             else (None, None)
         )
 
+        # Strangler switch: dispatch to AWS Batch when RENDER_COMPUTE=batch,
+        # otherwise keep the legacy CodeBuild path exactly as-is. Both are
+        # fire-and-forget; build_id carries the CodeBuild build id or the Batch
+        # jobId (same field — downstream SFN ResultPath depends on the shape).
         try:
-            build_id = self._submit_codebuild(
-                path=path,
-                contact_id=contact_id,
-                contact_date=contact_date,
-                input_prefix=input_prefix,
-                contact_time=contact_time,
-                chunk_duration=chunk_duration,
-            )
+            if self._render_compute == "batch":
+                build_id = self._submit_batch(
+                    path=path,
+                    contact_id=contact_id,
+                    contact_date=contact_date,
+                    input_prefix=input_prefix,
+                    contact_time=contact_time,
+                    chunk_duration=chunk_duration,
+                )
+            else:
+                build_id = self._submit_codebuild(
+                    path=path,
+                    contact_id=contact_id,
+                    contact_date=contact_date,
+                    input_prefix=input_prefix,
+                    contact_time=contact_time,
+                    chunk_duration=chunk_duration,
+                )
         except ClientError as exc:
             logger.error(
-                "CodeBuild submission failed: contact_id=%s path=%s "
+                "Render dispatch failed: compute=%s contact_id=%s path=%s "
                 "input_files=%s error=%s",
+                self._render_compute,
                 contact_id,
                 path,
                 json.dumps(s3_keys),
@@ -259,12 +326,18 @@ class VisualizationOrchestrator:
             )
             raise
 
-        logger.info("Submitted CodeBuild build: id=%s path=%s", build_id, path)
-        # NOTE: ProductsWritten is NOT published here.  The Lambda fires
-        # start_build() and returns immediately; products are written by the
-        # CodeBuild job several minutes later.  The metric is emitted from the
-        # buildspec's post_build phase, after `aws s3 sync`, so it reflects the
-        # actual files uploaded.  See SATDUMP_BUILDSPEC / NASA_BUILDSPEC.
+        logger.info(
+            "Dispatched render job: id=%s path=%s compute=%s",
+            build_id,
+            path,
+            self._render_compute,
+        )
+        # NOTE: ProductsWritten is NOT published here.  The Lambda dispatches the
+        # render job (start_build / submit_job) and returns immediately; products
+        # are written by that job several minutes later.  The metric is emitted
+        # from the render job itself, after `aws s3 sync`, so it reflects the
+        # actual files uploaded.  See SATDUMP_BUILDSPEC / NASA_BUILDSPEC (CodeBuild)
+        # and scripts/viirs/render_entrypoint.sh post_build (Batch).
         return {"build_id": build_id, "path": path, "contact_id": contact_id}
 
     # ------------------------------------------------------------------
@@ -530,6 +603,76 @@ class VisualizationOrchestrator:
             environmentVariablesOverride=env_overrides,
         )
         return response["build"]["id"]
+
+    # ------------------------------------------------------------------
+    # AWS Batch submission (strangler target)
+    # ------------------------------------------------------------------
+
+    # Batch job names allow only letters, digits, hyphen and underscore, up to
+    # 128 chars, and must start with a letter or digit. Contact UUIDs are
+    # hex+hyphen so already safe, but sanitise defensively against any id.
+    _JOBNAME_DISALLOWED_RE = re.compile(r"[^A-Za-z0-9_-]")
+
+    @classmethod
+    def _batch_job_name(cls, contact_id: str) -> str:
+        """Derive a Batch-safe job name from *contact_id*.
+
+        Replaces any character outside [A-Za-z0-9_-] with '-' and prefixes
+        "render-" so the name always starts with an alphanumeric and never
+        begins with a disallowed character. Truncated to Batch's 128-char limit.
+        """
+        sanitized = cls._JOBNAME_DISALLOWED_RE.sub("-", contact_id)
+        return f"render-{sanitized}"[:128]
+
+    def _submit_batch(
+        self,
+        path: str,
+        contact_id: str,
+        contact_date: str,
+        input_prefix: str,
+        contact_time: Optional[str] = None,
+        chunk_duration: Optional[float] = None,
+    ) -> str:
+        """Submit an AWS Batch job running render_entrypoint.sh.
+
+        Returns the Batch jobId string.
+
+        All values are passed via containerOverrides["environment"] as
+        [{"name":.., "value":..}] entries — NEVER via Batch Ref:: job-definition
+        parameters. Ref:: placeholders resolve only inside the job definition's
+        command[], not inside environment[], so an environment value of
+        "Ref::foo" would reach the container verbatim (documented project
+        gotcha). The env list sets exactly the vars render_entrypoint.sh reads.
+        """
+        environment = [
+            {"name": "RENDER_BRANCH", "value": path},
+            {"name": "INPUT_BUCKET", "value": self._input_bucket},
+            {"name": "INPUT_PREFIX", "value": input_prefix},
+            {"name": "CONTACT_ID", "value": contact_id},
+            {"name": "CONTACT_DATE", "value": contact_date},
+            {"name": "KMS_KEY_ID", "value": self._kms_key_id},
+            {"name": "ENABLE_GEOTIFF", "value": self._enable_geotiff},
+            # Always included so both branches are covered. render_entrypoint.sh
+            # only requires it on the nasa branch, but passing it on satdump is
+            # harmless (the satdump branch ignores it).
+            {"name": "ENABLE_DESTRIPE", "value": self._enable_destripe},
+            # SatDump-only optionals: empty string when unknown / on the nasa
+            # path (nasa passes contact_time=None/chunk_duration=None). An empty
+            # value makes render_entrypoint.sh skip the corresponding flag.
+            {"name": "CONTACT_TIME", "value": contact_time or ""},
+            {
+                "name": "CHUNK_DURATION_S",
+                "value": f"{chunk_duration:.0f}" if chunk_duration else "",
+            },
+        ]
+
+        response = self._batch.submit_job(
+            jobName=self._batch_job_name(contact_id),
+            jobQueue=self._batch_job_queue,
+            jobDefinition=self._batch_job_definition,
+            containerOverrides={"environment": environment},
+        )
+        return response["jobId"]
 
 
 # ---------------------------------------------------------------------------

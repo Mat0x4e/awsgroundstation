@@ -23,6 +23,11 @@ variable "sdr_ecr_image_url" {
   type        = string
 }
 
+variable "viirs_ecr_image_url" {
+  description = "Full ECR image URL (including :latest tag) for the dedicated VIIRS visualization container (Cartopy/GDAL/rasterio/h5py) - distinct from sdr_ecr_image_url. Example: 123456789012.dkr.ecr.eu-central-1.amazonaws.com/groundstation-noaa20-viirs-visualization:latest"
+  type        = string
+}
+
 variable "reception_bucket_name" {
   description = "Name of the Ground Station reception S3 bucket containing the contact .pcap chunks (read-only for chunk jobs)"
   type        = string

@@ -39,9 +39,14 @@ resource "aws_lambda_function" "viirs_orchestrator" {
 
   environment {
     variables = {
-      INPUT_BUCKET      = var.sdr_output_bucket_name
-      CODEBUILD_PROJECT = aws_codebuild_project.viirs_visualization.name
-      ENABLE_GEOTIFF    = tostring(var.enable_geotiff)
+      INPUT_BUCKET         = var.sdr_output_bucket_name
+      CODEBUILD_PROJECT    = aws_codebuild_project.viirs_visualization.name
+      ENABLE_GEOTIFF       = tostring(var.enable_geotiff)
+      RENDER_COMPUTE       = var.render_compute
+      ENABLE_DESTRIPE      = tostring(var.enable_destripe)
+      KMS_KEY_ID           = var.kms_key_id
+      BATCH_JOB_QUEUE      = var.batch_render_job_queue_arn
+      BATCH_JOB_DEFINITION = var.batch_render_job_definition_arn
     }
   }
 

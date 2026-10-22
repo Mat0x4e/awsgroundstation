@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -50,6 +51,22 @@ class FakeCodeBuild:
         return {"build": {"id": "project:build-id"}}
 
 
+class FakeBatch:
+    """Records submit_job kwargs and returns a canned jobId."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def submit_job(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"jobId": "job-123"}
+
+
+# Batch job names: letters, digits, hyphen, underscore; start with
+# alphanumeric; max 128 chars.
+_BATCH_JOBNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+
+
 def _orchestrator(objects=None, codebuild=None):
     return handler.VisualizationOrchestrator(
         s3_client=FakeS3(objects or {}),
@@ -58,6 +75,29 @@ def _orchestrator(objects=None, codebuild=None):
         codebuild_project="project",
         enable_geotiff="true",
     )
+
+
+def _batch_orchestrator(objects=None, batch=None):
+    """Build a batch-mode orchestrator (RENDER_COMPUTE=batch)."""
+    return handler.VisualizationOrchestrator(
+        s3_client=FakeS3(objects or {}),
+        codebuild_client=FakeCodeBuild(),
+        batch_client=batch or FakeBatch(),
+        input_bucket="bucket",
+        codebuild_project="project",
+        render_compute="batch",
+        batch_job_queue="q",
+        batch_job_definition="d",
+        kms_key_id="arn:kms:...",
+        enable_geotiff="true",
+        enable_destripe="true",
+    )
+
+
+def _env_map(submit_kwargs: dict) -> dict[str, str]:
+    """Flatten containerOverrides.environment into a {name: value} dict."""
+    env = submit_kwargs["containerOverrides"]["environment"]
+    return {e["name"]: e["value"] for e in env}
 
 
 def _dataset(ts: float) -> bytes:
@@ -337,4 +377,219 @@ class TestProductsWrittenMetric:
         result = self._orchestrator(s3, mock_cw).handle(self._event())
 
         assert result["build_id"] is None
+        mock_cw.put_metric_data.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# AWS Batch dispatch path — Stage 3b strangler swap (RENDER_COMPUTE=batch)
+#
+# The render logic now lives in scripts/viirs/render_entrypoint.sh, driven by
+# RENDER_BRANCH=satdump|nasa. When RENDER_COMPUTE=batch, the Lambda submits a
+# Batch job and passes every value render_entrypoint.sh reads through
+# containerOverrides.environment — NEVER via Batch Ref:: job-definition
+# parameters (Ref:: does not resolve inside environment[], only command[]).
+#
+# The CodeBuild path is unchanged and stays the default; all tests above that
+# don't set render_compute exercise it.
+# ---------------------------------------------------------------------------
+
+
+def test_render_compute_defaults_to_codebuild():
+    """Flag default: no RENDER_COMPUTE env / kwarg → the codebuild path.
+
+    A dispatch in default mode must go through the CodeBuild client, not Batch.
+    """
+    cb = FakeCodeBuild()
+    batch = FakeBatch()
+    orch = handler.VisualizationOrchestrator(
+        s3_client=FakeS3({}),
+        codebuild_client=cb,
+        batch_client=batch,
+        input_bucket="bucket",
+        codebuild_project="project",
+        enable_geotiff="true",
+    )
+
+    assert orch._render_compute == "codebuild"
+
+    orch._submit_codebuild(
+        path="satdump",
+        contact_id="ba2c5446",
+        contact_date="2026/08/31",
+        input_prefix=PREFIX,
+        contact_time="11:59:57",
+        chunk_duration=30.0,
+    )
+    assert len(cb.calls) == 1, "default mode must dispatch via CodeBuild"
+    assert batch.calls == [], "default mode must not dispatch via Batch"
+
+
+def test_batch_submit_satdump():
+    """SatDump Batch submit: correct environment, queue/definition, no Ref::."""
+    batch = FakeBatch()
+    orch = _batch_orchestrator(batch=batch)
+
+    job_id = orch._submit_batch(
+        path="satdump",
+        contact_id="ba2c5446",
+        contact_date="2026/08/31",
+        input_prefix=PREFIX,
+        contact_time="11:59:57",
+        chunk_duration=30.0,
+    )
+
+    assert job_id == "job-123"
+    assert len(batch.calls) == 1, "submit_job must be called exactly once"
+    call = batch.calls[0]
+
+    # Queue / definition passed through from constructor.
+    assert call["jobQueue"] == "q"
+    assert call["jobDefinition"] == "d"
+
+    env = _env_map(call)
+    assert env["RENDER_BRANCH"] == "satdump"
+    assert env["INPUT_BUCKET"] == "bucket"
+    assert env["INPUT_PREFIX"] == PREFIX
+    assert env["CONTACT_ID"] == "ba2c5446"
+    assert env["CONTACT_DATE"] == "2026/08/31"
+    assert env["KMS_KEY_ID"] == "arn:kms:..."
+    assert env["ENABLE_GEOTIFF"] == "true"
+    # SatDump optionals populated when provided.
+    assert env["CONTACT_TIME"] == "11:59:57"
+    assert env["CHUNK_DURATION_S"] == "30"
+
+    # Never resolve values through Batch Ref:: job-definition parameters.
+    for name, value in env.items():
+        assert "Ref::" not in value, f"{name} must not contain a Ref:: placeholder"
+
+    # jobName must satisfy the Batch charset.
+    assert _BATCH_JOBNAME_RE.match(call["jobName"]), call["jobName"]
+
+    # Values go via containerOverrides.environment as [{"name","value"}], never
+    # via a top-level job-definition parameters map.
+    assert "parameters" not in call
+    for entry in call["containerOverrides"]["environment"]:
+        assert set(entry) == {"name", "value"}
+
+
+def test_batch_submit_nasa():
+    """NASA Batch submit: RENDER_BRANCH=nasa, ENABLE_DESTRIPE present,
+    CONTACT_TIME empty (nasa passes contact_time=None)."""
+    batch = FakeBatch()
+    orch = _batch_orchestrator(batch=batch)
+
+    orch._submit_batch(
+        path="nasa",
+        contact_id="ba2c5446",
+        contact_date="2026/08/31",
+        input_prefix=PREFIX,
+        contact_time=None,
+        chunk_duration=None,
+    )
+
+    env = _env_map(batch.calls[0])
+    assert env["RENDER_BRANCH"] == "nasa"
+    assert "ENABLE_DESTRIPE" in env, "nasa branch requires ENABLE_DESTRIPE"
+    assert env["ENABLE_DESTRIPE"] == "true"
+    assert env["CONTACT_TIME"] == "", "nasa passes None → empty string"
+    assert env["CHUNK_DURATION_S"] == ""
+
+
+def test_batch_job_name_sanitisation():
+    """A contact id with chars outside [A-Za-z0-9_-] yields a valid jobName."""
+    batch = FakeBatch()
+    orch = _batch_orchestrator(batch=batch)
+
+    orch._submit_batch(
+        path="nasa",
+        contact_id="path/with:bad*chars",
+        contact_date="2026/08/31",
+        input_prefix=PREFIX,
+    )
+
+    job_name = batch.calls[0]["jobName"]
+    assert _BATCH_JOBNAME_RE.match(job_name), job_name
+    # '/', ':' and '*' must be replaced, not passed through.
+    assert "/" not in job_name
+    assert ":" not in job_name
+    assert "*" not in job_name
+
+
+def test_batch_job_name_within_length_limit():
+    """Even an over-long id must truncate to Batch's 128-char limit."""
+    batch = FakeBatch()
+    orch = _batch_orchestrator(batch=batch)
+
+    orch._submit_batch(
+        path="nasa",
+        contact_id="z" * 200,
+        contact_date="2026/08/31",
+        input_prefix=PREFIX,
+    )
+
+    job_name = batch.calls[0]["jobName"]
+    assert len(job_name) <= 128
+    assert _BATCH_JOBNAME_RE.match(job_name), job_name
+
+
+class TestBatchDispatchMetricContract:
+    """Batch mode honours the same dispatch-vs-completion contract as CodeBuild:
+    handle() must NOT publish ProductsWritten at dispatch time. The metric is
+    emitted by render_entrypoint.sh post_build, after the s3 sync."""
+
+    CONTACT_ID = "ba2c5446"
+    CONTACT_DATE = "2026/08/31"
+    BUCKET = "test-sdr-bucket"
+
+    def _seed_s3_for_dispatch(self, s3) -> None:
+        s3.create_bucket(Bucket=self.BUCKET)
+        # SatDump composite so _detect_path returns "satdump".
+        s3.put_object(
+            Bucket=self.BUCKET,
+            Key=(
+                f"contacts/{self.CONTACT_DATE}/{self.CONTACT_ID}"
+                f"/satdump/viirs_rgb_True_Color.png"
+            ),
+            Body=b"fake-composite",
+        )
+
+    def _event(self) -> dict:
+        return {
+            "bucket": self.BUCKET,
+            "key": f"contacts/{self.CONTACT_DATE}/{self.CONTACT_ID}/manifest.json",
+        }
+
+    @mock_aws
+    def test_batch_mode_does_not_publish_products_written_at_dispatch(self):
+        """Mirror of the CodeBuild regression, but with render_compute="batch".
+
+        moto provides S3 for seeding/path detection; Batch is faked so no real
+        AWS Batch is needed.
+        """
+        s3 = boto3.client("s3", region_name="us-east-1")
+        self._seed_s3_for_dispatch(s3)
+        mock_cw = MagicMock()
+        batch = FakeBatch()
+
+        orch = handler.VisualizationOrchestrator(
+            s3_client=s3,
+            codebuild_client=FakeCodeBuild(),
+            cloudwatch_client=mock_cw,
+            batch_client=batch,
+            input_bucket=self.BUCKET,
+            codebuild_project="project",
+            render_compute="batch",
+            batch_job_queue="q",
+            batch_job_definition="d",
+            kms_key_id="arn:kms:...",
+            enable_geotiff="false",
+            enable_destripe="true",
+        )
+        result = orch.handle(self._event())
+
+        # Dispatched via Batch — build_id carries the Batch jobId.
+        assert result["build_id"] == "job-123"
+        assert result["path"] == "satdump"
+        assert len(batch.calls) == 1, "Batch must be dispatched"
+        # Regression gate — Lambda must NOT publish at dispatch time.
         mock_cw.put_metric_data.assert_not_called()

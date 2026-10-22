@@ -54,3 +54,23 @@ output "aggregation_log_group_name" {
   description = "CloudWatch log group for aggregation job execution logs"
   value       = aws_cloudwatch_log_group.aggregation.name
 }
+
+###############################################################################
+# Stage 3 - Render (VIIRS visualization) outputs
+# No render queue output - render reuses the aggregation on-demand queue.
+###############################################################################
+
+output "render_job_definition_name" {
+  description = "Name of the render Batch job definition (unqualified - always resolves to the latest revision)"
+  value       = aws_batch_job_definition.render.name
+}
+
+output "render_job_definition_arn" {
+  description = "ARN of the render Batch job definition (versioned ARN; use the name to reference latest)"
+  value       = aws_batch_job_definition.render.arn
+}
+
+output "render_log_group_name" {
+  description = "CloudWatch log group for render job execution logs"
+  value       = aws_cloudwatch_log_group.render.name
+}

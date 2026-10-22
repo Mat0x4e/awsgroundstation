@@ -41,10 +41,18 @@ data "aws_subnets" "default" {
 locals {
   fanout_log_group_name      = "/aws/batch/${var.project_name}-fanout"
   aggregation_log_group_name = "/aws/batch/${var.project_name}-aggregation"
+  render_log_group_name      = "/aws/batch/${var.project_name}-render"
 
   # ECR repository ARN - derived from the naming convention in the sdr_pipeline module.
   # That module always creates the repo as "${project_name}-sdr-pipeline".
   ecr_repo_arn = "arn:aws:ecr:${data.aws_region.current.id}:${var.account_id}:repository/${var.project_name}-sdr-pipeline"
+
+  # VIIRS visualization ECR repository ARN - derived from the naming convention
+  # in the viirs_visualization module, which always creates the repo as
+  # "${project_name}-viirs-visualization". This is a DISTINCT repo from the sdr
+  # one above; the render job pulls the dedicated Cartopy/GDAL/rasterio/h5py image.
+  # Do NOT reuse local.ecr_repo_arn here (that is the sdr-pipeline repo).
+  viirs_ecr_repo_arn = "arn:aws:ecr:${data.aws_region.current.id}:${var.account_id}:repository/${var.project_name}-viirs-visualization"
 
   # Aggregation entrypoint bootstrap command.
   # Pulls aggregation_entrypoint.sh from S3 at job start, then execs it. This
@@ -627,5 +635,117 @@ resource "aws_batch_job_definition" "aggregation" {
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-aggregation"
+  })
+}
+
+###############################################################################
+# CloudWatch Log Group - render jobs (Stage 3, VIIRS visualization)
+###############################################################################
+
+resource "aws_cloudwatch_log_group" "render" {
+  # checkov:skip=CKV_AWS_338: 90-day retention is deliberate for job execution logs.
+  # Render job traces are operational logs; the science products (PNG/GeoTIFF
+  # visualizations) are the permanent record, stored in S3 with versioning.
+  name              = local.render_log_group_name
+  retention_in_days = 90
+  kms_key_id        = var.kms_key_arn
+
+  tags = merge(var.tags, {
+    Name = local.render_log_group_name
+  })
+}
+
+###############################################################################
+# Batch Job Definition - render (VIIRS visualization, on-demand EC2)
+###############################################################################
+# VIIRS visualization render job (Stage 3). Replaces the SATDUMP_BUILDSPEC and
+# NASA_BUILDSPEC CodeBuild projects driven by the viirs-orchestrator Lambda; the
+# RENDER_BRANCH=satdump|nasa env var selects the branch (see render_entrypoint.sh).
+#
+# COMPUTE PLACEMENT: render runs on the EXISTING on-demand compute environment
+# via the EXISTING aggregation job queue. Render is a SINGLE job (not a fan-out
+# of many short jobs), so there is NO new CE or job queue - reuse, do not create.
+#
+# A Batch job definition is NOT bound to a queue in Terraform; the queue is
+# chosen at submit time. There is therefore no new queue/CE resource here. The
+# render job is submitted to the existing aws_batch_job_queue.aggregation by the
+# viirs-orchestrator Lambda (that submit-time wiring is Stage 3 part (b), not
+# this task).
+#
+# KEY DIFFERENCE FROM THE AGGREGATION JOB DEF: no S3 bootstrap fetch. The render
+# entrypoint is baked into the dedicated viirs-visualization image at build time
+# via "COPY scripts/ /opt/scripts/" in docker/viirs-visualization/Dockerfile, so
+# the command execs it directly from the in-image path - it does NOT pull the
+# script from S3 the way aggregation_entrypoint.sh does.
+
+resource "aws_batch_job_definition" "render" {
+  name                  = "${var.project_name}-render"
+  type                  = "container"
+  platform_capabilities = ["EC2"]
+
+  container_properties = jsonencode({
+    # Dedicated VIIRS visualization image (Cartopy/GDAL/rasterio/h5py), NOT the
+    # sdr-pipeline image. This is the whole point of the separate viirs repo.
+    image = var.viirs_ecr_image_url
+
+    # 8 vCPU / 16 GiB: matches the aggregation job def.
+    resourceRequirements = [
+      { type = "VCPU", value = "8" },
+      { type = "MEMORY", value = "16384" },
+    ]
+
+    # Execute the entrypoint baked into the image via COPY scripts/ -> /opt/scripts/.
+    # No S3 bootstrap fetch (unlike the aggregation job def, which pulls its
+    # entrypoint from s3://OUTPUT/software/). This is the single most important
+    # difference from the aggregation job definition.
+    command = ["/bin/bash", "/opt/scripts/viirs/render_entrypoint.sh"]
+
+    # Env vars declared with empty-string defaults for DOCUMENTATION purposes only.
+    # The real values are injected at submit time by the viirs-orchestrator Lambda
+    # via ContainerOverrides.Environment (canary gotcha #6: Ref:: substitution does
+    # NOT work in environment[], only in command[]). These keys are every required
+    # and optional env var that render_entrypoint.sh reads.
+    environment = [
+      { name = "RENDER_BRANCH", value = "" },
+      { name = "INPUT_BUCKET", value = "" },
+      { name = "INPUT_PREFIX", value = "" },
+      { name = "CONTACT_ID", value = "" },
+      { name = "CONTACT_DATE", value = "" },
+      { name = "KMS_KEY_ID", value = "" },
+      { name = "ENABLE_GEOTIFF", value = "" },
+      { name = "ENABLE_DESTRIPE", value = "" },
+      { name = "CONTACT_TIME", value = "" },
+      { name = "CHUNK_DURATION_S", value = "" },
+    ]
+
+    jobRoleArn = aws_iam_role.batch_render_job.arn
+    # DEDICATED render execution role, scoped to the viirs repo (the shared
+    # batch_execution role is scoped to the sdr-pipeline repo).
+    executionRoleArn = aws_iam_role.batch_render_execution.arn
+
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.render.name
+        "awslogs-region"        = data.aws_region.current.id
+        "awslogs-stream-prefix" = "render"
+      }
+    }
+  })
+
+  # On-demand: not subject to Spot reclaim. A single attempt is correct - render
+  # is a single on-demand job and a mid-run retry is not worth it (same rationale
+  # as the aggregation job def).
+  retry_strategy {
+    attempts = 1
+  }
+
+  # 3600 s = 60 min: generous headroom for the render pipeline (match aggregation).
+  timeout {
+    attempt_duration_seconds = 3600
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-render"
   })
 }

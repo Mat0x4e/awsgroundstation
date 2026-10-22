@@ -57,6 +57,24 @@ variable "tle_fallback" {
   default     = ""
 }
 
+variable "render_compute" {
+  description = "Selects the render compute backend for the orchestrator Lambda: codebuild (legacy) or batch"
+  type        = string
+  default     = "codebuild"
+}
+
+variable "batch_render_job_queue_arn" {
+  description = "ARN of the Batch job queue the render job is submitted to (the shared on-demand aggregation queue). Empty when Batch render is disabled"
+  type        = string
+  default     = ""
+}
+
+variable "batch_render_job_definition_arn" {
+  description = "ARN of the render Batch job definition (unversioned; resolves to latest ACTIVE revision). Empty when Batch render is disabled"
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags to apply to all taggable resources"
   type        = map(string)

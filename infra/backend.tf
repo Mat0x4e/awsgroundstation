@@ -2,9 +2,9 @@
 # Bucket:  groundstation-noaa20-tfstate-471112743408 (eu-central-1)
 #          versioning=ON, AES-256 encryption, all public access blocked
 #
-# Locking: use_lockfile=true uses S3 conditional writes — no DynamoDB table needed.
-# The groundstation-noaa20-tfstate-lock DynamoDB table (created 2026-10-19) is no
-# longer used and can be safely deleted when convenient.
+# Locking: use_lockfile=true uses S3 conditional writes - no DynamoDB table needed.
+# (A transitional groundstation-noaa20-tfstate-lock DynamoDB table existed briefly during
+# bootstrap and was deleted 2026-10-22 once use_lockfile was adopted.)
 #
 # Bootstrap was done once via AWS CLI (2026-10-19). State migrated from local.
 # To onboard a new operator: run `terraform init` — Terraform will pull state from S3.

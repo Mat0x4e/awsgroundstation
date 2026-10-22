@@ -241,10 +241,23 @@ each backlog item through four agentic quality gates — implement → validate 
 
 ## ADR-001 — Compute platform for chunk fan-out and aggregation (resolves OPEN-1)
 
-**Status:** Proposed (decision document — no implementation; any migration is a separate spec)
-**Date:** 2026-10-09
-**Depends on:** PERF-1 (S3 LUT cache) — the prerequisite that makes every non-CodeBuild option viable
+**Status:** Accepted (2026-10-22) — direction confirmed; the gating bake-off was satisfied by the production Stage-1 Batch run on contact-7. Implemented via spec `clean-compute-pipeline` (Stages 1-3).
+**Date:** 2026-10-09 (proposed); 2026-10-22 (accepted)
+**Depends on:** PERF-1 (S3 LUT cache) — the prerequisite that makes every non-CodeBuild option viable — DEPLOYED
 **Deciders:** AWS Alliance / project owner
+
+> **Acceptance note (2026-10-22).** The two gates below were met. PERF-1 is deployed. The
+> "one measured bake-off" was satisfied by the production Stage-1 fan-out run on **contact-7**
+> (`dcef1518-c454-401f-bdcd-dc2e73fe89a5`, Oregon 1, flown 2026-10-17): the chunk fan-out ran
+> on AWS Batch on EC2 Spot (Option C) with `ChunksSucceeded=50, ChunksFailed=0` (every chunk
+> processed, 0 failures) and ~19 concurrent Spot instances, demonstrating the concurrency win
+> that removes the CodeBuild account-build-cap throttle this ADR targeted. The disposable
+> `compute_bakeoff` module served as the first strangler step per ADR-002; the production Stage-1
+> validation is the measurement that replaces the order-of-magnitude estimates in the table below.
+> Option C was adopted for the fan-out and the aggregation stage runs as a single on-demand Batch
+> job (Stage 2). Fargate (B/D) was not needed — `c6i/m6i.2xlarge` Spot capacity in `eu-central-1`
+> proved reliable. See ADR-002 for the whole-pipeline extension and `docs/CONTACTS.md` (contact-7)
+> for the verified run.
 
 ### Context
 

@@ -273,6 +273,59 @@ resource "aws_iam_role_policy" "sfn" {
 }
 
 ###############################################################################
+# 2a. Step Functions Batch permissions (clean-compute-pipeline Stage 2)
+# Gated on use_batch_aggregation: created only when the Batch aggregation path
+# is active. The sync pipeline has no fan-out Batch step (unlike sdr_pipeline),
+# so this policy covers the aggregation job only.
+###############################################################################
+
+resource "aws_iam_role_policy" "sfn_batch" {
+  count = var.use_batch_aggregation ? 1 : 0
+  name  = "${var.project_name}-sync-sfn-batch-policy"
+  role  = aws_iam_role.sfn.id
+
+  # checkov:skip=CKV_AWS_355: batch:DescribeJobs and batch:TerminateJob cannot
+  # be scoped to a specific resource ARN (AWS service constraint -- job IDs are
+  # not ARNs at policy evaluation time). Resource: * is the only valid value.
+  # checkov:skip=CKV_AWS_290: Same constraint as above.
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # batch:SubmitJob -- scoped to the aggregation queue and job definition only.
+      {
+        Sid    = "BatchSubmitJob"
+        Effect = "Allow"
+        Action = ["batch:SubmitJob"]
+        Resource = [
+          var.batch_aggregation_job_queue_arn,
+          var.batch_aggregation_job_definition_arn,
+        ]
+      },
+      # batch:DescribeJobs and batch:TerminateJob are required by submitJob.sync.
+      # Neither action supports resource-level scoping.
+      {
+        Sid      = "BatchMonitorAndTerminate"
+        Effect   = "Allow"
+        Action   = ["batch:DescribeJobs", "batch:TerminateJob"]
+        Resource = "*"
+      },
+      # EventBridge -- submitJob.sync creates and manages one well-known managed
+      # rule in the execution account. Scoped to the exact rule name.
+      {
+        Sid    = "EventBridgeBatchManagedRule"
+        Effect = "Allow"
+        Action = [
+          "events:PutTargets",
+          "events:PutRule",
+          "events:DescribeRule",
+        ]
+        Resource = "arn:aws:events:${data.aws_region.current.id}:${var.account_id}:rule/StepFunctionsGetEventsForBatchJobsRule"
+      },
+    ]
+  })
+}
+
+###############################################################################
 # 3. EventBridge Role — starts the state machine on contact COMPLETED only.
 # The PREPASS arm trigger invokes lambda.tf's receiver_arm Lambda directly via
 # a resource-based aws_lambda_permission (see eventbridge.tf), not this role.

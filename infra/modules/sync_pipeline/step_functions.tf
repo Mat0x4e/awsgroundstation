@@ -220,11 +220,107 @@ resource "aws_sfn_state_machine" "sync_pipeline" {
         Catch = [
           {
             ErrorEquals = ["States.ALL"]
-            Next        = "StartAggregationBuild"
+            Next        = "InjectAggFlag"
             ResultPath  = "$.stop_error"
           }
         ]
-        Next = "StartAggregationBuild"
+        Next = "InjectAggFlag"
+      }
+
+      # ── 4a. InjectAggFlag ─────────────────────────────────────────────────
+      # Injects the build-time Batch gate flag into the state via ResultPath so
+      # ChooseAggregationCompute can branch. Using a dedicated Pass state (rather
+      # than the Task-state StopReceiver) is necessary because Task states cannot
+      # inject values via Parameters+ResultPath without altering their output shape.
+      InjectAggFlag = {
+        Type       = "Pass"
+        Comment    = "Stage 2 strangler: inject build-time Batch gate into state for the compute router"
+        Result     = var.use_batch_aggregation
+        ResultPath = "$.use_batch_agg"
+        Next       = "ChooseAggregationCompute"
+      }
+
+      # ── 4b. ChooseAggregationCompute ──────────────────────────────────────
+      # Stage 2 strangler gate. Routes to Batch (RTSTPS=off) when use_batch_agg
+      # is true; falls through to the existing CodeBuild CSPP poll-loop otherwise.
+      # Both branches remain until task 8 retires the sync CSPP CodeBuild project.
+      ChooseAggregationCompute = {
+        Type    = "Choice"
+        Comment = "Stage 2 strangler: Batch aggregation (RTSTPS=off) or CodeBuild poll-loop"
+        Choices = [
+          {
+            Variable      = "$.use_batch_agg"
+            BooleanEquals = true
+            Next          = "SubmitBatchAggregation"
+          }
+        ]
+        Default = "StartAggregationBuild"
+      }
+
+      # ── 4c. SubmitBatchAggregation ────────────────────────────────────────
+      # Batch on-demand aggregation job: RDR -> CSPP only (RTSTPS=off).
+      # RT-STPS already ran on the receiver EC2 in FinishReceiver, producing
+      # the RDR that lives in sync_output/contacts/.../rdr/. The same aggregation
+      # job definition is shared with the async pipeline; RTSTPS=off selects the
+      # CSPP-only branch in aggregation_entrypoint.sh.
+      #
+      # CRITICAL: Batch Ref:: substitution only works inside job-def command[],
+      # NOT in environment[].value. All per-contact values are passed via
+      # ContainerOverrides.Environment (mirrors the sdr_pipeline SubmitBatchChunk pattern).
+      #
+      # RECEPTION_BUCKET is omitted: the RTSTPS=off branch reads the RDR from
+      # OUTPUT_BUCKET/contacts/.../rdr/ (already in sync_output), not the
+      # reception bucket.
+      SubmitBatchAggregation = {
+        Type     = "Task"
+        Comment  = "Submit Batch aggregation job (RDR -> CSPP, RTSTPS=off, Stage 2)"
+        Resource = "arn:aws:states:::batch:submitJob.sync"
+        Parameters = {
+          "JobName.$"   = "States.Format('agg-{}', $.contact_id)"
+          JobQueue      = var.batch_aggregation_job_queue_arn
+          JobDefinition = var.batch_aggregation_job_definition_arn
+          ContainerOverrides = {
+            Environment = [
+              {
+                Name  = "RTSTPS"
+                Value = "off"
+              },
+              {
+                Name  = "OUTPUT_BUCKET"
+                Value = aws_s3_bucket.sync_output.id
+              },
+              {
+                Name      = "CONTACT_ID"
+                "Value.$" = "$.contact_id"
+              },
+              {
+                Name      = "CONTACT_DATE"
+                "Value.$" = "$.contact_date"
+              },
+              {
+                Name  = "KMS_KEY_ID"
+                Value = var.kms_key_arn
+              }
+            ]
+          }
+        }
+        ResultPath = "$.aggregation_batch"
+        Retry = [
+          {
+            ErrorEquals     = ["States.TaskFailed", "Batch.AWSBatchException"]
+            IntervalSeconds = 30
+            MaxAttempts     = 2
+            BackoffRate     = 2.0
+          }
+        ]
+        Catch = [
+          {
+            ErrorEquals = ["States.ALL"]
+            Next        = "AggregationFailure"
+            ResultPath  = "$.error"
+          }
+        ]
+        Next = "StartVisualization"
       }
 
       # ── 5. StartAggregationBuild ───────────────────────────────────────────

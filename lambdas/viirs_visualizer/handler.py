@@ -77,6 +77,15 @@ phases:
       - aws s3 sync /tmp/output/
           "s3://${INPUT_BUCKET}/products/${CONTACT_DATE}/${CONTACT_ID}/"
           --sse aws:kms --sse-kms-key-id "${KMS_KEY_ID}"
+      # DISPATCH-VS-COMPLETION: products are created here, by this build, not
+      # by the Lambda orchestrator.  The Lambda fires start_build() and returns
+      # immediately -- the products/ prefix is empty at dispatch time.  Emit
+      # ProductsWritten now, after the sync, so the metric reflects what was
+      # actually uploaded.  Requires cloudwatch:PutMetricData (namespace
+      # SDRPipeline) on the CodeBuild service role (iam.tf).
+      - PRODUCT_COUNT=$(aws s3 ls "s3://${INPUT_BUCKET}/products/${CONTACT_DATE}/${CONTACT_ID}/" --recursive 2>/dev/null | wc -l | tr -d ' ')
+      - aws cloudwatch put-metric-data --namespace SDRPipeline --metric-name ProductsWritten --unit Count --value "${PRODUCT_COUNT}" --dimensions "Name=ContactId,Value=${CONTACT_ID}" || echo "WARNING:ProductsWritten metric publish failed (non-fatal)"
+      - echo "ProductsWritten metric published: contact_id=${CONTACT_ID} count=${PRODUCT_COUNT}"
       - echo "Visualization complete"
 """
 
@@ -124,6 +133,15 @@ phases:
       - aws s3 sync /tmp/output/
           "s3://${INPUT_BUCKET}/products/${CONTACT_DATE}/${CONTACT_ID}/"
           --sse aws:kms --sse-kms-key-id "${KMS_KEY_ID}"
+      # DISPATCH-VS-COMPLETION: products are created here, by this build, not
+      # by the Lambda orchestrator.  The Lambda fires start_build() and returns
+      # immediately -- the products/ prefix is empty at dispatch time.  Emit
+      # ProductsWritten now, after the sync, so the metric reflects what was
+      # actually uploaded.  Requires cloudwatch:PutMetricData (namespace
+      # SDRPipeline) on the CodeBuild service role (iam.tf).
+      - PRODUCT_COUNT=$(aws s3 ls "s3://${INPUT_BUCKET}/products/${CONTACT_DATE}/${CONTACT_ID}/" --recursive 2>/dev/null | wc -l | tr -d ' ')
+      - aws cloudwatch put-metric-data --namespace SDRPipeline --metric-name ProductsWritten --unit Count --value "${PRODUCT_COUNT}" --dimensions "Name=ContactId,Value=${CONTACT_ID}" || echo "WARNING:ProductsWritten metric publish failed (non-fatal)"
+      - echo "ProductsWritten metric published: contact_id=${CONTACT_ID} count=${PRODUCT_COUNT}"
       - echo "Visualization complete"
 """
 
@@ -159,12 +177,14 @@ class VisualizationOrchestrator:
         self,
         s3_client=None,
         codebuild_client=None,
+        cloudwatch_client=None,
         input_bucket: Optional[str] = None,
         codebuild_project: Optional[str] = None,
         enable_geotiff: Optional[str] = None,
     ) -> None:
         self._s3 = s3_client or boto3.client("s3")
         self._cb = codebuild_client or boto3.client("codebuild")
+        self._cw = cloudwatch_client or boto3.client("cloudwatch")
         self._input_bucket = input_bucket or os.environ["INPUT_BUCKET"]
         self._codebuild_project = codebuild_project or os.environ["CODEBUILD_PROJECT"]
         self._enable_geotiff = (enable_geotiff or os.environ.get("ENABLE_GEOTIFF", "false")).lower()
@@ -240,6 +260,11 @@ class VisualizationOrchestrator:
             raise
 
         logger.info("Submitted CodeBuild build: id=%s path=%s", build_id, path)
+        # NOTE: ProductsWritten is NOT published here.  The Lambda fires
+        # start_build() and returns immediately; products are written by the
+        # CodeBuild job several minutes later.  The metric is emitted from the
+        # buildspec's post_build phase, after `aws s3 sync`, so it reflects the
+        # actual files uploaded.  See SATDUMP_BUILDSPEC / NASA_BUILDSPEC.
         return {"build_id": build_id, "path": path, "contact_id": contact_id}
 
     # ------------------------------------------------------------------
@@ -382,6 +407,73 @@ class VisualizationOrchestrator:
             f"{duration:.1f}s" if duration else "unknown",
         )
         return first.strftime("%H:%M:%S"), duration
+
+    # ------------------------------------------------------------------
+    # CloudWatch metrics
+    # ------------------------------------------------------------------
+
+    def _count_products(self, bucket: str, contact_date: str, contact_id: str) -> int:
+        """Count S3 objects under products/{contact_date}/{contact_id}/.
+
+        Uses a paginator per project boto3 convention — no manual NextToken loop.
+        Products are written there by the visualization CodeBuild buildspec
+        (aws s3 sync /tmp/output/ s3://${INPUT_BUCKET}/products/${CONTACT_DATE}/${CONTACT_ID}/).
+
+        NOTE: No longer called from handle() at dispatch time — doing so always
+        produced 0 because the products/ prefix is empty when the Lambda fires
+        (dcef1518 / Oregon #7 regression).  ProductsWritten is now emitted from
+        the buildspec post_build phase, after the sync.  Retained as a reference
+        and for potential future use.
+        """
+        prefix = f"products/{contact_date}/{contact_id}/"
+        count = 0
+        paginator = self._s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            count += len(page.get("Contents", []))
+        return count
+
+    def _publish_products_written_metric(
+        self, bucket: str, contact_date: str, contact_id: str
+    ) -> None:
+        """Count products and publish ProductsWritten to the SDRPipeline namespace.
+
+        NOT called from handle() since the dcef1518 fix (Oregon #7 regression).
+        The metric is now emitted from the buildspec post_build phase, after
+        `aws s3 sync`, so it reflects actual uploaded files rather than the
+        empty prefix seen at dispatch time.  Retained here as a reference.
+
+        Defensive: a failure to publish must never fail the visualization path.
+        Logs a WARNING and continues on any exception, consistent with the
+        pipeline's 'products must survive' philosophy.
+
+        Namespace SDRPipeline matches the namespace already permitted by the
+        sdr_pipeline IAM conditions (cloudwatch:namespace StringEquals SDRPipeline).
+        """
+        try:
+            count = self._count_products(bucket, contact_date, contact_id)
+            self._cw.put_metric_data(
+                Namespace="SDRPipeline",
+                MetricData=[
+                    {
+                        "MetricName": "ProductsWritten",
+                        "Dimensions": [{"Name": "ContactId", "Value": contact_id}],
+                        "Value": float(count),
+                        "Unit": "Count",
+                    }
+                ],
+            )
+            logger.info(
+                "ProductsWritten metric published: contact_id=%s count=%d",
+                contact_id,
+                count,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to publish ProductsWritten metric (non-fatal): "
+                "contact_id=%s error=%s",
+                contact_id,
+                exc,
+            )
 
     # ------------------------------------------------------------------
     # CodeBuild submission

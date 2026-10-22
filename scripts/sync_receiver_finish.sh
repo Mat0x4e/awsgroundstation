@@ -111,6 +111,19 @@ log_json "INFO" "Uploading raw CADU capture to ${S3_PREFIX}/cadu/"
 aws s3 cp "$CAPTURE_FILE" "${S3_PREFIX}/cadu/combined.cadu" \
     --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID"
 
+# Upload the raw UDP tee capture if it was written by sync_receiver_arm.sh.
+# This gives a replayable copy of every raw UDP payload for packet-format
+# inspection (see docs/SYNC_PIPELINE.md's "Packet-format validation gate").
+RAW_CAPTURE_FILE="${WORK_DIR}/raw_capture.bin"
+if [ -f "$RAW_CAPTURE_FILE" ] && [ -s "$RAW_CAPTURE_FILE" ]; then
+    log_json "INFO" "Uploading raw UDP tee capture to ${S3_PREFIX}/raw/"
+    aws s3 cp "$RAW_CAPTURE_FILE" "${S3_PREFIX}/raw/raw_capture.bin" \
+        --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID"
+    log_json "INFO" "Raw capture upload complete"
+else
+    log_json "INFO" "No raw tee capture found -- skipping raw/ upload"
+fi
+
 if [ "$(find /opt/data -maxdepth 1 -name '*.h5' 2>/dev/null | head -1)" ]; then
     log_json "INFO" "Uploading RDR HDF5 files to ${S3_PREFIX}/rdr/"
     aws s3 sync /opt/data/ "${S3_PREFIX}/rdr/" \

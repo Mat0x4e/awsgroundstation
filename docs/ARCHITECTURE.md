@@ -73,7 +73,7 @@ sequenceDiagram
 | Contact | ~10 min | the only part that costs antenna time (~$110) |
 | Delivery settle | 120 s | last chunk landed 19 s after LOS; the wait is margin |
 | Chunk fan-out | ~40 min | 22 builds, 19 concurrent; measured 8.7 / 23.3 / 38.9 min (min / median / max) |
-| Aggregation | ~25 min | ~10 of it is `sdr_luts.sh` fetching ancillary |
+| Aggregation | ~15 min (cache hit) / ~25 min (miss) | PERF-1: `sdr_luts.sh` (~10 min) skipped when LUT DB staged from S3; fallback fetch runs only on first contact after cache is cold |
 
 ---
 
@@ -200,6 +200,15 @@ against the products prefix, never the execution status.
 - **The EC2 aggregation instance carries a hand-installed `/opt/rt-stps` and
   `/opt/SDR_4_1`** that exist in no Terraform, Dockerfile or user_data. Replacing the
   instance destroys them, which is why `ignore_changes` covers `root_block_device`.
+  Drift is now **DETECTED** (OE-2): an SSM State Manager association
+  (`infra/modules/sdr_pipeline/ssm_drift_check.tf`) runs a daily presence-and-non-empty
+  check on these paths and emits an `OptDriftDetected` metric (namespace `SDRPipeline`,
+  dimension `InstanceId`) to CloudWatch; `monitoring.tf` alarms on it and routes to SNS.
+  The same detection covers the sync receiver's `/opt/rt-stps` + `config/jpss1.xml`
+  (namespace `SyncPipeline`, `infra/modules/sync_pipeline/ssm_drift_check.tf`). Full
+  automated reconstruction from vendor tarballs remains **DEFERRED** — the CSPP/RT-STPS
+  install is weeks of manual work; re-encoding it blind risks silent wrongness that only
+  surfaces during a pass.
 
 ---
 
@@ -215,3 +224,38 @@ against the products prefix, never the execution status.
 DigIF delivery is the reason the numbers are this size: it ships ~30× the demodulated
 bitstream. AWS also offers demodulated delivery — cheaper, if implementing the signal chain
 is not the point.
+
+---
+
+## Accepted architectural tradeoffs
+
+Deliberate decisions, recorded so a reviewer does not mistake a conscious choice for an
+oversight. Each is a demonstrator-appropriate trade with a documented rationale; the
+Well-Architected refinement ([`ARCHITECTURE_REFINEMENT.md`](ARCHITECTURE_REFINEMENT.md))
+assessed each and chose to keep it rather than engineer it away.
+
+| Decision | Rationale | Where it lives | Revisit when |
+|---|---|---|---|
+| **Single-region, no cross-region DR** | A demonstrator; the system of record is Partner Central/Ground Station, and S3 is a replayable cache. Cross-region replication adds cost without protecting anything irreplaceable. | `checkov:skip=CKV_AWS_144` on every output bucket (`s3.tf`) | This becomes a production dependency with an RPO/RTO requirement. |
+| **Single shared KMS CMK across all domains** | One key for S3/ECR/CloudTrail/SNS/Logs/EBS across both pipelines. Operational simplicity over blast-radius isolation; rotation is enabled and the key policy is least-privilege per service principal. | `aws_kms_key.groundstation` (`security/main.tf`) | A compliance boundary requires per-domain key separation, or a second tenant shares the account. |
+| **Sync receiver single-AZ** | The receiver is one instance in `subnets.ids[0]`. The fixed-IP ENI (REL-6) and the PREPASS readiness check (REL-5) address the realistic failure modes; multi-AZ would not help a per-contact, pre-positioned receiver and doubles idle cost. | `aws_instance.receiver` (`sync_pipeline/ec2.tf`) | The sync path becomes the primary (non-experimental) reception mode. |
+| **Scheduler cron disabled** | Automatic booking once reserved two unintended paid contacts. Reservation is now a deliberate human act, backed by the Task 11 budget guardrail. | `contact_scheduler` (cron disabled); budget in `security/budget.tf` | Booking is driven by a reviewed, rate-limited automation with its own spend guard. |
+| **`ToleratedFailurePercentage = 100` on the chunk Map** | Partial chunk results are still useful — aggregation consumes whatever decoded. Kept, but made *visible* by the `ChunksSucceeded`/`ChunksFailed` metrics + all-chunks-failed alarm (REL-3). | `ParallelProcessing` Map (`sdr_pipeline/step_functions.tf`); metrics in `monitoring.tf` | — (visibility added; behaviour intentionally retained). |
+| **Account-wide budget (not GS-service-scoped)** | A working account-wide ceiling beats a budget mis-scoped to a Cost Explorer service name not yet verified. A ready-to-enable `cost_filter` is committed, commented. | `aws_budgets_budget.ground_station` (`security/budget.tf`) | The exact Cost Explorer "AWS Ground Station" service string is confirmed. |
+
+### The buildspec-override contract (OE-3)
+
+Two CodeBuild projects are `NO_SOURCE` with a **stub** buildspec that is never meant to run
+as-is — the real buildspec is injected at `start_build()` time via `buildspecOverride`:
+
+- `aws_codebuild_project.sdr_pipeline` — overridden by the Map's inline `StartCodeBuild`
+  buildspec (per chunk) and by `StartAggregationBuild`'s `file("buildspecs/aggregation.yml")`.
+- `aws_codebuild_project.viirs_visualization` — overridden from
+  `lambdas/viirs_visualizer/handler.py` (`SATDUMP_BUILDSPEC` / `NASA_BUILDSPEC`).
+
+Both stubs **fail safe with `exit 1`**: a standalone run (no override) means a
+misconfiguration and must error loudly rather than silently succeed doing nothing. This
+contract is guarded by `tests/test_buildspec_contract.py`, which asserts each stub contains
+`exit 1` — the test fails if anyone removes it. Three real defects once hid in the gap
+between the stub and the real buildspec (2026-09-01); the guard exists so that class of
+error cannot recur silently.

@@ -104,6 +104,33 @@ variable "creation_date" {
   default     = "2025-05-22"
 }
 
+variable "enable_compute_bakeoff" {
+  description = <<-EOT
+    Set to true to create the disposable AWS Batch-on-EC2-Spot chunk fan-out bakeoff module.
+    EXPERIMENT ONLY — defaults to false so it is never created by a normal apply.
+    Requires enable_sdr_pipeline = true: the module reuses the SDR ECR image and output bucket.
+    Tear down with: terraform destroy -target module.compute_bakeoff[0]
+    See .kiro/specs/compute-bakeoff-batch-spot/ for cost and measurement notes.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "enable_batch_compute" {
+  description = <<-EOT
+    Set to true to create the production AWS Batch-on-EC2-Spot fan-out module
+    (clean-compute-pipeline Stage 1). This module stands up ALONGSIDE the existing
+    CodeBuild fan-out during the strangler-fig cutover and is the long-lived
+    replacement, not a disposable experiment.
+    Requires enable_sdr_pipeline = true: the module reuses the SDR ECR image and
+    output bucket. Defaults to false so a normal apply does not create it; the
+    operator flips this flag when ready to begin the Stage-1 cutover.
+    See .kiro/specs/clean-compute-pipeline/ for cutover sequence and rollback notes.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "aws_profile" {
   description = "AWS CLI profile to use for authentication"
   type        = string

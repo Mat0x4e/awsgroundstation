@@ -29,11 +29,17 @@ header length by up to 5 words, which vita49_extract.py's fixed 7-word
 assumption does not account for).
 
 Usage:
-    sync_receiver_listen.py <port> <output_file> [--raw-passthrough]
+    sync_receiver_listen.py <port> <output_file> [--raw-passthrough] [--raw-tee PATH]
 
   --raw-passthrough: write raw UDP payloads (no VITA-49 header parsing) to
     output_file instead. Useful for capturing a sample to inspect by hand if
     the parsed-frame output doesn't sync in RT-STPS.
+
+  --raw-tee PATH: ALSO write every raw UDP payload to PATH, in addition to the
+    normal parsed-frame (or --raw-passthrough) output. Use this to capture a
+    replayable raw sample while still feeding RT-STPS in real time -- the tee
+    does not replace the main output. See docs/SYNC_PIPELINE.md's
+    "Packet-format validation gate" section.
 
 Writes newline-free, concatenated decoded-frame bytes to output_file --
 directly consumable by rt-stps/bin/batch.sh the same way a SatDump .cadu is
@@ -45,12 +51,14 @@ closing the output file cleanly first.
 """
 
 import argparse
+import contextlib
 import json
 import logging
 import signal
 import socket
 import sys
 import time
+from pathlib import Path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,6 +69,19 @@ logger = logging.getLogger("sync_receiver_listen")
 
 RECV_BUFFER_SIZE = 65536  # generous -- UDP payloads here are well under the 1500 MTU set on the dataflow endpoint
 STATS_LOG_INTERVAL_SECONDS = 30
+
+# Readiness marker files written by this listener; polled by sync_receiver_arm.sh.
+#
+# READY_MARKER     -- created immediately after successful socket.bind().
+#                     sync_receiver_arm.sh polls this for up to 15 s to confirm
+#                     the UDP socket is accepting before emitting the
+#                     ReceiverReadyFailure=0 metric.
+#
+# RECEIVING_MARKER -- created on first packet arrival.
+#                     NOT required at arm time (AOS may not have happened yet
+#                     during PREPASS); written for post-hoc diagnosis only.
+READY_MARKER = "/var/run/sync_receiver_ready"
+RECEIVING_MARKER = "/var/run/sync_receiver_receiving"
 
 _shutdown = False
 
@@ -114,6 +135,16 @@ def main():
         action="store_true",
         help="Write raw UDP payloads without VITA-49 header parsing",
     )
+    parser.add_argument(
+        "--raw-tee",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Also write every raw UDP payload to PATH (tee -- in addition to the "
+            "normal parsed-frame output, not instead of). Enables replay of a pass "
+            "if the parsed stream fails RT-STPS frame_sync. See docs/SYNC_PIPELINE.md."
+        ),
+    )
     args = parser.parse_args()
 
     signal.signal(signal.SIGTERM, _handle_signal)
@@ -124,6 +155,15 @@ def main():
     sock.bind(("0.0.0.0", args.port))
     sock.settimeout(1.0)  # so the loop can notice _shutdown even with no traffic
 
+    # Write the ready marker immediately after bind.
+    # sync_receiver_arm.sh polls READY_MARKER for up to 15 s to confirm the
+    # socket is accepting before emitting ReceiverReadyFailure=0.
+    try:
+        Path(READY_MARKER).touch()
+    except OSError as e:
+        logger.warning(json.dumps({"action": "ready_marker_error", "error": str(e)}))
+    logger.info(json.dumps({"action": "listener_bound", "port": args.port}))
+
     logger.info(
         json.dumps(
             {
@@ -131,6 +171,7 @@ def main():
                 "port": args.port,
                 "output_file": args.output_file,
                 "raw_passthrough": args.raw_passthrough,
+                "raw_tee": args.raw_tee,
             }
         )
     )
@@ -138,9 +179,14 @@ def main():
     packets_received = 0
     frames_extracted = 0
     bytes_written = 0
+    first_packet_seen = False
     last_stats_log = time.monotonic()
 
-    with open(args.output_file, "wb") as out:
+    # Open the optional raw-tee file alongside the main output.
+    # When --raw-tee is not given, nullcontext() yields None and no tee is written.
+    tee_ctx = open(args.raw_tee, "wb") if args.raw_tee else contextlib.nullcontext()
+
+    with open(args.output_file, "wb") as out, tee_ctx as tee_out:
         while not _shutdown:
             try:
                 packet, _addr = sock.recvfrom(RECV_BUFFER_SIZE)
@@ -152,6 +198,12 @@ def main():
 
             packets_received += 1
 
+            # Always tee the raw UDP payload when --raw-tee was given.
+            # This is independent of --raw-passthrough: both the tee and the
+            # parsed output are written in the same pass.
+            if tee_out is not None:
+                tee_out.write(packet)
+
             if args.raw_passthrough:
                 out.write(packet)
                 bytes_written += len(packet)
@@ -161,6 +213,19 @@ def main():
                     out.write(frame)
                     bytes_written += len(frame)
                     frames_extracted += 1
+
+            # First-packet arrival: write receiving marker and log.
+            # NOTE: NOT required at arm time (PREPASS runs before AOS, so no
+            # packets may have arrived yet). Written for post-hoc diagnosis only.
+            if not first_packet_seen:
+                first_packet_seen = True
+                try:
+                    Path(RECEIVING_MARKER).touch()
+                except OSError as e:
+                    logger.warning(
+                        json.dumps({"action": "receiving_marker_error", "error": str(e)})
+                    )
+                logger.info(json.dumps({"action": "first_packet_received", "port": args.port}))
 
             now = time.monotonic()
             if now - last_stats_log >= STATS_LOG_INTERVAL_SECONDS:
@@ -177,6 +242,8 @@ def main():
                 last_stats_log = now
 
         out.flush()
+        if tee_out is not None:
+            tee_out.flush()
 
     sock.close()
     logger.info(

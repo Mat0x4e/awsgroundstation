@@ -106,6 +106,48 @@ and inspect it by hand against the onboarding-provided spec. The C/T/TSI/TSF fla
 can change the header length by up to 5 words, which the fixed 7-word assumption does not
 account for.
 
+## Packet-format validation gate (REL-5)
+
+**The sync path is not flight-ready until the packet format has been validated against a
+real traffic capture.** The current parser assumes a 7-word/28-byte VITA-49 header — the
+same fixed layout used by the DigIF reference scripts. AWS documents the demod/decode
+VITA-49 Extension format as explicitly different, with the exact per-satellite layout
+provided at onboarding. Until the assumption is confirmed, every pass is a format
+validation experiment.
+
+### Clearing the gate
+
+1. **Capture a raw sample.** `sync_receiver_arm.sh` now passes `--raw-tee
+   ${WORK_DIR}/raw_capture.bin` to the listener by default (Task 9.2). This writes every
+   raw UDP payload to `raw_capture.bin` alongside the normal parsed frame stream.
+   After the pass, `sync_receiver_finish.sh` uploads it to
+   `s3://<bucket>/contacts/<date>/<contact>/raw/raw_capture.bin`.
+
+   Alternatively, run the listener manually with `--raw-passthrough` to capture raw
+   payloads only (no VITA-49 header parsing) to the main output file.
+
+2. **Inspect against the onboarding spec.** Open the captured file in a hex editor and
+   compare the byte layout to the VITA-49 Extension packet format provided by AWS during
+   satellite onboarding. Confirm: header word count, packet-type field position, size
+   field position, payload start offset. Check whether the C/T/TSI/TSF flag bits are set
+   — these can extend the header by up to 5 words beyond the 7-word assumption.
+
+3. **Confirm RT-STPS frame_sync locks.** Run RT-STPS against a real pass and confirm
+   `frame_sync` logs successful lock and produces RDR HDF5 output. Zero RDR output with
+   frame-sync errors means the header parsing is stripping too many or too few bytes.
+   Zero RDR output with no frame-sync errors means the frames are malformed before
+   reaching RT-STPS.
+
+4. **Record the result.** Once all three steps pass, update this section with the contact
+   ID, date, and verified header layout. Until then, treat the `ReceiverReadyFailure`
+   metric and the raw tee as diagnostic infrastructure, not a production-ready pipeline.
+
+**Related:** `scripts/sync_receiver_listen.py`'s module docstring has the full header
+caveat. The Terraform `ReceiverReadyFailure > 0` alarm (Task 9.1, `monitoring.tf`) fires
+during PREPASS if the listener fails to bind before AOS.
+
+---
+
 ## Manual prerequisites (installed by hand, outside Terraform)
 
 Same pattern as the existing aggregation EC2 (`ARCHITECTURE.md`'s constraints section):

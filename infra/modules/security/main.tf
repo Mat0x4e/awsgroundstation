@@ -100,6 +100,27 @@ resource "aws_kms_key" "groundstation" {
             "aws:SourceAccount" = data.aws_caller_identity.current.account_id
           }
         }
+      },
+      {
+        # AWS Budgets publishes notifications to the KMS-encrypted SNS topic as the
+        # budgets.amazonaws.com service principal.  Without this grant the SNS
+        # publish call silently fails because the service cannot generate the data
+        # key for the topic's envelope encryption (COST-1 / R9-AC1).
+        Sid    = "AllowBudgetsEncryption"
+        Effect = "Allow"
+        Principal = {
+          Service = "budgets.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey*"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
       }
     ]
   })
@@ -302,6 +323,15 @@ resource "aws_iam_role_policy" "processor_lambda" {
           "cloudwatch:PutMetricData"
         ]
         Resource = "*"
+        # R6-AC1: scope PutMetricData to the namespace the data_processor handler
+        # actually uses (lambdas/data_processor/handler.py METRICS_NAMESPACE =
+        # "GroundStation/DataProcessor"). Prevents the role from writing metrics
+        # to any other namespace without a further IAM change.
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "GroundStation/DataProcessor"
+          }
+        }
       },
       {
         Effect = "Allow"
@@ -352,6 +382,24 @@ resource "aws_sns_topic_policy" "contact_notifications" {
             "aws:SourceAccount" = data.aws_caller_identity.current.account_id
           }
         }
+      },
+      {
+        # AWS Budgets calls sns:Publish as the budgets.amazonaws.com service
+        # principal when sending budget alarm notifications (COST-1 / R9-AC1).
+        # Without this statement budget notifications silently fail on KMS-encrypted
+        # topics even when the KMS key policy grants the Decrypt/GenerateDataKey.
+        Sid    = "AllowBudgetsPublish"
+        Effect = "Allow"
+        Principal = {
+          Service = "budgets.amazonaws.com"
+        }
+        Action   = "sns:Publish"
+        Resource = aws_sns_topic.contact_notifications.arn
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
       }
     ]
   })
@@ -378,12 +426,27 @@ resource "aws_cloudtrail" "groundstation" {
 
 # S3 bucket for CloudTrail logs
 resource "aws_s3_bucket" "cloudtrail" {
-  bucket        = "${var.project_name}-${var.environment}-cloudtrail-${data.aws_caller_identity.current.account_id}"
-  force_destroy = true
+  bucket = "${var.project_name}-${var.environment}-cloudtrail-${data.aws_caller_identity.current.account_id}"
+  # force_destroy intentionally omitted (default: false).
+  # The CloudTrail audit log store must not be casually destroyable; destroying
+  # it requires manually emptying the bucket first — a deliberate friction that
+  # prevents accidental loss of the audit trail (R9-AC2 / SEC-4).
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-${var.environment}-cloudtrail"
   })
+}
+
+# Versioning for the CloudTrail log bucket (R9-AC2 / SEC-4).
+# The pipeline S3 buckets already have versioning; the audit store should too —
+# versioning prevents silent overwrites and satisfies common compliance baselines.
+# SSE-KMS encryption and public access block are defined further below.
+resource "aws_s3_bucket_versioning" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "cloudtrail" {

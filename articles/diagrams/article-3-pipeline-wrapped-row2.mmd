@@ -1,0 +1,6 @@
+flowchart LR
+    D["<b>RDR HDF5</b> — Level 0<br/>raw counts, per instrument"]
+    E["<b>SDR + GEO HDF5</b> — Level 1<br/>radiances + per-pixel lat/lon"]
+    F["<b>GeoTIFF</b><br/>georeferenced raster"]
+    D -->|"4 · calibration + geolocation<br/>(counts → physics)"| E
+    E -->|"5 · projection + rendering<br/>(scan geometry → map grid)"| F

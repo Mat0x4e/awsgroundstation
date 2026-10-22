@@ -12,8 +12,12 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
+import boto3
 import pytest
+from botocore.exceptions import ClientError as BotoCoreClientError
+from moto import mock_aws
 
 _HANDLER = Path(__file__).resolve().parent.parent / "lambdas" / "viirs_visualizer" / "handler.py"
 _spec = importlib.util.spec_from_file_location("viirs_visualizer_handler", _HANDLER)
@@ -184,3 +188,153 @@ def test_nasa_detection_matches_j01_names():
     keys = [f"{PREFIX}/sdr/SVI01_j01_d20260831_t1206350_e1207596_b45517_c2026_cspp_dev.h5"]
 
     assert orch._detect_path(keys) == "nasa"
+
+
+# ---------------------------------------------------------------------------
+# ProductsWritten metric lifecycle tests — dcef1518 / Oregon #7 regression
+#
+# Bug: handle() called _publish_products_written_metric immediately after
+# start_build() returned.  start_build() is fire-and-forget; it returns a
+# build ID with no waiting.  Products are written by the CodeBuild job
+# several minutes later, so the products/ prefix was always empty at the
+# moment the Lambda measured it → ProductsWritten always published as 0.
+#
+# Fix: ProductsWritten is now emitted from the buildspec post_build phase,
+# after `aws s3 sync`, so it reflects the actual files uploaded.  The Lambda
+# no longer calls put_metric_data.
+#
+# Tests:
+#   (a) REGRESSION — Lambda must NOT call put_metric_data at dispatch time.
+#       This test FAILS against the old buggy code.
+#   (b) SATDUMP_BUILDSPEC structural contract — put-metric-data appears in
+#       post_build AFTER the s3 sync upload.
+#   (c) NASA_BUILDSPEC same structural contract.
+#   (d) NoVisualizableDataError fast-exit: no build, no metric call.
+# ---------------------------------------------------------------------------
+
+
+class TestProductsWrittenMetric:
+    """ProductsWritten metric lifecycle: emitted by buildspec, not by Lambda."""
+
+    CONTACT_ID = "ba2c5446"
+    CONTACT_DATE = "2026/08/31"
+    BUCKET = "test-sdr-bucket"
+
+    def _seed_s3_for_dispatch(self, s3) -> None:
+        """Seed only the input objects needed for path detection — no products/.
+
+        Reflects the real state at dispatch time: the CodeBuild build has not
+        yet run, so products/ is empty.  The old tests seeded products/ BEFORE
+        handle() and thus encoded the wrong lifecycle assumption.
+        """
+        s3.create_bucket(Bucket=self.BUCKET)
+        # SatDump composite so _detect_path returns "satdump"
+        s3.put_object(
+            Bucket=self.BUCKET,
+            Key=(
+                f"contacts/{self.CONTACT_DATE}/{self.CONTACT_ID}"
+                f"/satdump/viirs_rgb_True_Color.png"
+            ),
+            Body=b"fake-composite",
+        )
+        # No products/ objects — correct state at dispatch time.
+
+    def _orchestrator(self, s3, mock_cw):
+        return handler.VisualizationOrchestrator(
+            s3_client=s3,
+            codebuild_client=FakeCodeBuild(),
+            cloudwatch_client=mock_cw,
+            input_bucket=self.BUCKET,
+            codebuild_project="project",
+            enable_geotiff="false",
+        )
+
+    def _event(self) -> dict:
+        return {
+            "bucket": self.BUCKET,
+            "key": (
+                f"contacts/{self.CONTACT_DATE}/{self.CONTACT_ID}/manifest.json"
+            ),
+        }
+
+    @mock_aws
+    def test_lambda_does_not_publish_products_written_at_dispatch(self):
+        """REGRESSION: handle() must NOT call put_metric_data at dispatch time.
+
+        The Lambda dispatches the build with start_build() (fire-and-forget)
+        and returns immediately.  Products are written by the build minutes
+        later.  Calling put_metric_data from handle() always produced count=0
+        because the products/ prefix is empty at that moment (dcef1518 bug).
+
+        The metric is now emitted from the buildspec post_build phase.
+
+        This test FAILS against the old (buggy) code that called
+        _publish_products_written_metric immediately after _submit_codebuild.
+        """
+        s3 = boto3.client("s3", region_name="us-east-1")
+        self._seed_s3_for_dispatch(s3)
+        mock_cw = MagicMock()
+
+        result = self._orchestrator(s3, mock_cw).handle(self._event())
+
+        assert result["build_id"] is not None, "CodeBuild must be dispatched"
+        # Regression gate — Lambda must NOT publish at dispatch time
+        mock_cw.put_metric_data.assert_not_called()
+
+    def test_satdump_buildspec_emits_products_written_after_sync(self):
+        """SATDUMP_BUILDSPEC: put-metric-data must appear in post_build AFTER
+        the aws s3 sync upload so the count reflects actual uploaded files."""
+        spec = handler.SATDUMP_BUILDSPEC
+        upload_pos = spec.find("aws s3 sync /tmp/output/")
+        metric_pos = spec.find("put-metric-data")
+        assert upload_pos != -1, "SATDUMP_BUILDSPEC must contain the upload sync"
+        assert metric_pos != -1, (
+            "SATDUMP_BUILDSPEC must contain 'put-metric-data' — metric must be "
+            "emitted from the build, not from the Lambda"
+        )
+        assert metric_pos > upload_pos, (
+            "put-metric-data must appear AFTER the s3 sync so it counts "
+            "products that have already been uploaded, not an empty prefix"
+        )
+        region = spec[metric_pos : metric_pos + 300]
+        assert "SDRPipeline" in region, "must target the SDRPipeline namespace"
+        assert "ProductsWritten" in region, "MetricName must be ProductsWritten"
+        assert "ContactId" in region, "must include the ContactId dimension"
+
+    def test_nasa_buildspec_emits_products_written_after_sync(self):
+        """NASA_BUILDSPEC: same post_build structural contract as SatDump."""
+        spec = handler.NASA_BUILDSPEC
+        upload_pos = spec.find("aws s3 sync /tmp/output/")
+        metric_pos = spec.find("put-metric-data")
+        assert upload_pos != -1, "NASA_BUILDSPEC must contain the upload sync"
+        assert metric_pos != -1, (
+            "NASA_BUILDSPEC must contain 'put-metric-data' — metric must be "
+            "emitted from the build, not from the Lambda"
+        )
+        assert metric_pos > upload_pos, (
+            "put-metric-data must appear AFTER the s3 sync"
+        )
+        region = spec[metric_pos : metric_pos + 300]
+        assert "SDRPipeline" in region
+        assert "ProductsWritten" in region
+        assert "ContactId" in region
+
+    @mock_aws
+    def test_no_metric_when_no_visualizable_data(self):
+        """NoVisualizableDataError: handle() returns early without dispatching
+        a build, so the buildspec never runs.  put_metric_data must not be
+        called at Lambda level either (no change from previous behaviour)."""
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket=self.BUCKET)
+        # Only a manifest — no VIIRS composites or SDR HDF5 files
+        s3.put_object(
+            Bucket=self.BUCKET,
+            Key=f"contacts/{self.CONTACT_DATE}/{self.CONTACT_ID}/manifest.json",
+            Body=b"{}",
+        )
+
+        mock_cw = MagicMock()
+        result = self._orchestrator(s3, mock_cw).handle(self._event())
+
+        assert result["build_id"] is None
+        mock_cw.put_metric_data.assert_not_called()

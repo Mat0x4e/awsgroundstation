@@ -38,3 +38,7 @@ node_modules/
 # IDE
 .vscode/
 .idea/
+
+# Terraform state backups (may contain secrets) and the batch_compute validation wrapper
+infra/terraform.tfstate*
+infra/.batch_compute_validate/

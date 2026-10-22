@@ -1,0 +1,2 @@
+flowchart LR
+    IQ[".cs8<br/>I/Q samples"] --> Q["QPSK<br/>demodulation"] --> V["Viterbi<br/>decoding"] --> P["de-randomization<br/>(PN removal)"] --> RS["Reed-Solomon<br/>correction"] --> OUT[".cadu<br/>clean frames"]

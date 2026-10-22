@@ -79,6 +79,22 @@ resource "aws_iam_policy" "lambda_execution" {
         Action   = "kms:Decrypt"
         Resource = var.kms_key_arn
       },
+      # CloudWatch Metrics — publish ProductsWritten and other pipeline metrics.
+      # Resource = "*" is the only valid value: cloudwatch:PutMetricData has no
+      # resource-level constraint in IAM.  The namespace condition below limits
+      # this permission to the SDRPipeline namespace exclusively, making the
+      # effective scope equivalent to a resource-scoped statement.
+      {
+        Sid      = "CloudWatchPutMetricData"
+        Effect   = "Allow"
+        Action   = "cloudwatch:PutMetricData"
+        Resource = "*" # PutMetricData is un-scopeable by resource; scoped by namespace condition
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "SDRPipeline"
+          }
+        }
+      },
     ]
   })
 
@@ -150,9 +166,13 @@ resource "aws_iam_policy" "codebuild_service" {
       },
       # CloudWatch Logs — write CodeBuild build logs
       {
-        Sid      = "CloudWatchLogs"
-        Effect   = "Allow"
-        Action   = "logs:*"
+        Sid    = "CloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
         Resource = "arn:aws:logs:*:${var.account_id}:log-group:/aws/codebuild/${var.project_name}-viirs-*:*"
       },
       # ECR — pull the visualization Docker image
@@ -183,6 +203,22 @@ resource "aws_iam_policy" "codebuild_service" {
           "ecr:BatchCheckLayerAvailability",
         ]
         Resource = "arn:aws:ecr:*:${var.account_id}:repository/${var.project_name}-viirs-*"
+      },
+      # CloudWatch Metrics — publish ProductsWritten from the buildspec post_build phase.
+      # Resource = "*" is the only valid value: cloudwatch:PutMetricData has no
+      # resource-level constraint in IAM.  The namespace condition below limits
+      # this permission to the SDRPipeline namespace exclusively, making the
+      # effective scope equivalent to a resource-scoped statement.
+      {
+        Sid      = "CloudWatchPutMetricData"
+        Effect   = "Allow"
+        Action   = "cloudwatch:PutMetricData"
+        Resource = "*" # PutMetricData is un-scopeable by resource; scoped by namespace condition
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "SDRPipeline"
+          }
+        }
       },
     ]
   })

@@ -30,3 +30,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "monthly_budget_usd" {
+  description = "Monthly cost budget ceiling in USD. A budget alarm fires at 80% and 100% of this amount, guarding against accidental spend (e.g. a re-enabled contact scheduler booking paid Ground Station passes)."
+  type        = string
+  default     = "500"
+}

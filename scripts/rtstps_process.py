@@ -101,7 +101,13 @@ class RTSTPSProcessor:
                 f"RT-STPS exited with code {exit_code} for input: {cadu_path}"
             )
 
-        # RT-STPS writes to ../data relative to output_dir (cwd)
+        # RT-STPS writes RDRs to "../data" relative to its working directory,
+        # which _invoke_rtstps sets to output_dir. That path is fixed by the
+        # bundled config: config/jpss1.xml declares
+        #   <RDR label="VIIRS_SCI_AE_RDR" directory="../data" .../>
+        # so the RDRs land in a *sibling* of output_dir, never inside it.
+        # The deployed aggregation.sh relies on the same contract: it runs
+        # batch.sh from /opt/rt-stps and harvests /opt/data.
         rdr_output_dir = str(Path(output_dir).parent / "data")
         validation = self._validate_output(rdr_output_dir)
 
@@ -115,7 +121,9 @@ class RTSTPSProcessor:
 
         if result.viirs_granules == 0:
             raise NoVIIRSDataError(
-                f"No VIIRS granule produced in output directory: {output_dir}"
+                f"No VIIRS granule produced. RT-STPS ran with cwd={output_dir}; "
+                f"its config writes RDRs to '../data', so the directory scanned "
+                f"was {rdr_output_dir}"
             )
 
         return result

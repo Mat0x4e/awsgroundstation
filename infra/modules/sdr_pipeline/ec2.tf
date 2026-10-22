@@ -146,6 +146,21 @@ resource "aws_iam_role_policy" "aggregation_ec2" {
         ]
         Resource = aws_ecr_repository.sdr_pipeline.arn
       },
+      # CloudWatch Metrics — emit OptDriftDetected from the SSM drift-check script
+      # (ssm_drift_check.tf). Namespace-conditioned to SDRPipeline, matching the
+      # PutMetricData pattern established on aws_iam_role.codebuild in iam.tf.
+      # Resource must be "*" — cloudwatch:PutMetricData does not support resource ARNs.
+      {
+        Sid      = "PutMetricDataDriftCheck"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricData"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "SDRPipeline"
+          }
+        }
+      },
     ]
   })
 }

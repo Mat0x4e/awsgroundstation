@@ -1,5 +1,24 @@
 # Planned Contacts — NOAA-20 (JPSS-1)
 
+> ## ⚠️ Program horizon — JPSS Direct Broadcast end-of-life
+>
+> On **2026-10-01** NOAA issued a 30-day notice (via the CSPP `cspp_registrants` list) that
+> **Suomi-NPP (S-NPP, NORAD 37849)** data delivery — including **HRD Direct Broadcast** —
+> ceases permanently at **2026-11-02 13:00 UTC**. S-NPP is NOAA-20's predecessor.
+>
+> **This project flies NOAA-20 (JPSS-1, NORAD 43013), which is _not_ affected by the S-NPP
+> cessation.** But it is a direct precedent: S-NPP (launched 2011) is being retired, NOAA-20
+> (launched 2017) is next-oldest in the JPSS series, and a NOAA-20 cessation notice would
+> arrive on the **same list, in the same format**. "HRD Direct Broadcast disabled" is the exact
+> capability this entire pipeline consumes.
+>
+> **Consequence for this contact log:** NOAA-20's HRD DB sunset date, once known, is a **hard
+> horizon** on the useful life of the whole async DigIF pipeline — every contact below is only
+> plannable while NOAA-20 HRD DB remains live. The date is **not yet recorded** (see
+> [`ARCHITECTURE_REFINEMENT.md`](ARCHITECTURE_REFINEMENT.md) → Vendor Notifications Inbox for the
+> action to find it via JPSS program / NOAA OSPO). The `cspp_registrants` list is now a
+> mission-critical monitoring channel, not optional vendor noise.
+
 ## Contact #1
 
 | Property | Value |
@@ -380,3 +399,79 @@ failed: link elevation **while the basin is scanned**.
 AOS — structural, since the Mediterranean sits at the southern edge of reach. On contact #5
 nothing before ~AOS+2.5 min survived calibration. Higher elevation improves the link budget
 but does not move the basin out of that window.
+
+
+---
+
+## Contact #7 — Oregon granule-yield pass (scheduled)
+
+First pass flown against the **refined pipeline** (post Well-Architected refinement,
+applied 2026-10-13 — see [`ARCHITECTURE_REFINEMENT.md`](ARCHITECTURE_REFINEMENT.md)). Chosen
+to **maximise granule yield** (longest, highest-elevation window) rather than to image a
+target — the goal is a clean, high-volume end-to-end validation of the refined pipeline on
+warm (STANDARD) data.
+
+| Property | Value |
+|----------|-------|
+| **Contact ID** | `dcef1518-c454-401f-bdcd-dc2e73fe89a5` |
+| **Status** | 📅 SCHEDULED (reserved 2026-10-13) |
+| **Satellite** | NOAA-20 (NORAD 43013) |
+| **Ground Station** | Oregon 1 (`us-west-2`) |
+| **Max Elevation** | 83.06° (near-overhead — highest of all 99 offered windows) |
+| **Pre-pass Start** | 2026-10-17 20:41:12 UTC |
+| **Visibility Start** | 2026-10-17 20:43:12 UTC |
+| **Visibility End** | 2026-10-17 20:55:14 UTC |
+| **Post-pass End** | 2026-10-17 20:57:14 UTC |
+| **Duration** | 12m02s (722s) — **~8.5 granules est** (longest window offered) |
+| **Local solar time** | ~13:43 (daytime pass — true-colour usable, not just thermal) |
+| **Mission Profile** | async DigIF (`32a1fdbb-99f1-413d-8905-436c5fccb382`) — refined SDR pipeline auto-triggers on COMPLETED |
+| **Data Format** | VITA-49 DigIF (raw digitized RF, .pcap) |
+| **Estimated Cost** | ~$110–130 (on-demand narrowband X-band) |
+| **Scheduled By** | Manual `reserve-contact` (scheduler cron remains DISABLED) |
+| **Selected From** | real AWS offer set (99 AVAILABLE windows across 5 stations), ranked by duration × elevation |
+
+### Why this pass
+
+Ranked #1 for granule yield of 99 real offered windows: tied-longest window (722s) with the
+highest max elevation (83.06°). Granule count scales with contiguous high-SNR downlink
+duration, and a near-overhead pass maximises both the visibility window and the link budget —
+best conditions for complete granules across all instruments (VIIRS, ATMS, CrIS, OMPS×2). An
+Ohio 10-19 window was marginally longer (802s / ~9.4 granules, 78.9°) but flies 2 days later;
+Oregon was chosen for the earlier end-to-end validation.
+
+### Outcome — FLOWN 2026-10-17, pipeline success ✅
+
+Verified via `python scripts/verify_pass.py dcef1518-... --date 2026/10/17` → **OVERALL: PASS**.
+Report saved to `output/contact-07_oregon-1_2026-10-17/verify_pass_report.{txt,json}`.
+
+| Check | Result |
+|---|---|
+| Contact | COMPLETED; async pipeline auto-triggered on warm STANDARD data (no restore needed) |
+| SDR execution | SUCCEEDED, 39m51s |
+| Chunk metrics (REL-3) | ✅ `ChunksSucceeded=50, ChunksFailed=0` — every chunk processed |
+| Products in S3 (truth) | ✅ **9/9** — True Color, Thermal IR, Day Microphysics × PNG+GeoTIFF+JSON |
+| CADU / science | ✅ 415 SatDump objects + **38 SDR/GEO files** — CSPP (calibrated) branch succeeded on warm data |
+| Alarms | ✅ all three OK (chunks-all-failed, products-written-zero, visualization-failed) |
+| PERF-1 LUT cache | cold on this run → `sdr_luts.sh` fallback used (weekly refresh had not yet populated `lut-cache/`); expected, next run should hit the fast path |
+
+**First clean end-to-end validation of the refined pipeline on a real pass.** High granule yield
+as intended (50 chunks, full SDR product set).
+
+### Two bugs the live run exposed (both fixed 2026-10-19)
+
+The refined pipeline worked, but verifying this real pass surfaced two defects that plan-only
+gates could not have caught — documented here as the continuous-learning record:
+
+1. **`ProductsWritten` metric measured at the wrong moment.** The viirs orchestrator Lambda
+   counted the `products/` prefix immediately after `start_build()` (dispatch), but the
+   CodeBuild render writes the products minutes later — so the metric always published `0`.
+   Fix: emission moved into the visualization buildspec's `post_build` phase (after
+   `aws s3 sync`), plus a `cloudwatch:PutMetricData` grant on the CodeBuild service role.
+   This contact's metric is a permanent `0` (metrics can't be backfilled) — hence the WARN,
+   not FAIL, in its report. See `aws-knowledge.md` → "Metrics That Measure Build Output...".
+
+2. **`verify_pass.py` used a fixed 6h metric lookback** → false FAIL when verifying a pass
+   >6h after it ran. Fix: the metric window is now derived from the SFN execution times.
+   Also: the tool now honours "S3 is truth, metric is corroboration" — a pass with products
+   in S3 but a stale/zero metric is PASS (WARN on the metric), while zero products in S3
+   stays a hard FAIL (the ba2c5446 guard).

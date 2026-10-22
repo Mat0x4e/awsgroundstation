@@ -129,3 +129,80 @@ resource "aws_cloudwatch_metric_alarm" "sync_pipeline_execution_failures" {
     Service = "sync-pipeline"
   })
 }
+
+###############################################################################
+# Task 6.1 (mirror) — /opt/* drift detected on sync receiver EC2 (R5-AC2, OE-2)
+#
+# Mirror of sdr_pipeline/monitoring.tf's opt_drift alarm. The SSM association in
+# ssm_drift_check.tf emits OptDriftDetected=1 (namespace SyncPipeline) when
+# /opt/rt-stps or /opt/rt-stps/config/jpss1.xml is missing or empty on the receiver.
+#
+# The receiver is normally stopped between passes. treat_missing_data=notBreaching
+# means no data during stopped periods is not treated as drift.
+###############################################################################
+
+resource "aws_cloudwatch_metric_alarm" "opt_drift" {
+  alarm_name          = "${var.project_name}-sync-receiver-opt-drift"
+  alarm_description   = "Hand-installed /opt/rt-stps or jpss1.xml absent or empty on sync receiver EC2 -- manual restoration required before next pass (OE-2)"
+  namespace           = "SyncPipeline"
+  metric_name         = "OptDriftDetected"
+  statistic           = "Maximum"
+  period              = 86400
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+
+  dimensions = {
+    InstanceId = aws_instance.receiver.id
+  }
+
+  # No data during stopped periods is not a breach.
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [var.sns_topic_arn]
+
+  tags = merge(var.tags, {
+    Name    = "${var.project_name}-sync-receiver-opt-drift"
+    Service = "sync-pipeline"
+  })
+}
+
+###############################################################################
+# Task 9.1 (REL-5) — PREPASS receiver-readiness alarm
+#
+# PREVENTIVE signal: the Python receiver script (sync_receiver_listen.py) emits
+# ReceiverReadyFailure=1 (namespace "SyncPipeline") when the UDP listener did
+# NOT confirm bound+receiving within the pre-pass window; 0 on success. This
+# alarm fires during/around PREPASS so an operator learns of the arming failure
+# BEFORE the pass is fully lost -- unlike the detective receiver_arm_lambda_errors
+# alarm above, which only surfaces that the Arm Lambda itself errored, not
+# whether the socket actually bound and saw first packets.
+#
+# IAM: the receiver EC2 role already holds a namespace-conditioned
+# cloudwatch:PutMetricData statement (Sid "PutMetricDataDriftCheck", condition
+# cloudwatch:namespace = "SyncPipeline") added in Wave 3. No new IAM is needed.
+###############################################################################
+
+resource "aws_cloudwatch_metric_alarm" "receiver_ready_failure" {
+  alarm_name          = "${var.project_name}-sync-receiver-ready-failure"
+  alarm_description   = "Receiver UDP listener did not confirm bound+receiving during PREPASS -- pass may be lost (REL-5)"
+  namespace           = "SyncPipeline"
+  metric_name         = "ReceiverReadyFailure"
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+
+  # The metric is only emitted around PREPASS. No data between passes is not
+  # a failure -- it means the listener was not armed (instance stopped), which
+  # is the expected state.
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [var.sns_topic_arn]
+
+  tags = merge(var.tags, {
+    Name    = "${var.project_name}-sync-receiver-ready-failure"
+    Service = "sync-pipeline"
+  })
+}

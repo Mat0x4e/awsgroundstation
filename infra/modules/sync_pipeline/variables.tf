@@ -137,3 +137,26 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# -- clean-compute-pipeline Stage 2 strangler variables ----------------------
+# These three variables wire the sync SFN aggregation step to the shared Batch
+# on-demand aggregation job (RTSTPS=off -- RT-STPS already ran on the receiver
+# EC2 in FinishReceiver). Pattern mirrors modules/sdr_pipeline.
+
+variable "use_batch_aggregation" {
+  description = "When true the aggregation step routes to Batch (RTSTPS=off) instead of CodeBuild (clean-compute-pipeline Stage 2 strangler cutover); default false keeps the CodeBuild poll-loop path"
+  type        = bool
+  default     = false
+}
+
+variable "batch_aggregation_job_queue_arn" {
+  description = "ARN of the Batch aggregation job queue (groundstation-noaa20-agg-queue). Leave empty string when use_batch_aggregation is false."
+  type        = string
+  default     = ""
+}
+
+variable "batch_aggregation_job_definition_arn" {
+  description = "ARN of the Batch aggregation job definition (groundstation-noaa20-aggregation, unversioned). Leave empty string when use_batch_aggregation is false."
+  type        = string
+  default     = ""
+}

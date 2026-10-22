@@ -358,3 +358,66 @@ aws s3 cp scripts/aggregation_entrypoint.sh "s3://.../software/aggregation_entry
 loop -- first re-run the SAME command directly in PowerShell. If that works, the problem was the
 bash subshell's credential inheritance, not the session. The repo's `scripts/deploy_*.sh` helpers
 are fine on Linux/CI but on a Windows operator box prefer the direct PowerShell `aws` invocation.
+
+---
+
+## AWS Batch + Image-Build CodeBuild -- A Container Job Runs Image-Baked Code, So the Image Must Be Rebuilt From the Branch That Holds the New Code
+
+**Symptom**: A Batch job (job definition, queue, IAM, image URL all correct) reaches STARTING
+then FAILED with statusReason "Essential container in task exited". The container log group shows
+a single line:
+```
+/bin/bash: /opt/scripts/viirs/render_entrypoint.sh: No such file or directory
+```
+The image pulled fine (so ECR auth, the execution role, and the image URL are correct) -- the
+script the `command` execs simply is not inside the image at that path.
+
+**Live evidence (Stage 3 render -> Batch, contact dcef1518, 2026-10-22)**:
+- The render job definition command is `["/bin/bash","/opt/scripts/viirs/render_entrypoint.sh"]`.
+- `docker/viirs-visualization/Dockerfile` bakes the scripts in with `COPY scripts/ /opt/scripts/`.
+- `render_entrypoint.sh` existed ONLY on the feature branch `med-pass-cspp-codebuild`, never
+  merged to `main`.
+- The image-build CodeBuild project `groundstation-noaa20-viirs-docker-build` has
+  `sourceVersion = "main"` and source type GITHUB. Triggering `start-build` with no override
+  rebuilt the image from `main`, which has no `render_entrypoint.sh` -> the file was absent in
+  the pushed `:latest` -> every render job failed with "No such file or directory".
+
+**Root cause**: An AWS Batch (or ECS/Fargate) container job runs the code that was baked INTO the
+image at build time, not the code in your working tree or on your feature branch. The image is
+produced by a separate image-build step (here a CodeBuild project) that pulls from a configured
+source ref. If that ref (`sourceVersion`) points at a branch that does not yet contain the new
+code, rebuilding the image is a no-op for your change: the job keeps running stale (or missing)
+code. "I rebuilt the image" is necessary but NOT sufficient -- it must be rebuilt from a ref that
+actually contains the change.
+
+**Fix (validate-from-the-branch, without mutating `main` or the project config)**:
+1. Commit AND push the feature branch to the remote the CodeBuild project reads
+   (CodeBuild pulls from the remote, not your local clone).
+2. Trigger the rebuild pinned to that branch with a one-off source override:
+   `aws codebuild start-build --project-name <image-build-project> --source-version <branch>`.
+   This overrides `sourceVersion` for a single build without editing the project / Terraform.
+3. Confirm the new image actually contains the change before re-validating: check the ECR push
+   time advanced (`aws ecr describe-images ... --query 'imageDetails[0].imagePushedAt'`), then
+   re-run the Batch job.
+
+**Interaction with the strangler cutover (important ordering hazard)**: if the orchestrator has
+already been flipped to the Batch path (e.g. `RENDER_COMPUTE=batch`) and applied, the PRODUCTION
+render is pointing at `:latest` while `:latest` may still be the stale image. Any real contact
+that dispatches a render in that window runs the wrong code. Two mitigations: (a) rebuild from the
+correct branch BEFORE (or immediately after) applying the flip, or (b) keep the flag on the legacy
+path until the image is confirmed rebuilt. Here the SFN catches a visualization failure so the
+pipeline still SUCCEEDS (products just are not produced), but the render silently does nothing
+until the right image is live.
+
+**Verify-completion, not exit-code**: a Batch job SUCCEEDED means the container exited 0, which is
+NOT proof the work happened (same dispatch-vs-completion trap as the CodeBuild ProductsWritten
+bug). Confirm the entrypoint's post-upload evidence: the `ProductsWritten` metric with a non-zero
+count emitted AFTER the `aws s3 sync`, the `render_entrypoint.sh complete` log line, and fresh
+object timestamps under `products/<date>/<contact>/`. Both branches (satdump count=11, nasa
+count=14) were confirmed this way before Stage 3 was called done.
+
+**Rule**: for any container-based compute (Batch/ECS/Fargate) whose code is image-baked via
+`COPY`, treat the image-build source ref as part of the deploy. When the code is on a feature
+branch, rebuild the image with `--source-version <branch>` and verify the ECR push time advanced,
+BEFORE running any validation -- and prefer verifying the job's product/metric evidence over its
+exit status.

@@ -1,0 +1,6 @@
+flowchart LR
+    A["<b>.pcap</b> — VITA-49 DigIF<br/>raw digitized RF · ~2.18 GB / 30 s chunk"]
+    B["<b>.cs8</b> — raw I/Q<br/>headerless complex int8"]
+    C["<b>.cadu</b> — 1024-byte frames<br/>~53.6 MiB / chunk (~37:1 reduction)"]
+    A -->|"1 · de-encapsulation<br/>(no sample changes value)"| B
+    B -->|"2 · demodulation<br/>(waves → bits, probabilistic)"| C

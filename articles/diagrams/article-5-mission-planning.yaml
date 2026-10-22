@@ -1,0 +1,175 @@
+Diagram:
+  DefinitionFiles:
+    - Type: URL
+      Url: "https://raw.githubusercontent.com/awslabs/diagram-as-code/main/definitions/definition-for-aws-icons-light.yaml"
+
+  Resources:
+    Canvas:
+      Type: AWS::Diagram::Canvas
+      Direction: vertical
+      Children:
+        - Title
+        - Body
+
+    Title:
+      Type: AWS::Diagram::Resource
+      Title: "Part 5 - mission planning - 135 modelled passes to 1 reserved contact - Stockholm 1, 2026-08-31"
+      Align: center
+
+    Body:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - Unmanaged
+        - AWSCloud
+
+    Unmanaged:
+      Type: AWS::Diagram::VerticalStack
+      Children:
+        - Satellite
+        - Planner
+        - TLE
+
+    Satellite:
+      Type: AWS::Diagram::Resource
+      Preset: "Satellite"
+      Title: "NOAA-20 (43013)"
+      Align: center
+
+    TLE:
+      Type: AWS::Diagram::Resource
+      Preset: "Server"
+      Title: "celestrak.org - TLE"
+      Align: center
+
+    Planner:
+      Type: AWS::Diagram::Resource
+      Preset: "Toolkit"
+      Title: "plan_pass.py - SGP4, swath, sun"
+      Align: center
+
+    AWSCloud:
+      Type: AWS::Diagram::Cloud
+      Preset: AWSCloudNoLogo
+      Direction: vertical
+      Align: center
+      Children:
+        - RegionNorth
+        - RegionCentral
+
+    RegionNorth:
+      Type: AWS::Region
+      Title: "eu-north-1 - shared antenna"
+      Children:
+        - GroundStation
+
+    GroundStation:
+      Type: AWS::Diagram::Resource
+      Preset: "AWS Ground Station"
+      Title: "Stockholm 1 - ~10 deg mask"
+      Align: center
+
+    RegionCentral:
+      Type: AWS::Region
+      Title: "eu-central-1 - reception & processing"
+      Children:
+        - Pipeline
+
+    RawBucket:
+      Type: AWS::S3::Bucket
+      Title: "reception bucket - 21 x 2.18 GB"
+      Align: center
+
+    Pipeline:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - RawBucket
+        - EventBridge
+        - StepFunctions
+        - CodeBuild
+
+    EventBridge:
+      Type: AWS::Events::Rule
+      Title: "EventBridge"
+      Align: center
+
+    StepFunctions:
+      Type: AWS::StepFunctions
+      Title: "Step Functions"
+      Align: center
+
+    CodeBuild:
+      Type: AWS::CodeBuild::Project
+      Title: "CodeBuild - 21 in parallel"
+      Align: center
+
+  Links:
+    - Source: TLE
+      SourcePosition: N
+      Target: Planner
+      TargetPosition: S
+      TargetArrowHead:
+        Type: Open
+      Type: orthogonal
+
+    - Source: Satellite
+      SourcePosition: NNE
+      Target: GroundStation
+      TargetPosition: WNW
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        AutoLeft:
+          Title: "X-band HRD, 10 min"
+
+    - Source: Planner
+      SourcePosition: NNE
+      Target: GroundStation
+      TargetPosition: SW
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetLeft:
+          Title: "list-contacts / reserve"
+
+    - Source: GroundStation
+      SourcePosition: SSW
+      Target: Planner
+      TargetPosition: ENE
+      TargetArrowHead:
+        Type: Open
+      LineStyle: dashed
+      Labels:
+        TargetRight:
+          Title: "32 windows -> real mask"
+
+    - Source: GroundStation
+      SourcePosition: S
+      Target: RawBucket
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+      Type: orthogonal
+      Labels:
+        AutoRight:
+          Title: "DigIF cross-region"
+
+    - Source: RawBucket
+      SourcePosition: E
+      Target: EventBridge
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: EventBridge
+      SourcePosition: E
+      Target: StepFunctions
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: StepFunctions
+      SourcePosition: E
+      Target: CodeBuild
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open

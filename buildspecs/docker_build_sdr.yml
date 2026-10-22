@@ -5,6 +5,10 @@ env:
     AWS_DEFAULT_REGION: "eu-central-1"
     ECR_REPO: "471112743408.dkr.ecr.eu-central-1.amazonaws.com/groundstation-noaa20-sdr-pipeline"
     S3_BUILD_PREFIX: "s3://groundstation-noaa20-sdr-output-471112743408/docker-build"
+    # Branch to build from. Override at start-build to test a change before it
+    # reaches main -- the image is what runs SatDump, so a Dockerfile change is
+    # only real once this has run.
+    REPO_BRANCH: "main"
 
 phases:
   pre_build:
@@ -20,9 +24,12 @@ phases:
   build:
     commands:
       - echo Cloning repo for Dockerfile and scripts...
-      - git clone --depth 1 https://github.com/Mat0x4e/awsgroundstation.git /tmp/repo
+      - git clone --depth 1 --branch "$REPO_BRANCH" https://github.com/Mat0x4e/awsgroundstation.git /tmp/repo
+      - echo "Building from branch $REPO_BRANCH at $(git -C /tmp/repo rev-parse --short HEAD)"
       - echo Preparing build context...
-      - cp /tmp/repo/docker/sdr-pipeline/Dockerfile /tmp/docker-build/
+      # Everything beside the Dockerfile too -- enable_satdump_projection.py is
+      # COPYed by it, and a missing context file fails the build late.
+      - cp /tmp/repo/docker/sdr-pipeline/* /tmp/docker-build/
       - cp -r /tmp/repo/scripts /tmp/docker-build/scripts
       - echo Building Docker image...
       - docker build -t $ECR_REPO:latest -f /tmp/docker-build/Dockerfile /tmp/docker-build/

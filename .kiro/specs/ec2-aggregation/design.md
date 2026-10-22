@@ -1,3 +1,24 @@
+> ## ⚠️ SUPERSEDED — 2026-09-01
+>
+> **Aggregation no longer runs on the EC2 instance.** It runs as a CodeBuild job.
+>
+> CSPP's ancillary staging fetches from `http://jpssdb.ssec.wisc.edu` at run time, and this
+> instance's security group is SSM-outbound-only — it has no route there. Offline, the fetch
+> times out five times over ~11 minutes and CSPP then dies inside its own error handler with
+> `TypeError: object of type 'bool' has no len()`. CodeBuild has egress.
+>
+> Key decision #1 below argued EC2 over CodeBuild because rebuilding the LUT cache costs
+> "10+ minutes" per run. That figure is right — `sdr_luts.sh` takes ~10 min — but it is the
+> price of the only arrangement that works.
+>
+> The instance still exists and is retained, because `/opt/rt-stps` and `/opt/SDR_4_1` were
+> installed on it by hand and exist in no Terraform, Dockerfile or user_data. It is not in
+> the pipeline path. Neither is the Trigger Lambda.
+>
+> Current design: [`../../../docs/DEPLOYMENT.md`](../../../docs/DEPLOYMENT.md) and
+> [`../../../docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md).
+> Retained below as the design record of an approach that was tried and did not hold.
+
 # Design Document: EC2-Based Aggregation for NOAA-20 SDR Pipeline
 
 ## Overview

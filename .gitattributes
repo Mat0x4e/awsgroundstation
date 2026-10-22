@@ -1,0 +1,12 @@
+# core.autocrlf=true on Windows checkouts rewrites LF to CRLF, which breaks any
+# file executed on Linux: a shebang of "#!/bin/bash\r" makes the kernel look for
+# an interpreter named "/bin/bash\r" and the script dies with
+#   cannot execute: required file not found   (exit 127)
+# Anything that runs on the EC2 aggregation instance or inside a CodeBuild
+# container must therefore stay LF regardless of the checkout platform.
+
+*.sh    text eol=lf
+*.py    text eol=lf
+*.tf    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf

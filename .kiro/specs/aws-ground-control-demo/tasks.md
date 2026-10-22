@@ -8,7 +8,7 @@ Ce plan couvre uniquement les lacunes identifiées lors de l'analyse de conformi
 
 - [x] 1. Configurer la démodulation QPSK dans le profil antenne
   - [x] 1.1 Remplacer `antenna_downlink_config` par `antenna_downlink_demod_decode_config` dans le module mission_profile
-    - Modifier `modules/mission_profile/main.tf` : remplacer le bloc `antenna_downlink_config` par `antenna_downlink_demod_decode_config` incluant les paramètres de démodulation QPSK (modulation, coding, unvalidated frame length)
+    - Modifier `infra/modules/mission_profile/main.tf` : remplacer le bloc `antenna_downlink_config` par `antenna_downlink_demod_decode_config` incluant les paramètres de démodulation QPSK (modulation, coding, unvalidated frame length)
     - Conserver les paramètres spectraux existants : 7812 MHz, 30 MHz BW, RHCP
     - Mettre à jour le dataflow edge dans le mission profile si l'ARN de la config change
     - _Requirements: 2.1_
@@ -20,12 +20,12 @@ Ce plan couvre uniquement les lacunes identifiées lors de l'analyse de conformi
 
 - [x] 2. Ajouter l'action SNS à l'alarme S3 errors
   - [x] 2.1 Ajouter une variable `sns_topic_arn` au module s3_delivery
-    - Ajouter la variable dans `modules/s3_delivery/variables.tf`
+    - Ajouter la variable dans `infra/modules/s3_delivery/variables.tf`
     - Passer `module.security.sns_topic_arn` depuis `main.tf` lors de l'appel du module
     - _Requirements: 1.5_
 
   - [x] 2.2 Configurer `alarm_actions` sur l'alarme `aws_cloudwatch_metric_alarm.s3_errors`
-    - Ajouter `alarm_actions = [var.sns_topic_arn]` à la ressource dans `modules/s3_delivery/main.tf`
+    - Ajouter `alarm_actions = [var.sns_topic_arn]` à la ressource dans `infra/modules/s3_delivery/main.tf`
     - _Requirements: 1.5_
 
 - [x] 3. Checkpoint — Valider la configuration
@@ -39,13 +39,13 @@ Ce plan couvre uniquement les lacunes identifiées lors de l'analyse de conformi
 
 - [x] 5. Remplacer le widget texte statique par une métrique de coût calculée
   - [x] 5.1 Remplacer le widget `text` "Estimated Cost" par un widget `metric` dans le dashboard CloudWatch
-    - Modifier `modules/observability/main.tf` : remplacer le dernier widget (type `text`) par un widget de type `metric` basé sur la durée des contacts (métrique `ContactDuration` ou calcul à partir de `ContactStatus` COMPLETED × durée moyenne)
+    - Modifier `infra/modules/observability/main.tf` : remplacer le dernier widget (type `text`) par un widget de type `metric` basé sur la durée des contacts (métrique `ContactDuration` ou calcul à partir de `ContactStatus` COMPLETED × durée moyenne)
     - Utiliser une expression mathématique CloudWatch si possible, sinon un widget `metric` avec la métrique `AWS/GroundStation` pertinente
     - _Requirements: 5.4_
 
 - [x] 6. Nettoyer la variable `contact_max_duration_seconds` inutilisée
   - [x] 6.1 Supprimer ou documenter la variable `contact_max_duration_seconds`
-    - La variable est déclarée dans `modules/mission_profile/variables.tf` mais n'est référencée nulle part dans le code
+    - La variable est déclarée dans `infra/modules/mission_profile/variables.tf` mais n'est référencée nulle part dans le code
     - Option A : supprimer la variable si elle n'a pas de raison d'être
     - Option B : ajouter un commentaire expliquant son usage futur et l'utiliser dans une validation ou un tag
     - _Requirements: 2.4_

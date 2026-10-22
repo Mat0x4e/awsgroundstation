@@ -1,0 +1,503 @@
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+# KMS Customer Managed Key for encryption
+resource "aws_kms_key" "groundstation" {
+  description             = "KMS key for ${var.project_name} Ground Station data encryption"
+  deletion_window_in_days = 30
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Id      = "${var.project_name}-key-policy"
+    Statement = [
+      {
+        Sid    = "EnableRootAccountAccess"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowGroundStationService"
+        Effect = "Allow"
+        Principal = {
+          Service = "groundstation.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowCloudTrailEncryption"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudtrail.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowEventBridgeEncryption"
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowCloudWatchLogsEncryption"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.${data.aws_region.current.name}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+          "kms:ReEncrypt*"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:*"
+          }
+        }
+      },
+      {
+        # CloudWatch Alarms (modules/sync_pipeline/monitoring.tf) publish to
+        # aws_sns_topic.contact_notifications as the cloudwatch.amazonaws.com
+        # service principal, not via an assumed IAM role -- since the topic is
+        # KMS-encrypted, that principal needs its own key grant to do so.
+        Sid    = "AllowCloudWatchAlarmsEncryption"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudwatch.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey*"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      },
+      {
+        # AWS Budgets publishes notifications to the KMS-encrypted SNS topic as the
+        # budgets.amazonaws.com service principal.  Without this grant the SNS
+        # publish call silently fails because the service cannot generate the data
+        # key for the topic's envelope encryption (COST-1 / R9-AC1).
+        Sid    = "AllowBudgetsEncryption"
+        Effect = "Allow"
+        Principal = {
+          Service = "budgets.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey*"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-kms"
+  })
+}
+
+resource "aws_kms_alias" "groundstation" {
+  name          = "alias/${var.project_name}-${var.environment}"
+  target_key_id = aws_kms_key.groundstation.key_id
+}
+
+# IAM Role for Ground Station Service
+resource "aws_iam_role" "groundstation" {
+  name = "${var.project_name}-${var.environment}-groundstation-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "groundstation.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-groundstation-role"
+  })
+}
+
+resource "aws_iam_role_policy" "groundstation" {
+  name = "${var.project_name}-${var.environment}-groundstation-policy"
+  role = aws_iam_role.groundstation.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetBucketLocation"
+        ]
+        Resource = [
+          var.reception_bucket_arn,
+          "${var.reception_bucket_arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:GenerateDataKey*"
+        ]
+        Resource = [
+          aws_kms_key.groundstation.arn
+        ]
+      }
+    ]
+  })
+}
+
+# IAM Role for Contact Scheduler Lambda
+resource "aws_iam_role" "scheduler_lambda" {
+  name = "${var.project_name}-${var.environment}-scheduler-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-scheduler-role"
+  })
+}
+
+resource "aws_iam_role_policy" "scheduler_lambda" {
+  name = "${var.project_name}-${var.environment}-scheduler-policy"
+  role = aws_iam_role.scheduler_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "groundstation:ListContacts",
+          "groundstation:ReserveContact"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "sns:Publish"
+        ]
+        Resource = aws_sns_topic.contact_notifications.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:Decrypt"
+        ]
+        Resource = aws_kms_key.groundstation.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:*"
+      }
+    ]
+  })
+}
+
+# IAM Role for Processing Lambda (conditionally used)
+resource "aws_iam_role" "processor_lambda" {
+  count = var.enable_processing_pipeline ? 1 : 0
+  name  = "${var.project_name}-${var.environment}-processor-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-processor-role"
+  })
+}
+
+resource "aws_iam_role_policy" "processor_lambda" {
+  count = var.enable_processing_pipeline ? 1 : 0
+  name  = "${var.project_name}-${var.environment}-processor-policy"
+  role  = aws_iam_role.processor_lambda[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject"
+        ]
+        Resource = "${var.reception_bucket_arn}/*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject"
+        ]
+        Resource = var.output_bucket_arn != "" ? "${var.output_bucket_arn}/*" : "${var.reception_bucket_arn}/*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey*"
+        ]
+        Resource = aws_kms_key.groundstation.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes"
+        ]
+        Resource = "arn:aws:sqs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:${var.project_name}-${var.environment}-*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricData"
+        ]
+        Resource = "*"
+        # R6-AC1: scope PutMetricData to the namespace the data_processor handler
+        # actually uses (lambdas/data_processor/handler.py METRICS_NAMESPACE =
+        # "GroundStation/DataProcessor"). Prevents the role from writing metrics
+        # to any other namespace without a further IAM change.
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "GroundStation/DataProcessor"
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:*"
+      }
+    ]
+  })
+}
+
+# SNS Topic for contact notifications
+resource "aws_sns_topic" "contact_notifications" {
+  name              = "${var.project_name}-${var.environment}-contact-notifications"
+  kms_master_key_id = aws_kms_key.groundstation.id
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-contact-notifications"
+  })
+}
+
+# Allows CloudWatch Alarms (e.g. modules/sync_pipeline/monitoring.tf's receiver
+# auto-recovery / Lambda-error / Step Functions-failure alarms) to publish to
+# this shared topic. CloudWatch Alarms call sns:Publish as the
+# cloudwatch.amazonaws.com service principal directly, not via an assumed IAM
+# role, so this resource-based grant (plus the matching KMS key statement
+# above) is required even though other publishers here (Step Functions,
+# the scheduler Lambda) only need the caller-side IAM grants they already have.
+resource "aws_sns_topic_policy" "contact_notifications" {
+  arn = aws_sns_topic.contact_notifications.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowCloudWatchAlarmsPublish"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudwatch.amazonaws.com"
+        }
+        Action   = "sns:Publish"
+        Resource = aws_sns_topic.contact_notifications.arn
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      },
+      {
+        # AWS Budgets calls sns:Publish as the budgets.amazonaws.com service
+        # principal when sending budget alarm notifications (COST-1 / R9-AC1).
+        # Without this statement budget notifications silently fail on KMS-encrypted
+        # topics even when the KMS key policy grants the Decrypt/GenerateDataKey.
+        Sid    = "AllowBudgetsPublish"
+        Effect = "Allow"
+        Principal = {
+          Service = "budgets.amazonaws.com"
+        }
+        Action   = "sns:Publish"
+        Resource = aws_sns_topic.contact_notifications.arn
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      }
+    ]
+  })
+}
+
+# CloudTrail for Ground Station API auditing
+resource "aws_cloudtrail" "groundstation" {
+  name                          = "${var.project_name}-${var.environment}-trail"
+  s3_bucket_name                = aws_s3_bucket.cloudtrail.id
+  include_global_service_events = true
+  is_multi_region_trail         = false
+  enable_logging                = true
+  kms_key_id                    = aws_kms_key.groundstation.arn
+
+  event_selector {
+    read_write_type           = "All"
+    include_management_events = true
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-trail"
+  })
+}
+
+# S3 bucket for CloudTrail logs
+resource "aws_s3_bucket" "cloudtrail" {
+  bucket = "${var.project_name}-${var.environment}-cloudtrail-${data.aws_caller_identity.current.account_id}"
+  # force_destroy intentionally omitted (default: false).
+  # The CloudTrail audit log store must not be casually destroyable; destroying
+  # it requires manually emptying the bucket first — a deliberate friction that
+  # prevents accidental loss of the audit trail (R9-AC2 / SEC-4).
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-cloudtrail"
+  })
+}
+
+# Versioning for the CloudTrail log bucket (R9-AC2 / SEC-4).
+# The pipeline S3 buckets already have versioning; the audit store should too —
+# versioning prevents silent overwrites and satisfies common compliance baselines.
+# SSE-KMS encryption and public access block are defined further below.
+resource "aws_s3_bucket_versioning" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AWSCloudTrailAclCheck"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudtrail.amazonaws.com"
+        }
+        Action   = "s3:GetBucketAcl"
+        Resource = aws_s3_bucket.cloudtrail.arn
+      },
+      {
+        Sid    = "AWSCloudTrailWrite"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudtrail.amazonaws.com"
+        }
+        Action   = "s3:PutObject"
+        Resource = "${aws_s3_bucket.cloudtrail.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
+        Condition = {
+          StringEquals = {
+            "s3:x-amz-acl" = "bucket-owner-full-control"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.groundstation.arn
+    }
+  }
+}

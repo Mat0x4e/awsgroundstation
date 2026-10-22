@@ -1,0 +1,63 @@
+# Sync pipeline aggregation (RDR -> SDR/GEO) as a CodeBuild job.
+#
+# CSPP-only: unlike buildspecs/aggregation.yml, RT-STPS already ran on the
+# receiver EC2 right after LOS (scripts/sync_receiver_finish.sh), so the RDR
+# HDF5 is already sitting in S3 when this build starts. Same reasoning as the
+# existing pipeline for why this step must be CodeBuild and not EC2: CSPP's
+# sdr_luts.sh fetches from http://jpssdb.ssec.wisc.edu at runtime, and the
+# receiver EC2's security group is deliberately UDP-ingress/SSM-HTTPS-egress
+# only (see infra/modules/sync_pipeline/ec2.tf) -- no route for that fetch.
+#
+# Required environment overrides:
+#   OUTPUT_BUCKET     sync pipeline output bucket holding RDR in and SDR out
+#   CONTACT_ID        Ground Station contact UUID
+#   CONTACT_DATE      YYYY/MM/DD, matching the S3 prefix
+
+version: 0.2
+
+env:
+  variables:
+    CSPP_HOME: /opt/SDR_4_1
+    CSPP_SDR_HOME: /opt/SDR_4_1
+    CSPP_RT_HOME: /opt/SDR_4_1
+
+phases:
+  pre_build:
+    commands:
+      - echo "Sync aggregation for contact ${CONTACT_ID} (${CONTACT_DATE})"
+      - test -x "${CSPP_HOME}/bin/viirs_sdr.sh" || { echo "CSPP missing from image"; exit 1; }
+      - mkdir -p /tmp/work/rdr /tmp/work/sdr
+      # DEPLOYMENT.md req 1 -- J01 shipped LUTs. Same as buildspecs/aggregation.yml.
+      - aws s3 cp "s3://${OUTPUT_BUCKET}/software/CSPP_SDR_V4.1_static_luts_j01.tar.gz" /tmp/j01luts.tgz
+      - tar xzf /tmp/j01luts.tgz -C /opt/ && rm -f /tmp/j01luts.tgz
+      - test -d "${CSPP_HOME}/anc/static/shipped_luts/j01" || { echo "shipped_luts/j01 missing after extract"; exit 1; }
+      # DEPLOYMENT.md req 2 -- populate the cache DB from jpssdb.ssec.wisc.edu.
+      - cd "${CSPP_HOME}" && timeout 2400 ./bin/sdr_luts.sh > /tmp/luts.log 2>&1; echo "sdr_luts exit $?"; tail -5 /tmp/luts.log
+      - test -e "${CSPP_HOME}/anc/static/SDR_4_1_DB/package" || { echo "LUT cache DB still absent after sdr_luts.sh"; tail -40 /tmp/luts.log; exit 1; }
+      # RDR was uploaded by scripts/sync_receiver_finish.sh right after LOS.
+      - echo "Downloading RDR from s3://${OUTPUT_BUCKET}/contacts/${CONTACT_DATE}/${CONTACT_ID}/rdr/"
+      - aws s3 sync "s3://${OUTPUT_BUCKET}/contacts/${CONTACT_DATE}/${CONTACT_ID}/rdr/" /tmp/work/rdr/ --exclude '*' --include '*.h5'
+      - test -n "$(find /tmp/work/rdr -name 'RNSCA-RVIRS*.h5' | head -1)" || { echo "No VIIRS RDR found in S3 -- did sync_receiver_finish.sh run RT-STPS successfully?"; exit 1; }
+
+  build:
+    commands:
+      - VIIRS_RDR=$(find /tmp/work/rdr -name 'RNSCA-RVIRS*.h5' | sort | head -1)
+      - echo "Running CSPP SDR on ${VIIRS_RDR}..."
+      - export CSPP_SDR_HOME="$CSPP_HOME"
+      - export CSPP_RT_HOME="$CSPP_HOME"
+      - "\"$CSPP_HOME/bin/viirs_sdr.sh\" --work-dir /tmp/work/sdr -p 4 \"$VIIRS_RDR\" 2>&1 | tee /tmp/work/cspp_sdr.log"
+      - SDR_COUNT=$(find /tmp/work/sdr -name 'SV*.h5' -o -name 'G*.h5' | wc -l)
+      - echo "CSPP SDR produced ${SDR_COUNT} SDR/GEO HDF5 files"
+      - test "$SDR_COUNT" -gt 0 || { echo "CSPP SDR produced no output"; exit 1; }
+
+  post_build:
+    commands:
+      - KMS_KEY_ID="${KMS_KEY_ID:-}"
+      - echo "Uploading SDR/GEO HDF5 files to s3://${OUTPUT_BUCKET}/contacts/${CONTACT_DATE}/${CONTACT_ID}/sdr/"
+      - >
+        aws s3 sync /tmp/work/sdr/ "s3://${OUTPUT_BUCKET}/contacts/${CONTACT_DATE}/${CONTACT_ID}/sdr/"
+        --exclude '*' --include '*.h5' --sse aws:kms --sse-kms-key-id "${KMS_KEY_ID}"
+      - >
+        aws s3 cp /tmp/work/cspp_sdr.log "s3://${OUTPUT_BUCKET}/contacts/${CONTACT_DATE}/${CONTACT_ID}/logs/cspp_sdr.log"
+        --sse aws:kms --sse-kms-key-id "${KMS_KEY_ID}" || true
+      - echo "Exit status ${CODEBUILD_BUILD_SUCCEEDING}"

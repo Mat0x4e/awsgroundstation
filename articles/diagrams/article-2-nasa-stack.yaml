@@ -1,0 +1,128 @@
+Diagram:
+  DefinitionFiles:
+    - Type: URL
+      Url: "https://raw.githubusercontent.com/awslabs/diagram-as-code/main/definitions/definition-for-aws-icons-light.yaml"
+
+  Resources:
+    Canvas:
+      Type: AWS::Diagram::Canvas
+      Direction: vertical
+      Children:
+        - Title
+        - Body
+
+    Title:
+      Type: AWS::Diagram::Resource
+      Title: "Part 2 - the NASA stack - CADU to sub-km geolocated Level 1 - contact #2"
+      Align: center
+
+    Body:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - AWSCloud
+        - LUTServer
+
+    AWSCloud:
+      Type: AWS::Diagram::Cloud
+      Preset: AWSCloudNoLogo
+      Align: center
+      Children:
+        - Region
+
+    Region:
+      Type: AWS::Region
+      Title: "eu-central-1"
+      Direction: vertical
+      Children:
+        - LevelZero
+        - LevelOne
+        - Products
+
+    LevelZero:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - CaduBucket
+        - Aggregator
+        - RdrBucket
+
+    CaduBucket:
+      Type: AWS::S3::Bucket
+      Title: "27 x .cadu chunks"
+      Align: center
+
+    Aggregator:
+      Type: AWS::EC2::Instance
+      Title: "EC2 - concat + RT-STPS"
+      Align: center
+
+    RdrBucket:
+      Type: AWS::S3::Bucket
+      Title: "RDR 863 MB - RNSCA-RVIRS_j01"
+      Align: center
+
+    LevelOne:
+      Type: AWS::CodeBuild::Project
+      Title: "CodeBuild - CSPP SDR 4.1.1 (~14 min)"
+      Align: center
+
+    Products:
+      Type: AWS::S3::Bucket
+      Title: "SVI/SVM + GITCO/GMTCO - true-color GeoTIFF"
+      Align: center
+
+    LUTServer:
+      Type: AWS::Diagram::Resource
+      Preset: "Server"
+      Title: "jpssdb.ssec.wisc.edu - calibration LUTs"
+      Align: center
+
+  Links:
+    - Source: CaduBucket
+      SourcePosition: E
+      Target: Aggregator
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: Aggregator
+      SourcePosition: E
+      Target: RdrBucket
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: RdrBucket
+      SourcePosition: S
+      Target: LevelOne
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+      Type: orthogonal
+
+    - Source: LevelOne
+      SourcePosition: S
+      Target: Products
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+      Type: orthogonal
+
+    - Source: LevelOne
+      SourcePosition: E
+      Target: LUTServer
+      TargetPosition: SW
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetLeft:
+          Title: "sdr_luts.sh reaches it"
+
+    - Source: Aggregator
+      SourcePosition: NE
+      Target: LUTServer
+      TargetPosition: NW
+      LineStyle: dashed
+      LineColor: 'rgba(200,30,30,255)'
+      Labels:
+        TargetLeft:
+          Title: "no route from EC2"

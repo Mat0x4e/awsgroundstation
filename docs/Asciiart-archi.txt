@@ -1,0 +1,110 @@
+• Here is the full pipeline — current (CodeBuild) and target (all-Batch) — both branches, end to end.
+
+  ═══════════════════════════════════════════════════════════════════════════════════════════════
+    NOAA-20 SDR PIPELINE — CURRENT (CodeBuild)          account 471112743408 · eu-central-1
+  ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+                            ┌─────────────────────────────────────────┐
+    AWS Ground Station      │  Contact State Change event (EventBridge)│
+    (NOAA-20 / 43013)       └───────────────────┬─────────────────────┘
+                                                 │
+                    ┌────────────────────────────┴────────────────────────────┐
+                    │                                                           │
+          ═══ ASYNC (DigIF) branch ═══                              ═══ SYNC (demod) branch ═══
+                    │                                                           │
+     S3 reception bucket  (VITA-49 DigIF chunks, ~30s each)          Receiver EC2 (live UDP listener)
+                    │                                                           │  arm → capture → LOS
+            ┌───────▼────────── SFN: sdr_pipeline ──────────┐                   │
+            │ ListChunks → ShapeInput → CheckMarker          │          ┌───────▼─────── SFN: sync_pipeline ───────┐
+            │ WriteProcessingMarker                          │          │ FinishReceiver (SSM on EC2):             │
+            │                                                │          │   stop listener → RT-STPS → upload       │
+            │  ParallelProcessing  ── Map (MaxConc=19) ──┐   │          │   CADU + RDR to S3                       │
+            │  ┌──────────── per chunk ──────────────┐   │   │          │ StopReceiver                             │
+            │  │ StartCodeBuild ►►► CODEBUILD ◄◄◄     │   │   │          │                                          │
+            │  │   2XLARGE   project: sdr_pipeline ★  │   │   │          │ StartAggregationBuild ►► CODEBUILD ◄◄    │
+            │  │   iq_extract.py (pcap→cs8)           │   │   │          │   2XLARGE  project: sync_aggregation     │
+            │  │   satdump_process.sh (cs8→CADU+comp) │   │   │          │   CSPP only (RT-STPS already ran on EC2) │
+            │  │ WaitForBuild → CheckBuildStatus loop │   │   │          │   sdr_luts.sh (NO cache — always fetch)  │
+            │  └──────────────────────────────────────┘   │   │          │                                          │
+            │  CheckResults (tolerate 100% fail)           │   │          └───────────────┬──────────────────────────┘
+            │                                              │   │                          │
+            │ StartAggregationBuild ►► CODEBUILD ◄◄        │   │                          │
+            │   2XLARGE  project: sdr_pipeline ★  (SAME!)  │   │                          │
+            │   RT-STPS + CSPP   (PERF-1 LUT cache)        │   │                          │
+            └───────────────────┬──────────────────────────┘   │                          │
+                                │   ★ ONE shared CodeBuild      │                          │
+                                │     project + IAM role        │                          │
+                                └───────────────┬───────────────┴──────────────────────────┘
+                                                │   SDR + GEO (HDF5)  →  S3
+                                                │
+                                 ┌──────────────▼───────────────┐
+                                 │ Lambda: viirs-orchestrator    │  fire-and-forget
+                                 │   start_build(buildspecOverride=│
+                                 │     SATDUMP_BUILDSPEC | NASA…) │  (~100+ line inline strings)
+                                 └──────────────┬────────────────┘
+                                                │
+                                 ┌──────────────▼───────────────┐
+                                 │ CODEBUILD: viirs-visualization│  MEDIUM
+                                 │   scripts/viirs/  (2 branches)│
+                                 │   SatDump path | NASA CSPP path│
+                                 └──────────────┬────────────────┘
+                                                │
+                                        products/  →  .png  +  .geotiff  +  .json
+                                          (SatDump composite  |  NASA true-color / thermal)
+
+     RUNTIME CODEBUILD SURFACE:  ★ sdr_pipeline (fan-out AND async agg)  ·  sync_aggregation  ·  viirs-visualization
+     KEPT:  image-build CI (builds the ECR sdr-pipeline image)
+
+  ═══════════════════════════════════════════════════════════════════════════════════════════════
+    NOAA-20 SDR PIPELINE — TARGET (all-Batch · ADR-002)      CodeBuild removed from runtime
+  ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+                            ┌─────────────────────────────────────────┐
+                            │  Contact State Change event (EventBridge)│
+                            └───────────────────┬─────────────────────┘
+                    ┌────────────────────────────┴────────────────────────────┐
+          ═══ ASYNC (DigIF) branch ═══                              ═══ SYNC (demod) branch ═══
+                    │                                                           │
+     S3 reception bucket (DigIF chunks)                             Receiver EC2 (live UDP listener)  ── UNCHANGED
+                    │                                                           │   RT-STPS stays on the EC2 (not batch)
+            ┌───────▼────────── SFN: sdr_pipeline ──────────┐          ┌───────▼─────── SFN: sync_pipeline ───────┐
+            │ … WriteProcessingMarker                        │          │ FinishReceiver (SSM: RT-STPS on EC2)     │
+            │  ParallelProcessing ── Map (per item) ─────┐   │          │ StopReceiver                             │
+            │  ┌──────────── per chunk ──────────────┐   │   │          │                                          │
+            │  │ Choice: UseBatch?                    │   │   │          │ StartAggregationBuild                    │
+            │  │  └► SubmitBatchChunk                 │   │   │          │   └► Choice: UseBatch?                   │
+            │  │      :::batch:submitJob.sync         │   │   │          │        └► submitJob  (RTSTPS=off)        │
+            │  │      (one non-array job per item)    │   │   │          │                     │                    │
+            │  └───────────────┬──────────────────────┘   │   │          └──────────┬───────────┘                    │
+            │  CheckResults    │                           │   │                     │                                │
+            │ StartAggregation │                           │   │                     │                                │
+            │   └► submitJob.sync (RTSTPS=on)              │   │                     │                                │
+            └───────────────┬──┴───────────────────────────┘   │                     │                                │
+                            │                                   │                     │                                │
+          ┌─────────────────▼───────────────────────── AWS BATCH (one family) ───────▼────────────────────────────┐
+          │                                                                                                         │
+          │   ┌──── SPOT compute env ────┐          ┌──────────── ON-DEMAND compute env (min_vcpus=0) ───────────┐ │
+          │   │ c6i/m6i.2xlarge          │          │                                                            │ │
+          │   │ SPOT_CAPACITY_OPTIMIZED  │          │   job: aggregation   (aggregation_entrypoint.sh)           │ │
+          │   │ max_vcpus ≥ 27×8         │          │     RTSTPS=on  → CADU→RT-STPS→CSPP   (async)               │ │
+          │   │                          │          │     RTSTPS=off → RDR→CSPP           (sync)                 │ │
+          │   │ job: chunk (array=no)    │          │     PERF-1 LUT cache fast-path  + sdr_luts.sh fallback     │ │
+          │   │  iq_extract → satdump    │          │                                                            │ │
+          │   │  retryStrategy:          │          │   job: render        (render_entrypoint.sh)                │ │
+          │   │   evaluateOnExit         │          │     RENDER_BRANCH=satdump | nasa                           │ │
+          │   │   Host EC2* → RETRY      │          │     ProductsWritten (post-sync) · VisualizationFailed→SNS  │ │
+          │   │   *        → EXIT        │          │                                                            │ │
+          │   └──────────┬───────────────┘          └───────────────────┬────────────────────────────────────────┘ │
+          │              │  CADU + composites → S3 contacts/            │  SDR+GEO → S3  ·  png/geotiff/json → products/ │
+          └──────────────┴───────────────────────────────────────────── ┴─────────────────────────────────────────┘
+                                                ▲
+                                 ┌──────────────┴────────────────┐
+                                 │ Lambda: viirs-orchestrator     │  TRIGGER ONLY (behind env flag)
+                                 │   batch.submit_job(RENDER_BRANCH)│  _lookup_acquisition stays here
+                                 └────────────────────────────────┘
+                                                │
+                                        products/  →  .png  +  .geotiff  +  .json
+                                       (NASA fixes: ① granule-token ∩  ② thermal NaN guard  ③ single-stretch)
+
+     shared ECR image "sdr-pipeline" unchanged · Spot=fan-out only · on-demand=agg+render · RT-STPS live demod stays on EC2
+  

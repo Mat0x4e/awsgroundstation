@@ -51,6 +51,14 @@ RUN apt-get update && \
     rm /tmp/satdump_1.2.2_ubuntu_22.04_amd64.deb && \
     rm -rf /var/lib/apt/lists/*
 
+# SatDump can georeference its own composites, and enable_satdump_projection.py
+# turns that on. It is deliberately NOT run: at 1.2.2 the composite projection
+# path receives per-scan timestamps for a per-line image, resolves 0 GCPs, falls
+# back to global bounds and segfaults on a 32000x16000 allocation. Verified
+# 2026-09-02; see docs/SATDUMP.md. The script ships so the next SatDump upgrade
+# can try again -- it fails loudly if the config layout moved.
+COPY enable_satdump_projection.py /opt/scripts/enable_satdump_projection.py
+
 # -------------------------------------------------------------------
 # RT-STPS 7.0 + Patch 1 (NASA/CIMSS) — CADU → RDR (HDF5 Level 0)
 # Full NOAA-20/JPSS-1/JPSS-2 support

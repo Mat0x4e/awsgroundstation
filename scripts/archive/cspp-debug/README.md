@@ -4,7 +4,7 @@ These are **superseded** exploratory CodeBuild buildspecs from the effort to get
 CSPP SDR 4.1.1 to process RT-STPS 7.0 RDRs. They are kept only for history — do
 **not** run them. The working buildspec is [`../../cspp_rdr_input.yml`](../../cspp_rdr_input.yml).
 
-## What actually fixed CSPP (see DEPLOYMENT_STATUS.md → "CSPP SDR — RESOLVED")
+## What actually fixed CSPP (see DEPLOYMENT.md → "CSPP SDR — RESOLVED")
 
 Two changes, both required, never combined until 2026-07-23:
 

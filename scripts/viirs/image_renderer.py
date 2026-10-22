@@ -119,13 +119,13 @@ class ImageRenderer:
         # the input is non-negative.
         return np.power(band.astype(np.float32), gamma, dtype=np.float32)
 
-    def destripe(self, band: np.ndarray) -> np.ndarray:
+    def destripe(self, band: np.ma.MaskedArray) -> np.ma.MaskedArray:
         """Correct inter-detector striping by subtracting column-wise medians.
 
         VIIRS images lines sequentially using 16 detectors arranged in an
         along-scan array.  Lines are assigned to detectors cyclically: line 0
-        → detector 0, line 1 → detector 1, …, line 15 → detector 15, line 16
-        → detector 0 again, etc.  Each detector has a slightly different
+        -> detector 0, line 1 -> detector 1, ..., line 15 -> detector 15, line 16
+        -> detector 0 again, etc.  Each detector has a slightly different
         radiometric response, producing horizontal stripes every 16 lines.
 
         This method removes the systematic offset for each detector by
@@ -134,43 +134,63 @@ class ImageRenderer:
         independently per column so that real along-track gradients (land/sea
         transitions, cloud edges) are preserved.
 
+        Masked pixels are excluded from the median computation (Bug #3 fix):
+        np.ma.median is used so that fill/invalid pixels do not corrupt the
+        per-detector column medians.  For fully-masked columns the median is
+        undefined; a neutral correction of 0.0 is applied (fill=0.0).  The
+        input mask is restored on the output so downstream callers can
+        distinguish valid from invalid pixels.
+
         The result is clipped to ``[0, 1]`` to prevent negative artefacts from
-        over-correction.
+        over-correction.  This is appropriate for both raw reflectance (which
+        is approximately [0,1] for VIIRS I-bands) and for contrast-stretched
+        data.
 
         Parameters
         ----------
         band:
-            Float32 array of shape ``(H, W)`` with values in ``[0, 1]``.
-            ``H`` does not need to be an exact multiple of
-            :attr:`VIIRS_DETECTORS` — the final partial cycle is handled
-            correctly.
+            Masked array of shape ``(H, W)`` -- either raw reflectance
+            (before contrast_stretch) or a stretched plain ndarray wrapped in
+            a masked array.  Plain ndarrays are also accepted (treated as
+            fully unmasked).
 
         Returns
         -------
-        np.ndarray
-            Destriped float32 array of the same shape, clipped to ``[0, 1]``.
+        np.ma.MaskedArray
+            Destriped masked array of the same shape, clipped to ``[0, 1]``,
+            with the original mask preserved.
         """
-        corrected = band.copy().astype(np.float32)
-        n_rows = band.shape[0]
+        # Extract mask and data; always work on a float32 copy
+        if isinstance(band, np.ma.MaskedArray):
+            original_mask = np.ma.getmaskarray(band).copy()
+            data = band.data.astype(np.float32).copy()
+        else:
+            original_mask = np.zeros(band.shape, dtype=bool)
+            data = np.asarray(band, dtype=np.float32).copy()
+
+        n_rows = data.shape[0]
 
         for detector in range(self.VIIRS_DETECTORS):
-            # Collect indices of all rows belonging to this detector.
             row_indices = np.arange(detector, n_rows, self.VIIRS_DETECTORS)
-
             if row_indices.size == 0:
                 continue
 
-            # Sub-array of shape (n_detector_rows, W).
-            detector_rows = corrected[row_indices, :]
+            # Build a masked sub-array for this detector's rows so that
+            # np.ma.median excludes masked (invalid) pixels from the statistic.
+            det_data = data[row_indices, :]
+            det_mask = original_mask[row_indices, :]
+            det_masked = np.ma.masked_array(det_data, mask=det_mask)
 
-            # Column-wise median: shape (W,).  Using np.median along axis=0
-            # computes the median independently for each column.
-            col_median = np.median(detector_rows, axis=0)
+            # Per-column median computed only from unmasked pixels.
+            # For fully-masked columns the median is masked; fill with 0.0
+            # (neutral correction -- do not modify those columns).
+            col_median_ma = np.ma.median(det_masked, axis=0)
+            col_median = np.ma.filled(col_median_ma, fill_value=0.0).astype(np.float32)
 
-            # Subtract the per-column median from every row of this detector.
-            corrected[row_indices, :] -= col_median
+            data[row_indices, :] -= col_median
 
-        return np.clip(corrected, 0.0, 1.0).astype(np.float32)
+        clipped = np.clip(data, 0.0, 1.0).astype(np.float32)
+        return np.ma.masked_array(clipped, mask=original_mask)
 
     def assemble_true_color(
         self,

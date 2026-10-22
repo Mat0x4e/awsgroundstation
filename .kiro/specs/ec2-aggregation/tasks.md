@@ -1,14 +1,35 @@
+> ## ⚠️ SUPERSEDED — 2026-09-01
+>
+> **Aggregation no longer runs on the EC2 instance.** It runs as a CodeBuild job.
+>
+> CSPP's ancillary staging fetches from `http://jpssdb.ssec.wisc.edu` at run time, and this
+> instance's security group is SSM-outbound-only — it has no route there. Offline, the fetch
+> times out five times over ~11 minutes and CSPP then dies inside its own error handler with
+> `TypeError: object of type 'bool' has no len()`. CodeBuild has egress.
+>
+> Key decision #1 below argued EC2 over CodeBuild because rebuilding the LUT cache costs
+> "10+ minutes" per run. That figure is right — `sdr_luts.sh` takes ~10 min — but it is the
+> price of the only arrangement that works.
+>
+> The instance still exists and is retained, because `/opt/rt-stps` and `/opt/SDR_4_1` were
+> installed on it by hand and exist in no Terraform, Dockerfile or user_data. It is not in
+> the pipeline path. Neither is the Trigger Lambda.
+>
+> Current design: [`../../../docs/DEPLOYMENT.md`](../../../docs/DEPLOYMENT.md) and
+> [`../../../docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md).
+> Retained below as the design record of an approach that was tried and did not hold.
+
 # Implementation Plan: EC2-Based Aggregation for NOAA-20 SDR Pipeline
 
 ## Overview
 
-Replace the CodeBuild-based final aggregation step in `modules/sdr_pipeline/` with an EC2 instance (r6i.xlarge) triggered via SSM Run Command. The implementation adds Terraform resources for the EC2 instance, IAM roles, and Trigger Lambda, modifies the Step Functions state machine to use a Lambda + SSM polling loop, and creates the aggregation shell script for the instance.
+Replace the CodeBuild-based final aggregation step in `infra/modules/sdr_pipeline/` with an EC2 instance (r6i.xlarge) triggered via SSM Run Command. The implementation adds Terraform resources for the EC2 instance, IAM roles, and Trigger Lambda, modifies the Step Functions state machine to use a Lambda + SSM polling loop, and creates the aggregation shell script for the instance.
 
 ## Tasks
 
 - [x] 1. Provision EC2 Aggregation Instance and IAM
   - [x] 1.1 Create Terraform EC2 instance resource and instance profile
-    - Add `ec2.tf` in `modules/sdr_pipeline/` with:
+    - Add `ec2.tf` in `infra/modules/sdr_pipeline/` with:
       - `aws_instance` resource (r6i.xlarge, Amazon Linux 2023 AMI, 100 GB gp3 EBS, launched in stopped state)
       - `aws_iam_instance_profile` and `aws_iam_role` for the EC2 instance
       - IAM policy for S3 read/write on SDR_Output_Bucket, KMS Encrypt/Decrypt/GenerateDataKey
@@ -41,7 +62,7 @@ Replace the CodeBuild-based final aggregation step in `modules/sdr_pipeline/` wi
     - _Requirements: 3.2, 3.3_
 
   - [x] 2.2 Create Terraform Lambda resource
-    - Add `lambda.tf` in `modules/sdr_pipeline/` (or extend existing file) with:
+    - Add `lambda.tf` in `infra/modules/sdr_pipeline/` (or extend existing file) with:
       - `aws_lambda_function` resource for the Trigger Lambda
       - `data "archive_file"` for packaging the handler
       - CloudWatch Log Group with appropriate retention
@@ -82,7 +103,7 @@ Replace the CodeBuild-based final aggregation step in `modules/sdr_pipeline/` wi
 
 - [x] 5. Modify Step Functions State Machine
   - [x] 5.1 Replace CodeBuild aggregation states with Lambda + SSM polling
-    - Modify `modules/sdr_pipeline/step_functions.tf`:
+    - Modify `infra/modules/sdr_pipeline/step_functions.tf`:
       - Replace `FinalAggregation` CodeBuild state with Lambda invoke targeting Trigger Lambda
       - Add `WaitForSSM` state (Wait 30 seconds)
       - Add `CheckSSMStatus` state (SDK integration: `ssm:getCommandInvocation`)
@@ -121,7 +142,7 @@ Replace the CodeBuild-based final aggregation step in `modules/sdr_pipeline/` wi
   - [x] 8.1 Add module variables and outputs for new resources
     - Add variables for: AMI ID (or data source for latest Amazon Linux 2023), subnet ID, KMS key ARN, SNS topic ARN
     - Add outputs for: EC2 instance ID, Trigger Lambda ARN, Trigger Lambda function name
-    - Wire outputs from `modules/sdr_pipeline/` to root module if needed
+    - Wire outputs from `infra/modules/sdr_pipeline/` to root module if needed
     - _Requirements: 1.1, 1.5_
 
 - [x] 9. Final Checkpoint — End-to-End Validation

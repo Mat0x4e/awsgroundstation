@@ -3,7 +3,7 @@
 Starts the pre-provisioned EC2 aggregation instance, waits for it to reach
 running state, then issues an SSM Run Command to execute the aggregation script.
 
-Terraform-side config: Python 3.12 runtime, 256 MB memory, 120s timeout.
+Terraform-side config: Python 3.12 runtime, 256 MB memory, 300s timeout.
 """
 
 import json
@@ -21,7 +21,7 @@ INSTANCE_ID = os.environ["AGGREGATION_INSTANCE_ID"]
 SCRIPT_PATH = "/opt/scripts/aggregation.sh"
 SSM_EXECUTION_TIMEOUT = 1800  # 30 minutes
 RUNNING_POLL_INTERVAL_SECONDS = 5
-RUNNING_POLL_MAX_ATTEMPTS = 12  # 12 × 5s = 60s max
+RUNNING_POLL_MAX_ATTEMPTS = 48  # 48 × 5s = 240s max
 
 
 def lambda_handler(event, context):

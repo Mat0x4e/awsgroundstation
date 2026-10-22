@@ -7,7 +7,7 @@ Pipeline de post-traitement serverless transformant les sorties VIIRS en images 
 ## Tasks
 
 - [x] 1. Set up Terraform module structure and IAM roles
-  - [x] 1.1 Create `modules/viirs_visualization/` directory structure with `main.tf`, `codebuild.tf`, `eventbridge.tf`, `iam.tf`, `variables.tf`, `outputs.tf`, `ecr.tf`
+  - [x] 1.1 Create `infra/modules/viirs_visualization/` directory structure with `main.tf`, `codebuild.tf`, `eventbridge.tf`, `iam.tf`, `variables.tf`, `outputs.tf`, `ecr.tf`
     - Define module variables: `project_name`, `account_id`, `sdr_output_bucket_name`, `sdr_output_bucket_arn`, `kms_key_arn`, `kms_key_id`, `sns_topic_arn`, `enable_geotiff`, `tags`
     - Define outputs: Lambda ARN, CodeBuild project name, ECR repository URL
     - _Requirements: 11.3, 11.4_

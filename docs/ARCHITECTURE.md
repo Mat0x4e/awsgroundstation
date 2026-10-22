@@ -1,0 +1,261 @@
+# Architecture
+
+How a booked satellite contact becomes calibrated, geolocated imagery — the services, the
+sequence, and the constraints that shaped both.
+
+Diagram source: [`diagrams/architecture.yaml`](diagrams/architecture.yaml), rendered with
+[awsdac](https://github.com/awslabs/diagram-as-code) — `awsdac docs/diagrams/architecture.yaml -o docs/diagrams/out/architecture.png -f`.
+
+![Architecture](diagrams/out/architecture.png)
+
+Everything inside the cloud boundary is managed. The three things outside it are the ones
+AWS does not supply: the **orbital model** that decides which contact is worth buying
+(`scripts/plan_pass.py`), the **TLE** it propagates, and the **CSPP calibration LUTs** that
+turn raw counts into physical radiances.
+
+Everything below describes the DigIF reception path (`enable_sdr_pipeline`), the one that
+has actually flown. A second, live demod/decode path exists alongside it — see
+[`SYNC_PIPELINE.md`](SYNC_PIPELINE.md) — under its own mission profile, so a contact's
+reservation ARN, not a global switch, decides which one runs.
+
+---
+
+## The cinematic — one contact, end to end
+
+Times are relative to AOS, measured on contact `ba2c5446` (2026-08-31, Stockholm 1,
+10m31s). Total wall-clock from AOS to Level 1 is roughly **100 minutes**, of which the
+pass itself is ten.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant SAT as NOAA-20
+    participant GS as Ground Station<br/>(rented antenna)
+    participant S3R as S3 reception
+    participant EB as EventBridge
+    participant SFN as Step Functions
+    participant CB as CodeBuild
+    participant S3O as S3 output
+    participant VIZ as VIIRS visualization
+
+    Note over SAT,GS: T-7d  plan_pass.py ranks the offer set, reserve-contact
+    SAT->>GS: T+0     AOS — X-band HRD, 15 Mbps
+    GS->>S3R: T+28s   first .pcap (2.18 GB)
+    loop every 30 s
+        GS->>S3R: VITA-49 DigIF chunk
+    end
+    SAT->>GS: T+10m31s LOS
+    GS->>S3R: T+10m50s last chunk — 22 objects, 43.1 GB
+    GS->>EB: contactStatus = COMPLETED
+    EB->>SFN: StartExecution {contact_id, event time}
+    Note over SFN: derive contact_date, wait 120 s
+    SFN->>S3R: listObjectsV2 by "<contactId>_" prefix
+    S3R-->>SFN: 22 chunk keys
+    Note over SFN: .processing marker claims the contact
+    SFN->>CB: Map fan-out, 19 concurrent
+    loop per chunk (9-39 min each, median 23)
+        CB->>CB: VITA-49 → I/Q → SatDump (QPSK, Viterbi, Reed-Solomon)
+        CB->>S3O: npp_hrd.cadu + composites
+    end
+    SFN->>CB: aggregation build
+    CB->>CB: install J01 LUTs, sdr_luts.sh (~10 min, needs internet)
+    CB->>CB: concat 22 CADU → RT-STPS → 5 RDR (~2.5 min)
+    CB->>CB: CSPP viirs_sdr.sh → SDR + GEO
+    CB->>S3O: RDR, SVI/SVM/GEO HDF5
+    SFN->>VIZ: StartVisualization — one call per contact
+    VIZ->>CB: visualization build (GeoTIFF, PNG)
+```
+
+### Where the time goes
+
+| Stage | Duration | Note |
+|---|---|---|
+| Contact | ~10 min | the only part that costs antenna time (~$110) |
+| Delivery settle | 120 s | last chunk landed 19 s after LOS; the wait is margin |
+| Chunk fan-out | ~40 min | 22 builds, 19 concurrent; measured 8.7 / 23.3 / 38.9 min (min / median / max) |
+| Aggregation | ~15 min (cache hit) / ~25 min (miss) | PERF-1: `sdr_luts.sh` (~10 min) skipped when LUT DB staged from S3; fallback fetch runs only on first contact after cache is cold |
+
+---
+
+## The processing chain
+
+Each step strips a container or adds meaning; nothing is thrown away until the end.
+
+```mermaid
+flowchart LR
+    PCAP[".pcap<br/>VITA-49 DigIF<br/>~43 GB"] -->|de-encapsulate| CS8[".cs8<br/>raw I/Q"]
+    CS8 -->|"SatDump: QPSK + Viterbi + Reed-Solomon"| CADU[".cadu<br/>clean CCSDS frames<br/>22 x 53.6 MiB"]
+    CADU -->|"RT-STPS jpss1.xml"| RDR["RDR HDF5 — Level 0<br/>raw counts, 640 MiB VIIRS"]
+    RDR -->|"CSPP viirs_sdr.sh"| SDR["SDR + GEO HDF5 — Level 1<br/>radiances + per-pixel lat/lon"]
+    SDR -->|project| TIF["GeoTIFF<br/>sub-km geolocation"]
+    CADU -->|"SatDump render"| PNG["composite PNG<br/>display image, uncalibrated<br/>georeferenced by SatDump itself"]
+```
+
+The lower branch is what open source gives you: display imagery, georeferenced by
+SatDump's own scan model. The upper branch is why the NASA stack is still worth the
+trouble — calibrated physical radiances and terrain-corrected per-pixel coordinates,
+rather than a raytrace of the nominal scan geometry. See [`../articles/article-2-nasa-software.md`](../articles/article-2-nasa-software.md).
+
+---
+
+## Step Functions state machine
+
+`groundstation-noaa20-sdr-pipeline`, defined in
+[`../infra/modules/sdr_pipeline/step_functions.tf`](../infra/modules/sdr_pipeline/step_functions.tf).
+
+| State | Type | Purpose |
+|---|---|---|
+| `DeriveDateOnly` → `DeriveDateParts` → `BuildContactDate` | Pass | event timestamp → `2026/09/06`; three states because Step Functions rejects deeply nested intrinsics |
+| `WaitForDelivery` | Wait | 120 s, so the last chunk has landed |
+| `ListChunks` | Task | `s3:listObjectsV2` prefixed `"<contactId>_"` |
+| `ShapeInput` | Pass | normalise to `{contact_id, bucket, contact_date, chunks[]}` |
+| `CheckChunksFound` | Choice | fail loudly on an empty contact |
+| `CheckProcessingMarker` / `WriteProcessingMarker` | Task | idempotence via `contacts/{id}/.processing` |
+| `ParallelProcessing` | Map | 19 concurrent, `ToleratedFailurePercentage: 100` |
+| `StartAggregationBuild` … `EvaluateAggregation` | Task/Wait/Choice | CodeBuild aggregation, polled |
+| `StartVisualization` | Task | invokes the VIIRS orchestrator directly — one call per contact. Catches `States.ALL` to success: products are already in S3, so a visualisation failure must not fail the run |
+| `MarkAggregationFailed` → `AggregationFailure` | Pass/Task | populate `$.error`, publish to SNS |
+
+**A green execution does not mean 22 good chunks.** The Map tolerates 100 % failure by
+design, so partial results still reach aggregation. Check the per-chunk `build_status`.
+
+**A green execution does not mean imagery either.** `StartVisualization` catches to
+success, so a failed rendering leaves `products/{date}/{contact}/` empty while the
+execution reports `SUCCEEDED`. Three rehearsals did exactly that on 2026-09-01. Verify
+against the products prefix, never the execution status.
+
+---
+
+## Constraints worth knowing before changing anything
+
+- **CSPP needs the internet; the EC2 aggregation instance does not have it.** Its security
+  group is SSM-outbound-only, so `sdr_luts.sh` times out and CSPP dies inside its own error
+  handler. Aggregation therefore runs in CodeBuild. See [`DEPLOYMENT.md`](DEPLOYMENT.md).
+- **The trigger is per contact, not per object.** A pass writes ~22 objects over ~10
+  minutes; an execution started by the first cannot know the full list.
+- **S3 allows one notification configuration per bucket.** Two `aws_s3_bucket_notification`
+  resources on one bucket silently erase each other — that is how EventBridge ended up
+  disabled and a whole pass went unprocessed.
+- **The contact id is in the object *name*, not a path segment:**
+  `year=Y/month=M/day=D/satellite=<sat>/<contactId>_<ts>_<uuid>.pcap`.
+- **Re-running a contact accumulates products.** RDR and SDR filenames embed a creation
+  timestamp, so they never overwrite; only `.cadu` does.
+- **The visualisation buildspecs live in the Lambda, not in `buildspecs/`.** The CodeBuild
+  project is `NO_SOURCE` with a stub spec that exits 1; the real spec is passed as
+  `buildspecOverride` at `start_build()` time from
+  [`lambdas/viirs_visualizer/handler.py`](../lambdas/viirs_visualizer/handler.py). The
+  `buildspecs/viirs_*.yml` files are manual-run copies and are *not* what runs. Three
+  defects hid in that gap until 2026-09-01: a wrong script path, the NASA path reading
+  `chunks/` instead of `sdr/` under pre-J01 filenames, and a SatDump sync that produced a
+  nested tree the non-recursive composite discovery could not see.
+- **SatDump could georeference its own composites, but not at 1.2.2 (parked 2026-09-02).** It ships the VIIRS scan
+  model (`resources/projections_settings/jpss1_viirs.json` — aggregation zones in
+  `forced_gcps_x`, 112° scan, `roll_offset` -0.05, `yaw_offset` 0.15) and holds the
+  per-scan timestamps inside the product, so it raytraces every line with the right
+  pointing. Adding a `project` block to a composite in `satdump_cfg.json` makes it
+  write `rgb_<name>_projected.tif`, an equirectangular GeoTIFF; that is done at image
+  build time by [`docker/sdr-pipeline/enable_satdump_projection.py`](../docker/sdr-pipeline/enable_satdump_projection.py),
+  and `scripts/viirs/projected_reader.py` reads them. The GeoTIFF carries its own
+  extent, so nothing downstream needs to know any geometry. **That script is not
+  run by the Dockerfile**: at 1.2.2 the composite path resolves 0 GCPs and
+  segfaults ([SATDUMP.md](SATDUMP.md)). Until a SatDump upgrade fixes it, the
+  fallback below is the active path — `projected_reader` simply finds no files
+  and says so in the log.
+- **SatDump needs a TLE, and its own updater cannot reach CelesTrak from CodeBuild.**
+  Composites decode without one, so `0 TLEs loaded!` sat in every chunk log for months
+  harmlessly; projection then resolves every control point to the same place, collapses
+  the bounds to the whole globe and segfaults on a 32000×16000 allocation.
+  `scripts/satdump_process.sh` passes `--tle_override`, which loads a specific file and
+  skips the network update entirely. Details in [SATDUMP.md](SATDUMP.md).
+- **`scripts/viirs/scan_geometry.py` is the active geolocation path**, and a fallback only
+  in intent: it is what runs while SatDump's own projection is parked. It reconstructs SatDump's model from outside
+  and is less accurate: it cannot apply the roll/yaw corrections, and it rebuilds line
+  times from a rate where SatDump has the real per-scan timestamps. Three things in it
+  are still worth knowing, because they are documented nowhere: the CBOR ephemeris
+  timestamps are 2³² s low; the frame they describe was rotated with that *wrapped*
+  clock, so undoing it needs the raw stamp; and the composite is cropped relative to
+  the bands whose timestamps it carries. Do not extend it — fix the SatDump config.
+- **SatDump output is per chunk, not per contact.** Composites live at
+  `satdump/chunk_N/<INSTRUMENT>/`, one set per 30 s of downlink. `chunk_0` is the first
+  30 s after AOS. The visualiser globs a flat directory, so the buildspec stages the
+  per-chunk folders into one, lowest chunk number winning.
+- **Visualisation is told, not triggered.** It was once driven by an S3 `ObjectCreated` rule
+  matching `.png`; a contact writes ~9,150 objects, so arming that bucket produced ~6,000
+  CodeBuild builds in a morning and exhausted the account build queue. Nothing this pipeline
+  writes is one-per-contact, so no filter fixes it — the state machine calls the orchestrator.
+- **The SDR image is built by a CodeBuild project that exists in no Terraform.**
+  `satdump-noaa20-processing` (role `codebuild-satdump-role`) is privileged, takes its
+  buildspec as an override at `start-build`, and pulls ~10.4 GB of vendor artifacts from
+  `s3://groundstation-noaa20-sdr-output-471112743408/docker-build/`. Its role could not
+  read that prefix — the S3 statement covered only the reception bucket — so on
+  2026-09-01 a read-only statement was added by hand (`ReadDockerBuildArtifacts` /
+  `ListDockerBuildArtifacts`, `GetObject` + `ListBucket` scoped to `docker-build/*`).
+  None of this is in code, so a `terraform apply` will neither create nor repair it.
+  Build it with:
+
+  ```bash
+  aws codebuild start-build --project-name satdump-noaa20-processing     --buildspec-override "$(cat buildspecs/docker_build_sdr.yml)"     --environment-variables-override "name=REPO_BRANCH,value=<branch>,type=PLAINTEXT"
+  ```
+
+- **The EC2 aggregation instance carries a hand-installed `/opt/rt-stps` and
+  `/opt/SDR_4_1`** that exist in no Terraform, Dockerfile or user_data. Replacing the
+  instance destroys them, which is why `ignore_changes` covers `root_block_device`.
+  Drift is now **DETECTED** (OE-2): an SSM State Manager association
+  (`infra/modules/sdr_pipeline/ssm_drift_check.tf`) runs a daily presence-and-non-empty
+  check on these paths and emits an `OptDriftDetected` metric (namespace `SDRPipeline`,
+  dimension `InstanceId`) to CloudWatch; `monitoring.tf` alarms on it and routes to SNS.
+  The same detection covers the sync receiver's `/opt/rt-stps` + `config/jpss1.xml`
+  (namespace `SyncPipeline`, `infra/modules/sync_pipeline/ssm_drift_check.tf`). Full
+  automated reconstruction from vendor tarballs remains **DEFERRED** — the CSPP/RT-STPS
+  install is weeks of manual work; re-encoding it blind risks silent wrongness that only
+  surfaces during a pass.
+
+---
+
+## Cost per contact
+
+| Item | Approx. |
+|---|---|
+| Antenna time (10 min, on-demand) | $110–130 |
+| CodeBuild (~490 build-minutes: 471 chunks + ~22 aggregation) | the largest variable |
+| Cross-region transfer (43 GB) | ~$1 |
+| S3 storage | ~$1/month per retained pass |
+
+DigIF delivery is the reason the numbers are this size: it ships ~30× the demodulated
+bitstream. AWS also offers demodulated delivery — cheaper, if implementing the signal chain
+is not the point.
+
+---
+
+## Accepted architectural tradeoffs
+
+Deliberate decisions, recorded so a reviewer does not mistake a conscious choice for an
+oversight. Each is a demonstrator-appropriate trade with a documented rationale; the
+Well-Architected refinement ([`ARCHITECTURE_REFINEMENT.md`](ARCHITECTURE_REFINEMENT.md))
+assessed each and chose to keep it rather than engineer it away.
+
+| Decision | Rationale | Where it lives | Revisit when |
+|---|---|---|---|
+| **Single-region, no cross-region DR** | A demonstrator; the system of record is Partner Central/Ground Station, and S3 is a replayable cache. Cross-region replication adds cost without protecting anything irreplaceable. | `checkov:skip=CKV_AWS_144` on every output bucket (`s3.tf`) | This becomes a production dependency with an RPO/RTO requirement. |
+| **Single shared KMS CMK across all domains** | One key for S3/ECR/CloudTrail/SNS/Logs/EBS across both pipelines. Operational simplicity over blast-radius isolation; rotation is enabled and the key policy is least-privilege per service principal. | `aws_kms_key.groundstation` (`security/main.tf`) | A compliance boundary requires per-domain key separation, or a second tenant shares the account. |
+| **Sync receiver single-AZ** | The receiver is one instance in `subnets.ids[0]`. The fixed-IP ENI (REL-6) and the PREPASS readiness check (REL-5) address the realistic failure modes; multi-AZ would not help a per-contact, pre-positioned receiver and doubles idle cost. | `aws_instance.receiver` (`sync_pipeline/ec2.tf`) | The sync path becomes the primary (non-experimental) reception mode. |
+| **Scheduler cron disabled** | Automatic booking once reserved two unintended paid contacts. Reservation is now a deliberate human act, backed by the Task 11 budget guardrail. | `contact_scheduler` (cron disabled); budget in `security/budget.tf` | Booking is driven by a reviewed, rate-limited automation with its own spend guard. |
+| **`ToleratedFailurePercentage = 100` on the chunk Map** | Partial chunk results are still useful — aggregation consumes whatever decoded. Kept, but made *visible* by the `ChunksSucceeded`/`ChunksFailed` metrics + all-chunks-failed alarm (REL-3). | `ParallelProcessing` Map (`sdr_pipeline/step_functions.tf`); metrics in `monitoring.tf` | — (visibility added; behaviour intentionally retained). |
+| **Account-wide budget (not GS-service-scoped)** | A working account-wide ceiling beats a budget mis-scoped to a Cost Explorer service name not yet verified. A ready-to-enable `cost_filter` is committed, commented. | `aws_budgets_budget.ground_station` (`security/budget.tf`) | The exact Cost Explorer "AWS Ground Station" service string is confirmed. |
+
+### The buildspec-override contract (OE-3)
+
+Two CodeBuild projects are `NO_SOURCE` with a **stub** buildspec that is never meant to run
+as-is — the real buildspec is injected at `start_build()` time via `buildspecOverride`:
+
+- `aws_codebuild_project.sdr_pipeline` — overridden by the Map's inline `StartCodeBuild`
+  buildspec (per chunk) and by `StartAggregationBuild`'s `file("buildspecs/aggregation.yml")`.
+- `aws_codebuild_project.viirs_visualization` — overridden from
+  `lambdas/viirs_visualizer/handler.py` (`SATDUMP_BUILDSPEC` / `NASA_BUILDSPEC`).
+
+Both stubs **fail safe with `exit 1`**: a standalone run (no override) means a
+misconfiguration and must error loudly rather than silently succeed doing nothing. This
+contract is guarded by `tests/test_buildspec_contract.py`, which asserts each stub contains
+`exit 1` — the test fails if anyone removes it. Three real defects once hid in the gap
+between the stub and the real buildspec (2026-09-01); the guard exists so that class of
+error cannot recur silently.

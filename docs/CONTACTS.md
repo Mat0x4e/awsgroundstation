@@ -1,0 +1,477 @@
+# Planned Contacts — NOAA-20 (JPSS-1)
+
+> ## ⚠️ Program horizon — JPSS Direct Broadcast end-of-life
+>
+> On **2026-10-01** NOAA issued a 30-day notice (via the CSPP `cspp_registrants` list) that
+> **Suomi-NPP (S-NPP, NORAD 37849)** data delivery — including **HRD Direct Broadcast** —
+> ceases permanently at **2026-11-02 13:00 UTC**. S-NPP is NOAA-20's predecessor.
+>
+> **This project flies NOAA-20 (JPSS-1, NORAD 43013), which is _not_ affected by the S-NPP
+> cessation.** But it is a direct precedent: S-NPP (launched 2011) is being retired, NOAA-20
+> (launched 2017) is next-oldest in the JPSS series, and a NOAA-20 cessation notice would
+> arrive on the **same list, in the same format**. "HRD Direct Broadcast disabled" is the exact
+> capability this entire pipeline consumes.
+>
+> **Consequence for this contact log:** NOAA-20's HRD DB sunset date, once known, is a **hard
+> horizon** on the useful life of the whole async DigIF pipeline — every contact below is only
+> plannable while NOAA-20 HRD DB remains live. The date is **not yet recorded** (see
+> [`ARCHITECTURE_REFINEMENT.md`](ARCHITECTURE_REFINEMENT.md) → Vendor Notifications Inbox for the
+> action to find it via JPSS program / NOAA OSPO). The `cspp_registrants` list is now a
+> mission-critical monitoring channel, not optional vendor noise.
+
+## Contact #1
+
+| Property | Value |
+|----------|-------|
+| **Contact ID** | `c14d25d6-d69c-4d9f-a255-85908ab17c13` |
+| **Status** | ✅ COMPLETED |
+| **Satellite** | NOAA-20 (NORAD 43013) |
+| **Ground Station** | Hawaii 1 (`us-west-2`) |
+| **Max Elevation** | 60.83° |
+| **Pre-pass Start** | 2026-06-19 11:52:41 UTC (13:52 CEST) |
+| **Visibility Start** | 2026-06-19 11:54:41 UTC (13:54 CEST) |
+| **Visibility End** | 2026-06-19 12:04:01 UTC (14:04 CEST) |
+| **Post-pass End** | 2026-06-19 12:06:01 UTC (14:06 CEST) |
+| **Duration** | ~10 min |
+| **Mission Profile** | `arn:aws:groundstation:eu-central-1:471112743408:mission-profile/2655b0f6-8196-44d3-bbc0-3782b1942d34` |
+| **Dataflow** | antenna-downlink (Hawaii 1) → s3-recording (eu-central-1) |
+| **Data Format** | VITA-49 DigIF (raw digitized RF, .pcap) |
+| **S3 Destination** | `s3://aws-groundstation-demo-reception-471112743408/year=2026/month=06/day=19/satellite=33f035e1-73f7-47a5-9df8-fbc48636dca8/` |
+| **Expected File** | `c14d25d6-d69c-4d9f-a255-85908ab17c13_*.pcap` |
+| **Expected Size** | ~2 GB (10 min × 15 Mbps HRD) |
+| **Actual Size** | **~40.9 GB** (19 files × ~2.18 GB — raw DigIF at 30 MHz BW) |
+| **Files Delivered** | 19 .pcap files (30-second chunks) |
+| **Estimated Cost** | ~$100 (on-demand narrowband X-band) |
+| **Scheduled By** | Lambda `groundstation-noaa20-demo-contact-scheduler` |
+| **Scheduled At** | 2026-06-19 ~11:30 UTC |
+
+### Notifications
+
+- Email → `mathieu.bonnet@soprasterianext.com` on:
+  - Contact state change (COMPLETED / FAILED) ✅ confirmed
+  - .pcap file arrival in S3 ✅ confirmed
+
+### Next Steps
+
+- [x] Confirm SNS email subscriptions (2 confirmation emails)
+- [x] Wait for contact execution (~13:54 CEST)
+- [x] Verify .pcap file in S3 after ~14:06 CEST — **19 files, ~40.9 GB total**
+- [x] Process one chunk with SatDump (CodeBuild) — **VIIRS + ATMS imagery produced!**
+- [x] Download and inspect VIIRS images — **Thermal IR over Pacific, ~37°N 150°W**
+- [x] Process remaining 18 chunks — **SDR pipeline deployed and triggered 2026-06-25**
+- [x] Create spec for automated DigIF → imagery pipeline — **`noaa20-cadu-to-tiff` spec implemented**
+
+### Imagery Coordinates (chunk_001)
+
+| Property | Value |
+|----------|-------|
+| Location | Open Pacific Ocean, ~1500 km NNW of Hawaii |
+| Nadir track | 35.4°N–37.0°N, 149.8°W–150.3°W |
+| Swath coverage | ~136°W → 164°W |
+| Acquisition | 2026-06-19 11:54:35–11:55:04 UTC |
+| Pass type | Nighttime (local ~01:55 HST) — thermal/IR only |
+| Bands produced | I4, I5, M8–M16, DNB, ATMS 1–22 |
+
+### SDR Pipeline Execution
+
+| Property | Value |
+|----------|-------|
+| Execution name | `c14d25d6-d69c-4d9f-a255-85908ab17c13-run2` |
+| Started | 2026-06-25 ~16:40 CEST |
+| State machine | `groundstation-noaa20-sdr-pipeline` |
+| Parallel chunks | 19 |
+
+---
+
+## Contact #2
+
+| Property | Value |
+|----------|-------|
+| **Contact ID** | `7903eb3f-8126-4e3c-bb3d-74eef49f79b3` |
+| **Status** | ✅ COMPLETED |
+| **Satellite** | NOAA-20 (NORAD 43013) |
+| **Ground Station** | Ohio 1 (`us-east-2`) — *corrected 2026-07-24; this table previously said "Hawaii 1", a copy-paste from contact #1. The delivered swath spans 91.8°W–64.4°W (Hudson Bay → Great Lakes → Florida → Cuba), which a Hawaii antenna cannot receive.* |
+| **Visibility Start** | 2026-06-23 18:20:55 UTC (20:20 CEST — ~13:00 local solar time at the sub-satellite point) |
+| **Visibility End** | 2026-06-23 18:43:32 UTC (20:43 CEST) |
+| **Duration** | ~13 min |
+| **Mission Profile** | `arn:aws:groundstation:eu-central-1:471112743408:mission-profile/2655b0f6-8196-44d3-bbc0-3782b1942d34` |
+| **Dataflow** | antenna-downlink (Ohio 1) → s3-recording (eu-central-1) |
+| **Data Format** | VITA-49 DigIF (raw digitized RF, .pcap) |
+| **S3 Destination** | `s3://aws-groundstation-demo-reception-471112743408/year=2026/month=06/day=23/satellite=33f035e1-73f7-47a5-9df8-fbc48636dca8/` |
+| **Expected File** | `7903eb3f-8126-4e3c-bb3d-74eef49f79b3_*.pcap` |
+| **Actual Size** | **~58.7 GB** (27 files × ~2.18 GB — raw DigIF at 30 MHz BW) |
+| **Files Delivered** | 27 .pcap files (30-second chunks) |
+| **Estimated Cost** | ~$130 (on-demand narrowband X-band, longer pass) |
+
+### SDR Pipeline Execution
+
+| Property | Value |
+|----------|-------|
+| Execution name | `7903eb3f-8126-4e3c-bb3d-74eef49f79b3` |
+| Started | 2026-06-25 ~16:40 CEST |
+| State machine | `groundstation-noaa20-sdr-pipeline` |
+| Parallel chunks | 27 |
+
+### VIIRS visualisation — re-rendered 2026-09-02
+
+Originally rendered 2026-06-26 by stretching the composite across an estimated
+bounding box: a full-width rectangle, `unknown` for the acquisition time, no
+sidecar, and coastlines drawn where the imagery was not. Re-rendered through
+the per-pixel path in `products/2026/06/23/7903eb3f-.../`:
+
+| | Original (2026-06-26) | Re-rendered (2026-09-02) |
+|---|---|---|
+| Acquisition time | `unknown` | `2026-06-23T18:30:45Z` |
+| Extent | full-width rectangle | lat 13.95–19.09, lon −92.04 to −63.94 |
+| Land/sea agreement | not measurable (uncorrelated) | 82.9%, MCC +0.370 |
+| Residual rigid offset | 100–300 km | ~0.2° (≈22 km) south |
+
+The originals are kept at
+`products-archive/2026-06-26-bbox-era/2026/06/23/7903eb3f-.../`, and one is
+kept locally as an exhibit under
+`output/contact-02_ohio-1_2026-06-23/products-2026-06-bbox-era/`.
+
+MCC is lower here than contact #5's 0.783 without implying worse geolocation:
+this scene is 20% land against 30%, its features are small islands where a
+given error costs more correlation, and Caribbean cloud removes much of the
+sample. The residual is visible in the render — Jamaica's land sits just south
+of its outline.
+
+---
+
+## Contact #3
+
+| Property | Value |
+|----------|-------|
+| **Contact ID** | `1ae80d1d-7c28-41c0-a032-1ee3e3e9f70b` |
+| **Status** | ✅ COMPLETED |
+| **Satellite** | NOAA-20 (NORAD 43013) |
+| **Ground Station** | Oregon 1 (`us-west-2`) |
+| **Max Elevation** | 89.19° (nearly overhead) |
+| **Visibility Start** | 2026-06-30 09:58:05 UTC (11:58 CEST) |
+| **Visibility End** | 2026-06-30 10:10:22 UTC (12:10 CEST) |
+| **Duration** | ~12 min |
+| **Actual Size** | **~54 GB** (25 files × ~2.18 GB) |
+| **Files Delivered** | 25 .pcap files |
+| **Estimated Cost** | ~$120 (on-demand narrowband X-band) |
+| **Scheduled By** | Contact scheduler (unintended — cron re-enabled by terraform apply) |
+
+### SDR Pipeline Execution
+
+| Property | Value |
+|----------|-------|
+| Execution name | `1ae80d1d-run3` |
+| Status | SatDump composites uploaded ✅ — RT-STPS succeeded ✅ — CSPP SDR blocked (missing J01 starter LUTs) |
+| RT-STPS output | 5 RDR files: VIIRS (328 MB), CrIS (216 MB), ATMS (3.3 MB), 2×OMPS |
+| RT-STPS fix | `batch.sh config/jpss1.xml combined.cadu` + `PnEncoded=false` + PN node removed |
+| Composites in S3 | `contacts/2026/06/30/1ae80d1d-.../satdump/chunk_0/VIIRS/` |
+| RDR in S3 | `contacts/2026/06/30/1ae80d1d-.../chunks/chunk_0/rdr/` |
+| Pass coverage | ~68°N, descending over North Pacific → Bering Sea / Alaska |
+| Composites | True Color, Thermal IR, Day Microphysics, 13 others |
+
+### VIIRS Visualization
+
+| Property | Value |
+|----------|-------|
+| Status | Rendered at native resolution (3200×272 px) |
+| Known limitation | Overlay alignment imprecise (~100-300 km) **as rendered at the time** — the swath was stretched across a TLE-estimated bounding box. Superseded 2026-09-01 by per-pixel geolocation ([SATDUMP.md](SATDUMP.md)); re-rendering this contact would fix it |
+| Products in S3 | `products/2026/06/30/1ae80d1d-.../viirs_satdump_true_color_*.png` |
+
+---
+
+## Contact #4
+
+| Property | Value |
+|----------|-------|
+| **Contact ID** | `69c8c149-3b63-4d6e-887e-541c2bce917f` |
+| **Status** | ✅ COMPLETED |
+| **Satellite** | NOAA-20 (NORAD 43013) |
+| **Ground Station** | Stockholm 1 (`eu-north-1`) |
+| **Max Elevation** | 86.24° |
+| **Visibility Start** | 2026-06-30 11:20:06 UTC (13:20 CEST) |
+| **Visibility End** | 2026-06-30 11:28:29 UTC (13:28 CEST) |
+| **Duration** | ~8 min |
+| **Actual Size** | **~34 GB** (17 files × ~2.18 GB) |
+| **Files Delivered** | 17 .pcap files |
+| **Estimated Cost** | ~$80 (on-demand narrowband X-band) |
+| **Scheduled By** | Contact scheduler (unintended — cron re-enabled by terraform apply) |
+
+### SDR Pipeline Execution
+
+| Property | Value |
+|----------|-------|
+| Execution name | `69c8c149-run3` |
+| Status | SatDump composites uploaded ✅ — RT-STPS failed (exit 254) |
+| Composites in S3 | `contacts/2026/06/30/69c8c149-.../satdump/chunk_0/VIIRS/` |
+| Pass coverage | Scandinavia (descending pass) |
+
+---
+
+## Contact #5 — Mediterranean
+
+Planned target rather than an opportunistic pass. Selection rationale, coverage analysis
+and the constraints behind it: [MEDITERRANEAN_PASS.md](MEDITERRANEAN_PASS.md).
+
+| Property | Value |
+|----------|-------|
+| **Contact ID** | `ba2c5446-280f-4985-8ad8-dced8ae8b616` |
+| **Status** | ✅ FLOWN 2026-08-31 — `COMPLETED` at the planned 51.23° |
+| **Satellite** | NOAA-20 (NORAD 43013) |
+| **Ground Station** | Stockholm 1 (`eu-north-1`) — the only onboarded antenna that reaches the Mediterranean |
+| **Max Elevation** | 51.23° |
+| **Pre-pass Start** | 2026-08-31 11:57:49 UTC (13:57 CEST) |
+| **Visibility Start** | 2026-08-31 11:59:49 UTC (13:59 CEST) |
+| **Visibility End** | 2026-08-31 12:10:20 UTC (14:10 CEST) |
+| **Post-pass End** | 2026-08-31 12:12:20 UTC (14:12 CEST) |
+| **Duration** | 10m31s |
+| **Mission Profile** | `arn:aws:groundstation:eu-central-1:471112743408:mission-profile/2655b0f6-8196-44d3-bbc0-3782b1942d34` |
+| **Dataflow** | antenna-downlink (Stockholm 1, `eu-north-1`) → s3-recording (`eu-central-1`) |
+| **Data Format** | VITA-49 DigIF (raw digitized RF, .pcap) |
+| **S3 Destination** | `s3://aws-groundstation-demo-reception-471112743408/year=2026/month=08/day=31/satellite=33f035e1-73f7-47a5-9df8-fbc48636dca8/` |
+| **Received** | 22 × `.pcap`, **43.1 GiB**, gapless 30 s cadence (first +28 s after AOS, last +19 s after LOS) |
+| **Estimated Cost** | ~$110 (on-demand narrowband X-band) |
+| **Scheduled By** | Manual `reserve-contact` (scheduler cron remains DISABLED) |
+| **Selected With** | [scripts/plan_pass.py](../scripts/plan_pass.py) |
+
+
+### Outcome — reception clean, target not calibrated
+
+| Stage | Result |
+|---|---|
+| Reception | 22 chunks, 43.1 GiB, no dropout |
+| SatDump | 22 × `npp_hrd.cadu` (53.6 MiB each) |
+| RT-STPS | 5 RDRs — VIIRS 639.5 MiB, CrIS 184.5, ROTCS 30.7, ATMS 2.9, RONPS 2.7 |
+| CSPP | 8 science granules in → **GEO for 4, calibrated SDR for 1** (35 files, 2.7 GiB) |
+
+**The calibrated granule does not cover the Mediterranean.** It spans 12:06:35–12:07:59 UTC,
+6m46s after AOS, over Scandinavia; the earliest product of any kind starts 12:02:20. The
+basin is scanned in the **first 10–115 s** of this contact, and those granules failed inside
+CSPP with `SDR_PREREQ_ABSENT VIIRS-SCIENCE-RDR` / `PRO_CROSSGRAN_FAIL` — the science RDR was
+too incomplete to calibrate.
+
+That is the predicted failure mode, not a surprise: the basin sits at the southern edge of
+Stockholm's reach and is scanned at 11.6–17.4° elevation at maximum slant range. The pass was
+still the right pick — it was the only offer of 32 putting the basin in the 375 m core swath.
+Retry booked as contact #6.
+
+This contact was also used for three pipeline rehearsals on 2026-09-01; products from those
+runs accumulate alongside the originals (RDR/SDR filenames embed a creation timestamp).
+Pre-rehearsal copies: `s3://groundstation-noaa20-sdr-output-471112743408/rehearsal-backup/2026-09-01/ba2c5446/`.
+
+Rehearsal 3 (13:16–14:13 CEST) is the first fully green run: **22/22 chunk builds**, then
+aggregation to 5 RDRs and 35 SDR/GEO files, reproducing the science outcome above exactly.
+Most of the 57 min was CodeBuild queue time — the account's concurrent-build limit, not the
+Map's `MaxConcurrency`, is what paces the fan-out.
+
+### The basin is in the imagery — via SatDump, not CSPP
+
+No calibrated SDR covers the Mediterranean, but `satdump/chunk_0/VIIRS/` composites plainly
+show **Italy, the Adriatic and Corsica/Sardinia**. SatDump decodes CADU straight to
+composites and tolerates the incomplete science RDR that CSPP rejects, so the two paths
+disagree about what survived the pass. Chunk order is time order, and `chunk_0` is the first
+30 s after AOS — the southernmost, Mediterranean end of the swath.
+
+Rendered products are in `products/2026/08/31/ba2c5446-.../` — True Color, Thermal IR and
+Day Microphysics, each PNG + GeoTIFF + JSON. They exist only from 2026-09-01: the
+visualisation stage had never once succeeded, and the state machine's catch-to-success hid
+it (see [ARCHITECTURE.md](ARCHITECTURE.md)).
+
+**Georeferencing on the SatDump path is better but still not quotable.** `product.cbor`
+carries no timestamp, so bbox resolution fell back to midnight on the contact date and the
+sidecar claimed lon 29.5–52.1°E (the Caspian) for a scene that is obviously the central
+Mediterranean. The acquisition time is available — `satdump/chunk_N/dataset.json` records it,
+11:59:57 UTC for `chunk_0`, eight seconds after AOS — and the orchestrator now passes it as
+`--contact-time`, along with `--pass-duration-seconds` measured from the gap to `chunk_1`
+(29 s on this contact). Re-rendered 2026-09-01 17:25:
+
+| | Before | After |
+|---|---|---|
+| `datetime_utc` | `2026-08-31T00:00:00Z` | `2026-08-31T11:59:57Z` |
+| Bounding box | lat 28.7–52.6, lon 29.5–52.1 (Caspian) | lat 29.5–53.2, lon 3.4–26.0 (Europe) |
+
+The swath geometry was then corrected too (same day): the cross-track extension is now a
+ground arc rather than a flat tangent — 1,494 km against 1,222 km for VIIRS, matching the
+documented ~3,000 km swath — and it is split between latitude and longitude by the ground
+track's bearing instead of being added to both, with longitude scaled by cos(lat). For this
+contact the footprint goes from 23.7° × 22.6° (2,632 × 1,866 km) to 8.5° × 35.2°
+(941 × 2,930 km), against a true footprint of about 3,000 km cross-track by 200 km
+along-track. Both the ephemeris and TLE sources share the corrected helper.
+
+### Expected Coverage
+
+Ascending daytime pass, ~13:20 local solar time. Sub-track 40.3°N 15.2°E (Gulf of
+Taranto) → 75.2°N 15.6°W (Arctic).
+
+| Basin | Off nadir | After AOS | Swath | Sun elev | Glint |
+|-------|-----------|-----------|-------|----------|-------|
+| Balearic Sea | 1013 km | +35 s | edge | 58.9° | 74.5° |
+| Gulf of Lion | 734 km | +75 s | core | 55.7° | 68.9° |
+| Ligurian Sea | 428 km | +75 s | core | 54.2° | 57.8° |
+| North Adriatic | 52 km | +75 s | core | 52.3° | 40.2° |
+| South Adriatic | 222 km | +15 s | core | 53.6° | 28.3° |
+| *Naples* | *63 km* | *+10 s* | *core* | — | *37.2°* |
+
+Not covered: the Tyrrhenian and the Strait of Sicily are scanned before AOS — the
+sub-track is already at 40.3°N when the link opens. The eastern basin (Aegean, Crete,
+Levantine) is unreachable from Stockholm at any time.
+
+The basin is scanned in the opening ~2 minutes at 11–17° link elevation, i.e. at
+maximum slant range. Partial granules there are expected and inherent to the geometry,
+not a pipeline regression.
+
+### Next Steps
+
+- [ ] Check cloud forecast for the western/central Med on 2026-08-30
+- [ ] Confirm `contactStatus` reaches `SCHEDULED`
+- [ ] Verify .pcap arrival after 14:12 CEST
+- [x] Run SDR pipeline with the working CSPP recipe ([DEPLOYMENT.md](DEPLOYMENT.md)) — **done 2026-09-01**, rehearsal 3, 22/22 chunks
+- [x] Produce composites — **done 2026-09-01**, 3 products after fixing the visualisation orchestrator
+- [x] Confirm the `--contact-time` geolocation fix on a rebuilt image — **done 2026-09-01**, bbox moved from the Caspian to Europe
+- [x] Fix the cross-track extension in `_from_tle` — **done 2026-09-01**, spherical arc + bearing split
+- [x] Re-render contact #5 and check the overlay — **done 2026-09-01**. First attempt looked right and was not: the renderer mirrored the geolocated grid across track (`np.fliplr`, correct for a raw swath, wrong once pixels are placed geographically) while the overlay stayed correct, so the map was right and the ground under it was reversed. Scoring the *delivered* PNG rather than the pre-render grid is what caught it — 50.8%, i.e. chance. Fixed in `cf2dacf`
+- [x] True georeferencing from `product.cbor` — **done 2026-09-01**. Pixels are now placed by the ephemeris and scan model and resampled onto a north-up grid, instead of being stretched across a bounding box. Land/sea agreement against known coastlines went from ~50% (chance) to **88%**; the sub-satellite track matches an independent SGP4 propagation to **0.8 km**. See [ARCHITECTURE.md](ARCHITECTURE.md) and `scripts/viirs/scan_geometry.py`
+- [ ] Re-run SatDump over contact #5's 22 chunks on an image built with projection enabled, so the composites are georeferenced by SatDump itself rather than by the fallback
+- [x] Fix `SVOM15`/`GMODO`/`GIGTO` constants in `scripts/viirs/` before the NASA path — **done 2026-08-27**, verified against contact #3's real `GMTCO`/`GITCO`
+- [ ] True-colour composite + I-band (375 m) look at the Adriatic/Naples area
+
+---
+
+## Cancelled Contacts
+
+| Contact ID | Date | Ground Station | Reason |
+|-----------|------|----------------|--------|
+| `9ffe7769` | 2026-06-25 01:21 UTC | Stockholm 1 | Cancelled manually |
+| `bd82c917` | 2026-06-25 11:13 UTC | Stockholm 1 | Cancelled manually |
+
+---
+
+## SDR Pipeline Infrastructure
+
+Deployed 2026-06-25 via Terraform (`enable_sdr_pipeline = true`).
+
+| Resource | Value |
+|----------|-------|
+| State Machine | `arn:aws:states:eu-central-1:471112743408:stateMachine:groundstation-noaa20-sdr-pipeline` |
+| CodeBuild Project | `groundstation-noaa20-sdr-pipeline` |
+| ECR Repository | `471112743408.dkr.ecr.eu-central-1.amazonaws.com/groundstation-noaa20-sdr-pipeline` |
+| Docker Image | `latest` / `v7` (SatDump 1.2.2 + RT-STPS 7.0+P1 + CSPP SDR 4.1.1) |
+| Output Bucket | `groundstation-noaa20-sdr-output-471112743408` |
+| EventBridge Rule | `groundstation-noaa20-pcap-uploaded` (auto-triggers on new .pcap uploads) |
+| Region | `eu-central-1` |
+
+### Pipeline Processing Chain
+
+```
+.pcap (VITA-49 DigIF) → I/Q Extraction (.cs8) → SatDump npp_hrd (.cadu)
+→ RT-STPS 7.0 (RDR HDF5) → CSPP SDR 4.1.1 (SDR + GEO HDF5 Level 1)
+```
+
+### Software Versions (in Docker image)
+
+| Tool | Version | Role |
+|------|---------|------|
+| SatDump | 1.2.2 | Baseband → CADU (QPSK demod + Viterbi + RS) |
+| RT-STPS | 7.0 + Patch 1 | CADU → RDR (CCSDS → HDF5 Level 0) |
+| CSPP SDR | 4.1.1 | RDR → SDR + GEO (calibrated HDF5 Level 1) |
+| Python | 3.x | I/Q extraction, geolocation, manifest, metrics |
+
+---
+
+## Contact #6 — Mediterranean retry (scheduled)
+
+Second attempt at the objective contact #5 missed. Chosen on the metric that actually
+failed: link elevation **while the basin is scanned**.
+
+| Property | Value |
+|----------|-------|
+| **Contact ID** | `8fb38af8-080a-445a-bf10-50d14f4ba85e` |
+| **Status** | 📅 SCHEDULED (reserved 2026-08-31) |
+| **Ground Station** | Stockholm 1 (`eu-north-1`) |
+| **Max Elevation** | 61.27° (AWS) — planner computed 56.9°, a 4.4° spread worth watching |
+| **Visibility** | 2026-09-06 11:47:16 → 11:57:59 UTC (10m43s) |
+| **Pre/post pass** | 11:45:16 → 11:59:59 UTC |
+| **Basins** | 6 imaged, 5 in the 375 m core swath |
+| **Link over basin** | Gulf of Lion and Ligurian at **19.5°**, N. Adriatic **18.8°** (293 km off nadir) — against 11.6–17.4° on contact #5 |
+| **Best glint** | 39.3° — clean true-colour side of the glint conflict |
+| **Estimated Cost** | ~$110 |
+
+**Residual risk:** every offered Stockholm pass scans the basin in the first 5–115 s after
+AOS — structural, since the Mediterranean sits at the southern edge of reach. On contact #5
+nothing before ~AOS+2.5 min survived calibration. Higher elevation improves the link budget
+but does not move the basin out of that window.
+
+
+---
+
+## Contact #7 — Oregon granule-yield pass (scheduled)
+
+First pass flown against the **refined pipeline** (post Well-Architected refinement,
+applied 2026-10-13 — see [`ARCHITECTURE_REFINEMENT.md`](ARCHITECTURE_REFINEMENT.md)). Chosen
+to **maximise granule yield** (longest, highest-elevation window) rather than to image a
+target — the goal is a clean, high-volume end-to-end validation of the refined pipeline on
+warm (STANDARD) data.
+
+| Property | Value |
+|----------|-------|
+| **Contact ID** | `dcef1518-c454-401f-bdcd-dc2e73fe89a5` |
+| **Status** | 📅 SCHEDULED (reserved 2026-10-13) |
+| **Satellite** | NOAA-20 (NORAD 43013) |
+| **Ground Station** | Oregon 1 (`us-west-2`) |
+| **Max Elevation** | 83.06° (near-overhead — highest of all 99 offered windows) |
+| **Pre-pass Start** | 2026-10-17 20:41:12 UTC |
+| **Visibility Start** | 2026-10-17 20:43:12 UTC |
+| **Visibility End** | 2026-10-17 20:55:14 UTC |
+| **Post-pass End** | 2026-10-17 20:57:14 UTC |
+| **Duration** | 12m02s (722s) — **~8.5 granules est** (longest window offered) |
+| **Local solar time** | ~13:43 (daytime pass — true-colour usable, not just thermal) |
+| **Mission Profile** | async DigIF (`32a1fdbb-99f1-413d-8905-436c5fccb382`) — refined SDR pipeline auto-triggers on COMPLETED |
+| **Data Format** | VITA-49 DigIF (raw digitized RF, .pcap) |
+| **Estimated Cost** | ~$110–130 (on-demand narrowband X-band) |
+| **Scheduled By** | Manual `reserve-contact` (scheduler cron remains DISABLED) |
+| **Selected From** | real AWS offer set (99 AVAILABLE windows across 5 stations), ranked by duration × elevation |
+
+### Why this pass
+
+Ranked #1 for granule yield of 99 real offered windows: tied-longest window (722s) with the
+highest max elevation (83.06°). Granule count scales with contiguous high-SNR downlink
+duration, and a near-overhead pass maximises both the visibility window and the link budget —
+best conditions for complete granules across all instruments (VIIRS, ATMS, CrIS, OMPS×2). An
+Ohio 10-19 window was marginally longer (802s / ~9.4 granules, 78.9°) but flies 2 days later;
+Oregon was chosen for the earlier end-to-end validation.
+
+### Outcome — FLOWN 2026-10-17, pipeline success ✅
+
+Verified via `python scripts/verify_pass.py dcef1518-... --date 2026/10/17` → **OVERALL: PASS**.
+Report saved to `output/contact-07_oregon-1_2026-10-17/verify_pass_report.{txt,json}`.
+
+| Check | Result |
+|---|---|
+| Contact | COMPLETED; async pipeline auto-triggered on warm STANDARD data (no restore needed) |
+| SDR execution | SUCCEEDED, 39m51s |
+| Chunk metrics (REL-3) | ✅ `ChunksSucceeded=50, ChunksFailed=0` — every chunk processed |
+| Products in S3 (truth) | ✅ **9/9** — True Color, Thermal IR, Day Microphysics × PNG+GeoTIFF+JSON |
+| CADU / science | ✅ 415 SatDump objects + **38 SDR/GEO files** — CSPP (calibrated) branch succeeded on warm data |
+| Alarms | ✅ all three OK (chunks-all-failed, products-written-zero, visualization-failed) |
+| PERF-1 LUT cache | cold on this run → `sdr_luts.sh` fallback used (weekly refresh had not yet populated `lut-cache/`); expected, next run should hit the fast path |
+
+**First clean end-to-end validation of the refined pipeline on a real pass.** High granule yield
+as intended (50 chunks, full SDR product set).
+
+### Two bugs the live run exposed (both fixed 2026-10-19)
+
+The refined pipeline worked, but verifying this real pass surfaced two defects that plan-only
+gates could not have caught — documented here as the continuous-learning record:
+
+1. **`ProductsWritten` metric measured at the wrong moment.** The viirs orchestrator Lambda
+   counted the `products/` prefix immediately after `start_build()` (dispatch), but the
+   CodeBuild render writes the products minutes later — so the metric always published `0`.
+   Fix: emission moved into the visualization buildspec's `post_build` phase (after
+   `aws s3 sync`), plus a `cloudwatch:PutMetricData` grant on the CodeBuild service role.
+   This contact's metric is a permanent `0` (metrics can't be backfilled) — hence the WARN,
+   not FAIL, in its report. See `aws-knowledge.md` → "Metrics That Measure Build Output...".
+
+2. **`verify_pass.py` used a fixed 6h metric lookback** → false FAIL when verifying a pass
+   >6h after it ran. Fix: the metric window is now derived from the SFN execution times.
+   Also: the tool now honours "S3 is truth, metric is corroboration" — a pass with products
+   in S3 but a stale/zero metric is PASS (WARN on the metric), while zero products in S3
+   stays a hard FAIL (the ba2c5446 guard).

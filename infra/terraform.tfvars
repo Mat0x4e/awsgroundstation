@@ -11,6 +11,8 @@ satellite_onboarded        = true # NOAA-20 (NORAD 43013) confirmed onboarded 20
 enable_processing_pipeline = false
 enable_sdr_pipeline        = true
 enable_sync_pipeline       = true
+# clean-compute-pipeline: Batch migration is deployed (Stages 1-2). Must stay true -- the SFN Map and async aggregation are Batch-only. See docs/CLEAN_COMPUTE_PIPELINE_HANDOFF.md.
+enable_batch_compute       = true
 aws_profile                = "AWSAdminAccess-471112743408"
 satellite_id               = "33f035e1-73f7-47a5-9df8-fbc48636dca8" # NOAA-20 UUID from list-satellites
 

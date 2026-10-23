@@ -3,6 +3,9 @@
 How a booked satellite contact becomes calibrated, geolocated imagery — the services, the
 sequence, and the constraints that shaped both.
 
+> New to the domain vocabulary (DigIF, CADU, RDR, SDR, VIIRS, demod/decode, granule...)?
+> See [`GLOSSARY.md`](GLOSSARY.md) for the single reference.
+
 Diagram source: [`diagrams/architecture.yaml`](diagrams/architecture.yaml), rendered with
 [awsdac](https://github.com/awslabs/diagram-as-code) — `awsdac docs/diagrams/architecture.yaml -o docs/diagrams/out/architecture.png -f`.
 

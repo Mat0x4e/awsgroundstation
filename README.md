@@ -41,6 +41,7 @@ end-to-end sequence with real timings, and the constraints that shaped the desig
 
 | Document | Read it when |
 |---|---|
+| [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | You hit an acronym (DigIF, CADU, RDR, SDR, VIIRS, demod/decode, granule...) - the single domain glossary |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | You want the system in one picture and one sequence |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | **Before touching CSPP, or to see what is deployed.** The exact conditions CSPP needs — J01 LUTs, `sdr_luts.sh` online, and the RDR filename rule that caused a multi-week dead end — plus current deployment state and the hard-won specifics |
 | [`docs/MEDITERRANEAN_PASS.md`](docs/MEDITERRANEAN_PASS.md) | Planning a targeted acquisition: reachability, the ~10° Stockholm mask, the 7-day booking wall |

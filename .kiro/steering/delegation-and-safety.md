@@ -47,8 +47,9 @@ without needing to invoke a workflow file. Keep this file short so the always-on
 
 ## Source of truth
 
-- `.kiro/specs/` is the single source of truth for requirements/design/tasks. The legacy
-  `.agents/` tree is historical only.
+- `.kiro/specs/` is the single source of truth for requirements/design/tasks. (A legacy
+  `.agents/` task tracker existed in the demo era; it was removed 2026-10-23 -- git history
+  retains it.)
 - Deeper context lives in: `.kiro/steering/aws-knowledge.md` (live-learned AWS gotchas),
   `.kiro/steering/wa-delta-workflow.md` (`#wa-delta-workflow`, the four-gate delivery workflow),
   and `docs/` (architecture, runbook, pass history, reviews).

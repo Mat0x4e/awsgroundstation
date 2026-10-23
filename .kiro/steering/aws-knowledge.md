@@ -1,8 +1,16 @@
 ---
-inclusion: always
+inclusion: fileMatch
+fileMatchPattern: "infra/**/*.tf|infra/**/*.tfvars|buildspecs/**|scripts/**/*.py|scripts/**/*.sh|lambdas/**/*.py|tests/**/*.py|docker/**"
 ---
 
 # AWS Service Knowledge — Ground Station SDR Pipeline
+
+> Inclusion note: this file is `fileMatch` (loads only when infra / compute / script / CI
+> files are in context), not `always` -- the seven case studies below all pertain to those
+> paths and are a heavy, growing payload. The two cross-cutting rules they imply (ASCII-only
+> Terraform `description`/`name`/tag values; verify by product evidence, not exit code) are
+> restated in the always-on `.kiro/steering/delegation-and-safety.md`, so they apply to every
+> session regardless.
 
 Project-local learnings about AWS service behaviour, constraints, and gotchas
 encountered during live pipeline runs. Supplement to global AWS knowledge.

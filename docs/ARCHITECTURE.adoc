@@ -1,0 +1,162 @@
+= protogroundstation -- Current Architecture
+:doctype: article
+:description: NOAA-20 X-band DigIF to geolocated VIIRS Level 1, on AWS Batch.
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:source-highlighter: rouge
+:account: 471112743408
+:region: eu-central-1
+
+Current, deployed architecture of the NOAA-20 direct-broadcast reception and processing
+pipeline. Runtime compute runs on *AWS Batch* (migrated from CodeBuild on 2026-10-22, per
+ADR-002 / the `clean-compute-pipeline` spec; `enable_batch_compute = true`).
+
+[NOTE]
+====
+New to the domain vocabulary (DigIF, CADU, RDR, SDR, VIIRS, demod/decode, granule)? See
+xref:GLOSSARY.md[the glossary]. This document is the AsciiDoc companion to the Markdown
+xref:ARCHITECTURE.md[ARCHITECTURE.md]; both describe the same deployed system.
+====
+
+== Overview
+
+The project rents an AWS Ground Station antenna to receive NOAA-20's X-band High Rate Data
+downlink as raw digitized radio (DigIF, VITA-49) delivered to S3, then processes it, entirely
+in code, into calibrated, geolocated VIIRS imagery.
+
+[cols="1,3",options="header"]
+|===
+| Property | Value
+
+| Account / region | `{account}` / `{region}` (antennas cross-region in `eu-north-1` / `us-west-2` / `us-east-2`)
+| Target satellite | NOAA-20 / JPSS-1 (NORAD 43013)
+| Delivery mode (deployed) | Asynchronous DigIF -> S3
+| Runtime compute | AWS Batch -- Spot fan-out + on-demand aggregation + on-demand render
+| Orchestration | AWS Step Functions (per contact)
+| State | Terraform, S3 backend (`groundstation-noaa20-tfstate-{account}`, `use_lockfile`)
+| Per contact | ~10 min antenna time, ~43 GB VITA-49, ~90-100 min wall-clock to Level 1
+|===
+
+== End-to-end flow
+
+[source]
+----
+                        NOAA-20 (X-band HRD, ~15 Mbps, QPSK/RHCP)
+                                     |
+                           AWS Ground Station antenna
+                            (Stockholm 1 / Ohio 1 / Oregon 1 ...)
+                                     | DigIF (VITA-49), cross-region
+                                     v
+                     S3 reception bucket  (~17-27 x ~2.18 GB .pcap chunks)
+                                     | EventBridge: contact COMPLETED
+                                     v
+                          Step Functions state machine
+                                     |
+          +--------------------------+---------------------------+
+          | Map (<=19 concurrent), per chunk:                    |
+          |   SubmitBatchChunk  ::: batch:submitJob.sync         |
+          |      -> AWS Batch SPOT CE / fanout-queue / chunk job |
+          |         iq_extract.py -> satdump_process.sh          |
+          |         -> .cadu + composites -> S3 contacts/        |
+          +--------------------------+---------------------------+
+                                     | CheckResults
+                                     v
+          SubmitBatchAggregation  ::: batch:submitJob.sync  (RTSTPS=on)
+             -> AWS Batch ON-DEMAND CE / agg-queue / aggregation job
+                concat CADU -> RT-STPS -> RDR (L0) -> CSPP -> SDR + GEO (L1) -> S3
+                                     |
+                                     v
+          StartVisualization -> viirs-orchestrator Lambda (RENDER_COMPUTE=batch)
+             -> submit_job -> AWS Batch ON-DEMAND CE / agg-queue / render job
+                (dedicated viirs-visualization image, RENDER_BRANCH=satdump|nasa)
+                render_entrypoint.sh -> .png + .geotiff + .json -> S3 products/
+----
+
+== Signal and processing chain
+
+[cols="1,2,2",options="header"]
+|===
+| Step | Tool | Output
+
+| Demod + FEC decode | SatDump (QPSK, Viterbi 1/2, NRZ-M, Reed-Solomon) | `.cadu` (clean CCSDS frames)
+| Level 0 | RT-STPS 7.0 | RDR HDF5 (VIIRS, CrIS, ATMS, 2x OMPS)
+| Level 1 | CSPP SDR 4.1.1 | SDR (calibrated radiances) + GEO (per-pixel lat/lon, terrain-corrected)
+| Visualization | render_entrypoint.sh (SatDump or NASA branch) | georeferenced PNG + GeoTIFF + JSON
+|===
+
+[TIP]
+====
+PN derandomization subtlety: on the async path SatDump derandomizes PN upstream, so RT-STPS
+runs `PnEncoded=false`. On the (blocked) sync demod/decode path the antenna does not, so RT-STPS
+would run `PnEncoded=true`. Reversing this silently discards every frame.
+====
+
+== Compute: AWS Batch
+
+Two compute environments, one shared launch template (200 GiB aws/ebs-encrypted root, IMDSv2).
+
+[cols="1,1,2",options="header"]
+|===
+| Compute environment | Allocation | Carries
+
+| Spot (`fanout-ce`) | `SPOT_CAPACITY_OPTIMIZED`, c6i/m6i.2xlarge | `fanout-queue` -> `chunk` job (per-chunk SatDump; idempotent, Spot-safe with retry/evaluateOnExit)
+| On-demand (`agg-ce`) | `BEST_FIT_PROGRESSIVE`, c6i/m6i.2xlarge | `agg-queue` -> `aggregation` job (RT-STPS + CSPP) AND `render` job (VIIRS visualization)
+|===
+
+[IMPORTANT]
+====
+The `aggregation` job uses the shared `sdr-pipeline` ECR image and fetches
+`scripts/aggregation_entrypoint.sh` from S3 at start (no image rebuild to update it). The
+`render` job uses the *dedicated* `viirs-visualization` ECR image and runs the image-baked
+`scripts/viirs/render_entrypoint.sh` (changing it DOES require an image rebuild). Both ride the
+same on-demand CE / `agg-queue`, but run different images.
+====
+
+== Step Functions states
+
+State machine `groundstation-noaa20-sdr-pipeline` (`infra/modules/sdr_pipeline/step_functions.tf`).
+
+[cols="2,1,3",options="header"]
+|===
+| State | Type | Purpose
+
+| `DeriveDateOnly` -> `BuildContactDate` | Pass | event timestamp -> `YYYY/MM/DD`
+| `WaitForDelivery` | Wait | 120 s, so the last chunk has landed
+| `ListChunks` / `ShapeInput` / `CheckChunksFound` | Task/Pass/Choice | list the contact's chunks; fail loudly on empty
+| `CheckProcessingMarker` / `WriteProcessingMarker` | Task | idempotence via `contacts/{id}/.processing` (no date segment)
+| `ParallelProcessing` | Map | up to 19 concurrent, `ToleratedFailurePercentage=100`; each item `SubmitBatchChunk`
+| `CheckResults` | Pass | normalise Map output (former CodeBuild agg poll-loop retired)
+| `SubmitBatchAggregation` | Task | `batch:submitJob.sync`, on-demand, `RTSTPS=on`
+| `StartVisualization` | Task | invoke the orchestrator Lambda; catches to `NotifyVisualizationFailed` (SNS) then succeeds
+|===
+
+[WARNING]
+====
+A `SUCCEEDED` execution is not proof of imagery. `StartVisualization` catches to success so a
+render failure does not fail the run. Verify against `products/{date}/{contact}/` and a non-zero
+`ProductsWritten` metric, never the execution status.
+====
+
+== Key constraints
+
+* *CSPP needs the internet* (`sdr_luts.sh` fetches LUTs from `jpssdb.ssec.wisc.edu` over HTTP 80); the Batch on-demand CE security group opens 80 + 443 egress. PERF-1 caches LUTs in S3 so warm runs skip the ~10-min fetch.
+* *ASCII-only* in Terraform `description` / `name` / tag values, or `apply` fails at create time.
+* *Image-baked code* (render) requires an ECR rebuild from the branch that holds the change; the image-build CodeBuild projects build from GitHub `main`.
+* *Hand-installed `/opt/rt-stps` + `/opt/SDR_4_1`* exist outside IaC on the aggregation/receiver instances; drift is detected via SSM, full reconstruction deferred.
+
+== Sync (demod/decode) path -- built, blocked
+
+A second mission profile delivers antenna-side demodulated/decoded frames live to a receiver EC2
+(RT-STPS on the instance, then the shared Batch aggregation job with `RTSTPS=off`). It is fully
+deployed but *cannot be flown*: NOAA-20 is onboarded for DigIF but not for demod/decode on this
+account (zero schedulable sync windows). See xref:SYNC_ONBOARDING_INVESTIGATION.md[the onboarding
+investigation].
+
+== Decision records
+
+* *ADR-001* -- chose AWS Batch on EC2 Spot for the chunk fan-out. Accepted (contact-7 validation).
+* *ADR-002* -- extended that to remove CodeBuild from the whole runtime. Accepted and implemented via `clean-compute-pipeline`.
+
+See xref:ARCHITECTURE_REFINEMENT.md[ARCHITECTURE_REFINEMENT.adoc/.md] for the full ADRs.

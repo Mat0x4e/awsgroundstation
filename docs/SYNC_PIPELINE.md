@@ -34,7 +34,7 @@ sequenceDiagram
     participant ARM as receiver_arm Lambda
     participant EC2 as Receiver EC2
     participant SFN as Step Functions
-    participant CB as CodeBuild (CSPP only)
+    participant AGG as AWS Batch (CSPP only, RTSTPS=off)
     participant VIZ as VIIRS visualization
 
     Note over GS: T-600s PREPASS
@@ -52,11 +52,17 @@ sequenceDiagram
     EC2->>EC2: RT-STPS jpss1.xml, PnEncoded=true (unlike the async path)
     EC2-->>SFN: RDR HDF5 + raw CADU in S3
     SFN->>EC2: stop instance (cost)
-    SFN->>CB: StartBuild (CSPP only — RT-STPS already done)
-    CB->>CB: sdr_luts.sh (needs internet, same reason as async pipeline)
-    CB->>CB: viirs_sdr.sh -> SDR + GEO HDF5
+    SFN->>AGG: SubmitBatchAggregation (RTSTPS=off, CSPP only -- RT-STPS already done)
+    AGG->>AGG: sdr_luts.sh (needs internet, same reason as async pipeline)
+    AGG->>AGG: viirs_sdr.sh -> SDR + GEO HDF5
     SFN->>VIZ: StartVisualization (same orchestrator Lambda, unmodified)
 ```
+
+> NOTE: the sync aggregation now routes to the shared on-demand **AWS Batch** job
+> (`RTSTPS=off`, `...-agg-queue`, `...-aggregation` job def) when `enable_batch_compute=true`;
+> the CodeBuild `aggregation_sync.yml` path is the retained fallback. This Batch sync path is
+> coded and deployed but **never run on real data** (no sync contact can be scheduled -- see
+> the onboarding blocker above).
 
 ## Component reference
 
@@ -67,8 +73,9 @@ sequenceDiagram
 | Pre-AOS arm | `receiver_arm` Lambda: start EC2, poll running + SSM Online, `SendCommand` to arm the listener | [`lambda.tf`](../infra/modules/sync_pipeline/lambda.tf), [`lambdas/receiver_arm/handler.py`](../lambdas/receiver_arm/handler.py) |
 | Live listener | UDP socket bound before AOS, strips a VITA-49-style header per packet, writes the decoded CCSDS frame stream to disk | [`scripts/sync_receiver_listen.py`](../scripts/sync_receiver_listen.py) |
 | Post-LOS handoff | Stop listener, run RT-STPS locally, upload CADU + RDR to S3 | [`scripts/sync_receiver_finish.sh`](../scripts/sync_receiver_finish.sh) |
-| Orchestration | Step Functions: wait, `FinishReceiver` (SSM), poll, stop EC2, CSPP CodeBuild, poll, `StartVisualization` | [`step_functions.tf`](../infra/modules/sync_pipeline/step_functions.tf) |
-| Aggregation | CSPP-only CodeBuild project, reuses `sdr_pipeline`'s ECR image | [`codebuild.tf`](../infra/modules/sync_pipeline/codebuild.tf), [`buildspecs/aggregation_sync.yml`](../buildspecs/aggregation_sync.yml) |
+| Orchestration | Step Functions: wait, `FinishReceiver` (SSM), poll, stop EC2, `ChooseAggregationCompute` -> `SubmitBatchAggregation` (RTSTPS=off) OR CodeBuild fallback, `StartVisualization` | [`step_functions.tf`](../infra/modules/sync_pipeline/step_functions.tf) |
+| Aggregation (live) | On-demand **AWS Batch** aggregation job, `RTSTPS=off` (CSPP only), shared with the async pipeline (`...-agg-queue`, `...-aggregation`), reuses `sdr_pipeline`'s ECR image | [`infra/modules/batch_compute/`](../infra/modules/batch_compute/), [`scripts/aggregation_entrypoint.sh`](../scripts/aggregation_entrypoint.sh) |
+| Aggregation (fallback) | CSPP-only CodeBuild project (retained until the Batch sync path is validated + task 8) | [`codebuild.tf`](../infra/modules/sync_pipeline/codebuild.tf), [`buildspecs/aggregation_sync.yml`](../buildspecs/aggregation_sync.yml) |
 | Triggers | PREPASS → Lambda direct invoke; COMPLETED → state machine. Both filtered on this module's `missionProfileArn` | [`eventbridge.tf`](../infra/modules/sync_pipeline/eventbridge.tf) |
 | Alarms | EC2 status checks (with auto-recovery), Lambda errors, Step Functions failures → shared SNS topic | [`monitoring.tf`](../infra/modules/sync_pipeline/monitoring.tf) |
 

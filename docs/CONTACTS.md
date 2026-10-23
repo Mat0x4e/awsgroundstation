@@ -349,14 +349,20 @@ not a pipeline regression.
 
 Deployed 2026-06-25 via Terraform (`enable_sdr_pipeline = true`).
 
+> **Updated 2026-10-22.** Runtime compute migrated from CodeBuild to AWS Batch. The shared
+> `groundstation-noaa20-sdr-pipeline` CodeBuild project (fan-out + async aggregation) was
+> **retired** (task 8); fan-out now runs on Batch Spot and aggregation on a Batch on-demand
+> CE. The table below is kept for history.
+
 | Resource | Value |
 |----------|-------|
 | State Machine | `arn:aws:states:eu-central-1:471112743408:stateMachine:groundstation-noaa20-sdr-pipeline` |
-| CodeBuild Project | `groundstation-noaa20-sdr-pipeline` |
-| ECR Repository | `471112743408.dkr.ecr.eu-central-1.amazonaws.com/groundstation-noaa20-sdr-pipeline` |
+| Runtime compute (current) | AWS Batch: `...-fanout-queue` (Spot, `...-chunk`), `...-agg-queue` (on-demand, `...-aggregation` + `...-render`) |
+| CodeBuild Project (retired) | `groundstation-noaa20-sdr-pipeline` — destroyed in the Batch cutover (task 8) |
+| ECR Repository | `471112743408.dkr.ecr.eu-central-1.amazonaws.com/groundstation-noaa20-sdr-pipeline` (+ dedicated `...-viirs-visualization` for render) |
 | Docker Image | `latest` / `v7` (SatDump 1.2.2 + RT-STPS 7.0+P1 + CSPP SDR 4.1.1) |
 | Output Bucket | `groundstation-noaa20-sdr-output-471112743408` |
-| EventBridge Rule | `groundstation-noaa20-pcap-uploaded` (auto-triggers on new .pcap uploads) |
+| EventBridge Rule | `groundstation-noaa20-contact-completed-sdr` (per-contact; `...-pcap-uploaded` superseded, DISABLED) |
 | Region | `eu-central-1` |
 
 ### Pipeline Processing Chain
@@ -385,7 +391,7 @@ failed: link elevation **while the basin is scanned**.
 | Property | Value |
 |----------|-------|
 | **Contact ID** | `8fb38af8-080a-445a-bf10-50d14f4ba85e` |
-| **Status** | 📅 SCHEDULED (reserved 2026-08-31) |
+| **Status** | ⚠️ OUTCOME NOT RECORDED. Was reserved 2026-08-31 for 2026-09-06; that date is now well in the past (contact #7 flew 2026-10-17), but no flown/failed/cancelled result was ever logged here. **Needs verification** against Ground Station history / S3 output, then update to the real disposition. |
 | **Ground Station** | Stockholm 1 (`eu-north-1`) |
 | **Max Elevation** | 61.27° (AWS) — planner computed 56.9°, a 4.4° spread worth watching |
 | **Visibility** | 2026-09-06 11:47:16 → 11:57:59 UTC (10m43s) |
@@ -448,7 +454,7 @@ Report saved to `output/contact-07_oregon-1_2026-10-17/verify_pass_report.{txt,j
 |---|---|
 | Contact | COMPLETED; async pipeline auto-triggered on warm STANDARD data (no restore needed) |
 | SDR execution | SUCCEEDED, 39m51s |
-| Chunk metrics (REL-3) | ✅ `ChunksSucceeded=50, ChunksFailed=0` — every chunk processed |
+| Chunk metrics (REL-3) | ✅ `ChunksSucceeded=50, ChunksFailed=0` — every chunk processed (this is the original **CodeBuild** live run; the later Batch Stage-1 replay of the same contact produced 25/25 chunks — a different run, see below) |
 | Products in S3 (truth) | ✅ **9/9** — True Color, Thermal IR, Day Microphysics × PNG+GeoTIFF+JSON |
 | CADU / science | ✅ 415 SatDump objects + **38 SDR/GEO files** — CSPP (calibrated) branch succeeded on warm data |
 | Alarms | ✅ all three OK (chunks-all-failed, products-written-zero, visualization-failed) |
@@ -467,11 +473,29 @@ gates could not have caught — documented here as the continuous-learning recor
    CodeBuild render writes the products minutes later — so the metric always published `0`.
    Fix: emission moved into the visualization buildspec's `post_build` phase (after
    `aws s3 sync`), plus a `cloudwatch:PutMetricData` grant on the CodeBuild service role.
-   This contact's metric is a permanent `0` (metrics can't be backfilled) — hence the WARN,
-   not FAIL, in its report. See `aws-knowledge.md` → "Metrics That Measure Build Output...".
+   This contact's *original CodeBuild* metric is a permanent `0` (metrics can't be
+   backfilled) — hence the WARN, not FAIL, in its report. (The later 2026-10-22 Batch
+   re-render DID emit it: `ProductsWritten=11` satdump / `14` nasa — see below.) See
+   `aws-knowledge.md` → "Metrics That Measure Build Output...".
 
 2. **`verify_pass.py` used a fixed 6h metric lookback** → false FAIL when verifying a pass
    >6h after it ran. Fix: the metric window is now derived from the SFN execution times.
    Also: the tool now honours "S3 is truth, metric is corroboration" — a pass with products
    in S3 but a stale/zero metric is PASS (WARN on the metric), while zero products in S3
    stays a hard FAIL (the ba2c5446 guard).
+
+### Re-rendered on AWS Batch — 2026-10-22 (clean-compute-pipeline validation)
+
+Contact-7's warm data is the baseline for the CodeBuild -> AWS Batch migration (ADR-002 /
+the `clean-compute-pipeline` spec). The pipeline stages were validated on it in two waves:
+
+| Stage | Compute | Result |
+|---|---|---|
+| Stage 1 — chunk fan-out | AWS Batch on EC2 Spot | **25/25 chunks**, ~19 concurrent (Batch replay of the same contact; the original CodeBuild live run above reported 50 chunks — a different run/segmentation, not a discrepancy to reconcile) |
+| Stage 2 — aggregation (async, `RTSTPS=on`) | AWS Batch on-demand | full run SUCCEEDED (~21 min) |
+| Stage 3 — render, **satdump** branch | AWS Batch render job (dedicated viirs image), dispatched via the Lambda (`RENDER_COMPUTE=batch`) | SUCCEEDED, `ProductsWritten=11` |
+| Stage 3 — render, **nasa** branch | AWS Batch render job (direct submit) | SUCCEEDED, `ProductsWritten=14` |
+
+Verified by completion evidence (ProductsWritten emitted post-upload, `render_entrypoint.sh
+complete`, fresh `products/2026/10/17/dcef1518-.../` timestamps), not just exit code. Full
+record in [`CLEAN_COMPUTE_PIPELINE_HANDOFF.md`](CLEAN_COMPUTE_PIPELINE_HANDOFF.md).

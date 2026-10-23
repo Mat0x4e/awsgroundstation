@@ -268,7 +268,7 @@ Quantified from the NASA THERMAL GeoTIFF (read with rasterio):
 - Pixel size ~0.0067 deg = ~0.48 km (lon @ 49.5N) x ~0.75 km (lat) -> **sub-km per-pixel,
   confirming the NASA-precision claim quantitatively.**
 
-### FIX ITEM 1 (real bug) -- NASA true_color GeoTIFF is missing despite the sidecar advertising it
+### FIX ITEM 1 (real bug) -- RESOLVED 2026-10-23: NASA true_color GeoTIFF was missing despite the sidecar advertising it
 `viirs_nasa_true_color_<id>.json` has `"geotiff_file": "...true_color...tif"`, but that `.tif`
 does NOT exist in S3 (head-object -> 404). Only the PNG + JSON were written for the NASA
 true-color product; the NASA thermal product has its `.tif`. So on the latest pass the NASA
@@ -277,6 +277,16 @@ specific to the NASA true-color branch of the render. Investigate `scripts/viirs
 true-color GeoTIFF export (and make the sidecar `geotiff_file` field conditional on the file
 actually being written, so it stops advertising a non-existent product). Python change ->
 python subagent.
+
+> RESOLVED 2026-10-23. Root cause: GeoTIFFExporter.export_nasa only handled
+> single-band data; the True Color (H,W,3) RGB array broke the finite-mask with a
+> broadcast ValueError that the best-effort try/except swallowed. Fixed export_nasa to
+> write a 3-band GeoTIFF (shared triangulation, memory-bounded strips) and made the
+> sidecar set geotiff_file only after a successful export (commit 906e8b7, test
+> tests/test_geotiff_exporter.py). Verified live: rebuilt the viirs image from the
+> branch, re-ran the NASA render on contact-7, and confirmed
+> viirs_nasa_true_color_<id>.tif now exists (129 MB, 3-band EPSG:4326). Thermal .tif
+> unaffected (43 MB).
 
 ### FIX ITEM 2 (minor) -- NASA sidecar provenance fields are placeholders
 Both NASA sidecars carry `granule_id: "unknown"`, `orbit_number: 0`, `datetime_utc: "unknown"`.

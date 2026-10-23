@@ -404,12 +404,18 @@ the same class of bug as filtering on a field that is merely missing.
 
 ## ADR-002 — Whole-pipeline compute platform: remove CodeBuild from the runtime (extends ADR-001)
 
-**Status:** Accepted (direction) — implementation via spec `clean-compute-pipeline`
-**Date:** 2026-10-09
+**Status:** Accepted and IMPLEMENTED (2026-10-22) — delivered via spec `clean-compute-pipeline`
+(Stages 1-3), merged to `main` and deployed. Fan-out, aggregation, and render all run on AWS
+Batch (`enable_batch_compute = true`); the runtime CodeBuild projects are retired or retained
+only as flag-gated fallbacks. The one exception is the SYNC aggregation branch (`RTSTPS=off`):
+coded and deployed but not yet run on real data (blocked by demod/decode onboarding, see
+`SYNC_ONBOARDING_INVESTIGATION.md`).
+**Date:** 2026-10-09 (accepted direction); 2026-10-22 (implemented / deployed)
 **Extends:** ADR-001 (which decided fan-out only). This ADR widens the decision to **every**
 runtime compute stage, both branches, end-to-end to `.png` + `.geotiff` + `.json`.
-**Depends on:** PERF-1 (S3 LUT cache) — DEPLOYED. The compute-bakeoff spot measurement is run
-as the first implementation step (strangler), not as a separate pre-gate.
+**Depends on:** PERF-1 (S3 LUT cache) — DEPLOYED. The compute-bakeoff spot measurement was run
+as the first implementation step (strangler), not as a separate pre-gate; the production
+Stage-1 run on contact-7 served as the measurement (see ADR-001 acceptance note).
 
 ### Context — the scope ADR-001 left open
 
@@ -420,9 +426,14 @@ all?* The honest answer is that "refined pipeline" hardened CodeBuild rather tha
 and off-CodeBuild was recorded as an un-executed recommendation. This ADR closes that gap by
 deciding the compute platform for the whole pipeline, not one stage.
 
-### Current compute placement (grounded in the Terraform/handlers)
+### Compute placement — the pre-migration baseline this ADR replaced
 
-| Stage | Today | Fit problem |
+> The "Was (pre-migration)" column below is the RETIRED CodeBuild baseline that motivated this
+> ADR. As of 2026-10-22 it has been replaced: fan-out -> Batch Spot; aggregation -> Batch
+> on-demand; render -> Batch on-demand (dedicated viirs image); sync RT-STPS stays on EC2;
+> sync aggregation -> shared Batch on-demand job (RTSTPS=off, not yet validated on real data).
+
+| Stage | Was (pre-migration) | Fit problem |
 |---|---|---|
 | Chunk fan-out (pcap→cs8→SatDump) | CodeBuild 2XLARGE ×19–27 concurrent | CI/CD tool as batch engine; account build-cap is the measured throttle; no Spot |
 | Aggregation (RT-STPS + CSPP) | CodeBuild 2XLARGE ×1 | Only chosen because CSPP needed internet — PERF-1 removed that reason |

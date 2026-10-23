@@ -14,9 +14,14 @@ AWS does not supply: the **orbital model** that decides which contact is worth b
 turn raw counts into physical radiances.
 
 Everything below describes the DigIF reception path (`enable_sdr_pipeline`), the one that
-has actually flown. A second, live demod/decode path exists alongside it — see
-[`SYNC_PIPELINE.md`](SYNC_PIPELINE.md) — under its own mission profile, so a contact's
-reservation ARN, not a global switch, decides which one runs.
+has actually flown. Since 2026-10-22 its runtime compute runs on **AWS Batch**, not
+CodeBuild (the chunk fan-out, the aggregation, and the visualization render were all
+migrated off CodeBuild per ADR-002 / the `clean-compute-pipeline` spec;
+`enable_batch_compute = true`). The CodeBuild projects are retained only as a strangler
+fallback behind feature flags. A second, live demod/decode path exists alongside it — see
+[`SYNC_PIPELINE.md`](SYNC_PIPELINE.md) — but it **cannot currently be flown**: NOAA-20 is
+not onboarded for demod/decode on this account (zero schedulable windows), see
+[`SYNC_ONBOARDING_INVESTIGATION.md`](SYNC_ONBOARDING_INVESTIGATION.md).
 
 ---
 
@@ -34,9 +39,9 @@ sequenceDiagram
     participant S3R as S3 reception
     participant EB as EventBridge
     participant SFN as Step Functions
-    participant CB as CodeBuild
+    participant BATCH as AWS Batch
     participant S3O as S3 output
-    participant VIZ as VIIRS visualization
+    participant VIZ as VIIRS orchestrator (Lambda)
 
     Note over SAT,GS: T-7d  plan_pass.py ranks the offer set, reserve-contact
     SAT->>GS: T+0     AOS — X-band HRD, 15 Mbps
@@ -52,18 +57,18 @@ sequenceDiagram
     SFN->>S3R: listObjectsV2 by "<contactId>_" prefix
     S3R-->>SFN: 22 chunk keys
     Note over SFN: .processing marker claims the contact
-    SFN->>CB: Map fan-out, 19 concurrent
+    SFN->>BATCH: Map -> submitJob.sync per chunk (Spot, fanout-queue)
     loop per chunk (9-39 min each, median 23)
-        CB->>CB: VITA-49 → I/Q → SatDump (QPSK, Viterbi, Reed-Solomon)
-        CB->>S3O: npp_hrd.cadu + composites
+        BATCH->>BATCH: VITA-49 → I/Q → SatDump (QPSK, Viterbi, Reed-Solomon)
+        BATCH->>S3O: npp_hrd.cadu + composites
     end
-    SFN->>CB: aggregation build
-    CB->>CB: install J01 LUTs, sdr_luts.sh (~10 min, needs internet)
-    CB->>CB: concat 22 CADU → RT-STPS → 5 RDR (~2.5 min)
-    CB->>CB: CSPP viirs_sdr.sh → SDR + GEO
-    CB->>S3O: RDR, SVI/SVM/GEO HDF5
+    SFN->>BATCH: SubmitBatchAggregation (on-demand, agg-queue, RTSTPS=on)
+    BATCH->>BATCH: install J01 LUTs, sdr_luts.sh (~10 min, needs internet)
+    BATCH->>BATCH: concat 22 CADU → RT-STPS → 5 RDR (~2.5 min)
+    BATCH->>BATCH: CSPP viirs_sdr.sh → SDR + GEO
+    BATCH->>S3O: RDR, SVI/SVM/GEO HDF5
     SFN->>VIZ: StartVisualization — one call per contact
-    VIZ->>CB: visualization build (GeoTIFF, PNG)
+    VIZ->>BATCH: submit_job render (on-demand, dedicated viirs image, GeoTIFF/PNG)
 ```
 
 ### Where the time goes
@@ -72,8 +77,8 @@ sequenceDiagram
 |---|---|---|
 | Contact | ~10 min | the only part that costs antenna time (~$110) |
 | Delivery settle | 120 s | last chunk landed 19 s after LOS; the wait is margin |
-| Chunk fan-out | ~40 min | 22 builds, 19 concurrent; measured 8.7 / 23.3 / 38.9 min (min / median / max) |
-| Aggregation | ~15 min (cache hit) / ~25 min (miss) | PERF-1: `sdr_luts.sh` (~10 min) skipped when LUT DB staged from S3; fallback fetch runs only on first contact after cache is cold |
+| Chunk fan-out | ~40 min | N Batch Spot jobs, up to 19 concurrent; measured 8.7 / 23.3 / 38.9 min (min / median / max). (CodeBuild-era wall-clock; Batch removes the account build-cap throttle.) |
+| Aggregation | ~15 min (cache hit) / ~25 min (miss) | on-demand Batch job; PERF-1: `sdr_luts.sh` (~10 min) skipped when LUT DB staged from S3; fallback fetch runs only on first contact after cache is cold |
 
 ---
 
@@ -111,9 +116,11 @@ rather than a raytrace of the nominal scan geometry. See [`../articles/article-2
 | `ShapeInput` | Pass | normalise to `{contact_id, bucket, contact_date, chunks[]}` |
 | `CheckChunksFound` | Choice | fail loudly on an empty contact |
 | `CheckProcessingMarker` / `WriteProcessingMarker` | Task | idempotence via `contacts/{id}/.processing` |
-| `ParallelProcessing` | Map | 19 concurrent, `ToleratedFailurePercentage: 100` |
-| `StartAggregationBuild` … `EvaluateAggregation` | Task/Wait/Choice | CodeBuild aggregation, polled |
-| `StartVisualization` | Task | invokes the VIIRS orchestrator directly — one call per contact. Catches `States.ALL` to success: products are already in S3, so a visualisation failure must not fail the run |
+| `ParallelProcessing` | Map | up to 19 concurrent, `ToleratedFailurePercentage: 100`; each item is `SubmitBatchChunk` (`:::batch:submitJob.sync`, Spot `...-fanout-queue`, `...-chunk` job def) |
+| `CheckResults` | Pass | normalise the Map output (the former CodeBuild aggregation poll-loop states were retired in the Batch cutover) |
+| `SubmitBatchAggregation` | Task | `:::batch:submitJob.sync` — on-demand `...-agg-queue`, `...-aggregation` job def, `RTSTPS=on` (RT-STPS + CSPP) |
+| `StartVisualization` | Task | invokes the VIIRS orchestrator Lambda directly — one call per contact. The Lambda dispatches an AWS Batch `...-render` job (`RENDER_COMPUTE=batch`). Catches `States.ALL` to `NotifyVisualizationFailed` (SNS) then succeeds: products are already in S3, so a visualisation failure must not fail the run |
+| `NotifyVisualizationFailed` | Task | publish the visualization error to SNS, then proceed to success |
 | `MarkAggregationFailed` → `AggregationFailure` | Pass/Task | populate `$.error`, publish to SNS |
 
 **A green execution does not mean 22 good chunks.** The Map tolerates 100 % failure by
@@ -128,9 +135,13 @@ against the products prefix, never the execution status.
 
 ## Constraints worth knowing before changing anything
 
-- **CSPP needs the internet; the EC2 aggregation instance does not have it.** Its security
-  group is SSM-outbound-only, so `sdr_luts.sh` times out and CSPP dies inside its own error
-  handler. Aggregation therefore runs in CodeBuild. See [`DEPLOYMENT.md`](DEPLOYMENT.md).
+- **CSPP needs the internet.** `sdr_luts.sh` fetches ancillary/LUT data from
+  jpssdb.ssec.wisc.edu (HTTP, port 80) and will time out without egress. Aggregation runs as
+  an on-demand **AWS Batch** job whose compute environment security group opens 80 + 443
+  egress for exactly this (`infra/modules/batch_compute/main.tf`). This is why aggregation
+  was *originally* placed on CodeBuild (the standalone EC2 aggregation instance was
+  SSM-outbound-only with no internet); the Batch on-demand CE replaced that reason.
+  See [`DEPLOYMENT.md`](DEPLOYMENT.md).
 - **The trigger is per contact, not per object.** A pass writes ~22 objects over ~10
   minutes; an execution started by the first cannot know the full list.
 - **S3 allows one notification configuration per bucket.** Two `aws_s3_bucket_notification`
@@ -140,14 +151,19 @@ against the products prefix, never the execution status.
   `year=Y/month=M/day=D/satellite=<sat>/<contactId>_<ts>_<uuid>.pcap`.
 - **Re-running a contact accumulates products.** RDR and SDR filenames embed a creation
   timestamp, so they never overwrite; only `.cadu` does.
-- **The visualisation buildspecs live in the Lambda, not in `buildspecs/`.** The CodeBuild
-  project is `NO_SOURCE` with a stub spec that exits 1; the real spec is passed as
-  `buildspecOverride` at `start_build()` time from
-  [`lambdas/viirs_visualizer/handler.py`](../lambdas/viirs_visualizer/handler.py). The
-  `buildspecs/viirs_*.yml` files are manual-run copies and are *not* what runs. Three
-  defects hid in that gap until 2026-09-01: a wrong script path, the NASA path reading
-  `chunks/` instead of `sdr/` under pre-J01 filenames, and a SatDump sync that produced a
-  nested tree the non-recursive composite discovery could not see.
+- **Render runs on AWS Batch; the CodeBuild buildspecs are a retained fallback.** As of
+  2026-10-22 the VIIRS orchestrator Lambda dispatches an AWS Batch `...-render` job
+  (`RENDER_COMPUTE=batch`) that runs the image-baked `scripts/viirs/render_entrypoint.sh`
+  (`RENDER_BRANCH=satdump|nasa`) on the **dedicated `...-viirs-visualization` image**. The
+  inline `SATDUMP_BUILDSPEC` / `NASA_BUILDSPEC` in
+  [`lambdas/viirs_visualizer/handler.py`](../lambdas/viirs_visualizer/handler.py) and the
+  `NO_SOURCE` CodeBuild project are retained only as the strangler fallback
+  (`RENDER_COMPUTE=codebuild`) until the Batch render path is proven over several real
+  contacts (then retired per task 13). The `buildspecs/viirs_*.yml` files are manual-run
+  copies. Three defects once hid in the Lambda/buildspec gap until 2026-09-01: a wrong
+  script path, the NASA path reading `chunks/` instead of `sdr/` under pre-J01 filenames,
+  and a SatDump sync that produced a nested tree the non-recursive composite discovery could
+  not see — all since relocated into `render_entrypoint.sh`.
 - **SatDump could georeference its own composites, but not at 1.2.2 (parked 2026-09-02).** It ships the VIIRS scan
   model (`resources/projections_settings/jpss1_viirs.json` — aggregation zones in
   `forced_gcps_x`, 112° scan, `roll_offset` -0.05, `yaw_offset` 0.15) and holds the
@@ -183,19 +199,18 @@ against the products prefix, never the execution status.
   matching `.png`; a contact writes ~9,150 objects, so arming that bucket produced ~6,000
   CodeBuild builds in a morning and exhausted the account build queue. Nothing this pipeline
   writes is one-per-contact, so no filter fixes it — the state machine calls the orchestrator.
-- **The SDR image is built by a CodeBuild project that exists in no Terraform.**
-  `satdump-noaa20-processing` (role `codebuild-satdump-role`) is privileged, takes its
-  buildspec as an override at `start-build`, and pulls ~10.4 GB of vendor artifacts from
-  `s3://groundstation-noaa20-sdr-output-471112743408/docker-build/`. Its role could not
-  read that prefix — the S3 statement covered only the reception bucket — so on
-  2026-09-01 a read-only statement was added by hand (`ReadDockerBuildArtifacts` /
-  `ListDockerBuildArtifacts`, `GetObject` + `ListBucket` scoped to `docker-build/*`).
-  None of this is in code, so a `terraform apply` will neither create nor repair it.
-  Build it with:
-
-  ```bash
-  aws codebuild start-build --project-name satdump-noaa20-processing     --buildspec-override "$(cat buildspecs/docker_build_sdr.yml)"     --environment-variables-override "name=REPO_BRANCH,value=<branch>,type=PLAINTEXT"
-  ```
+- **The SDR image is built by an IaC CodeBuild project, `groundstation-noaa20-sdr-docker-build`.**
+  The old out-of-band project `satdump-noaa20-processing` (role `codebuild-satdump-role`)
+  that predated it was **deleted on 2026-10-22** (orphaned, not in Terraform, superseded by
+  the IaC image-build project and the Batch fan-out — see
+  [`SYNC_ONBOARDING_INVESTIGATION.md`](SYNC_ONBOARDING_INVESTIGATION.md) history and the
+  `codebuild_image.tf` note). The IaC project (`infra/modules/sdr_pipeline/codebuild_image.tf`)
+  builds the SatDump/RT-STPS/CSPP image and pushes it to the sdr-pipeline ECR repo. The
+  dedicated VIIRS image is built by a separate IaC project,
+  `groundstation-noaa20-viirs-docker-build`. **Image-build gotcha:** both image-build
+  projects build from GitHub `sourceVersion = main`, so code must be merged to `main` before
+  a rebuild carries it into the image (a container Batch job runs image-baked code). See the
+  handoff's CRITICAL note.
 
 - **The EC2 aggregation instance carries a hand-installed `/opt/rt-stps` and
   `/opt/SDR_4_1`** that exist in no Terraform, Dockerfile or user_data. Replacing the
@@ -216,8 +231,8 @@ against the products prefix, never the execution status.
 
 | Item | Approx. |
 |---|---|
-| Antenna time (10 min, on-demand) | $110–130 |
-| CodeBuild (~490 build-minutes: 471 chunks + ~22 aggregation) | the largest variable |
+| Antenna time (10 min, on-demand) | $110–130 — the dominant cost |
+| Compute: AWS Batch — Spot fan-out (idempotent chunks) + one on-demand aggregation + one on-demand render | ~$1–2 (ADR-001 Option C; Spot for the restartable fan-out). Formerly CodeBuild ~490 build-minutes. |
 | Cross-region transfer (43 GB) | ~$1 |
 | S3 storage | ~$1/month per retained pass |
 
@@ -243,19 +258,22 @@ assessed each and chose to keep it rather than engineer it away.
 | **`ToleratedFailurePercentage = 100` on the chunk Map** | Partial chunk results are still useful — aggregation consumes whatever decoded. Kept, but made *visible* by the `ChunksSucceeded`/`ChunksFailed` metrics + all-chunks-failed alarm (REL-3). | `ParallelProcessing` Map (`sdr_pipeline/step_functions.tf`); metrics in `monitoring.tf` | — (visibility added; behaviour intentionally retained). |
 | **Account-wide budget (not GS-service-scoped)** | A working account-wide ceiling beats a budget mis-scoped to a Cost Explorer service name not yet verified. A ready-to-enable `cost_filter` is committed, commented. | `aws_budgets_budget.ground_station` (`security/budget.tf`) | The exact Cost Explorer "AWS Ground Station" service string is confirmed. |
 
-### The buildspec-override contract (OE-3)
+### The buildspec-override contract (OE-3) — historical, now superseded by Batch
 
-Two CodeBuild projects are `NO_SOURCE` with a **stub** buildspec that is never meant to run
-as-is — the real buildspec is injected at `start_build()` time via `buildspecOverride`:
+This contract applied to the CodeBuild runtime, which has been migrated to AWS Batch
+(2026-10-22). It is retained here as history and because the CodeBuild render path survives
+as a flag-gated fallback:
 
-- `aws_codebuild_project.sdr_pipeline` — overridden by the Map's inline `StartCodeBuild`
-  buildspec (per chunk) and by `StartAggregationBuild`'s `file("buildspecs/aggregation.yml")`.
-- `aws_codebuild_project.viirs_visualization` — overridden from
-  `lambdas/viirs_visualizer/handler.py` (`SATDUMP_BUILDSPEC` / `NASA_BUILDSPEC`).
+- `aws_codebuild_project.sdr_pipeline` — the shared fan-out + async-aggregation project was
+  **retired** in the Batch cutover (task 8). The Map now runs `SubmitBatchChunk` and
+  aggregation runs `SubmitBatchAggregation` (`scripts/aggregation_entrypoint.sh`, fetched
+  from `s3://.../software/`). `buildspecs/aggregation.yml` is no longer read by Terraform.
+- `aws_codebuild_project.viirs_visualization` — still `NO_SOURCE`; its inline
+  `SATDUMP_BUILDSPEC` / `NASA_BUILDSPEC` override (from `lambdas/viirs_visualizer/handler.py`)
+  is now the **fallback** path only. The live render runs on Batch via
+  `scripts/viirs/render_entrypoint.sh`.
 
-Both stubs **fail safe with `exit 1`**: a standalone run (no override) means a
-misconfiguration and must error loudly rather than silently succeed doing nothing. This
-contract is guarded by `tests/test_buildspec_contract.py`, which asserts each stub contains
-`exit 1` — the test fails if anyone removes it. Three real defects once hid in the gap
-between the stub and the real buildspec (2026-09-01); the guard exists so that class of
-error cannot recur silently.
+Where a CodeBuild stub survives it **fails safe with `exit 1`** (a standalone run without an
+override is a misconfiguration and must error loudly). `tests/test_buildspec_contract.py`
+still guards that invariant. Three real defects once hid in the gap between the stub and the
+real buildspec (2026-09-01); the guard exists so that class of error cannot recur silently.

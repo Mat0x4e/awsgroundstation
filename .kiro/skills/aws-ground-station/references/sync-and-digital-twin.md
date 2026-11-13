@@ -13,6 +13,33 @@ the AWS Ground Station **digital twin**, because no real sync contact has ever b
   mission profile and write it into `docs/CONTACTS.md`.
 - Even with a contact, the packet format is unvalidated (`docs/SYNC_PIPELINE.md`, "Open risk").
 
+## Reproduced 2026-11-13 (read-only, `scripts/gs_list_sync_contacts.ps1`)
+
+Window 2026-11-13 17:56Z -> 2026-11-20 16:51Z, NOAA-20, all 7 visible ground stations:
+
+| Mission profile | Contacts offered |
+|---|---|
+| sync `2e719f99-...` (demod/decode) | **0 on every station** |
+| async `2655b0f6-...` (DigIF), control | Cape Town 20, Hawaii 17, Ohio 25, Oregon 32, Stockholm 33; Ireland 0, Singapore 0 |
+
+Dataflow endpoint group `da5e60d9-...` is `HEALTHY`, endpoint `groundstation-noaa20-demo-sync-endpoint`
+at 172.31.23.74:55888, status `created`. That rules out H1 (missing or unhealthy group); the name match
+with the `DataflowEndpointConfig` was not re-checked.
+
+Observed differences, none proven causal: sync profile has pre-pass 600 s / min viable 300 s while the
+endpoint group has pre-pass 120 s (the AWS example uses 120 s on both); the sync profile is the only one
+using `AntennaDownlinkDemodDecodeConfig`. The AWS API docs state no constraint tying the two durations.
+
+**Trial 1 (2026-11-13, `scripts/gs_sync_profile_trial.ps1`)**: throwaway clone of the sync profile with
+pre-pass 120 s / post 120 s / min viable 180 s (same edges, same tracking config), deleted right after.
+Result: **still 0 contacts on all 7 stations** -> H3 (durations) is ruled out.
+Also checked: the demod/decode config (7812 MHz, 30 MHz, RHCP, QPSK 15 Msps, Viterbi 1/2, NRZ-M,
+`UncodedFramesEgress`) is identical to the AWS example; the `DataflowEndpointConfig` name equals the
+endpoint name in the group. Satellite `33f035e1-...` is onboarded on Cape Town 1, Hawaii 1, Ohio 1,
+Oregon 1, Stockholm 1, ephemeris source SPACE_TRACK. Remaining suspects: H5 (satellite/account not
+onboarded for demod/decode, onboarding is per capability `[unverified]`) or an undocumented rule.
+Next: trial 2 with the AWS `AquaSnppJpss` template, and/or ask AWS support.
+
 ## Hypotheses for "no contact offered" (to test, not to assume)
 
 | # | Hypothesis | How to test |

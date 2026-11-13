@@ -1,0 +1,115 @@
+Diagram:
+  DefinitionFiles:
+    - Type: URL
+      Url: "https://raw.githubusercontent.com/awslabs/diagram-as-code/main/definitions/definition-for-aws-icons-light.yaml"
+
+  Resources:
+    Canvas:
+      Type: AWS::Diagram::Canvas
+      Direction: horizontal
+      Children:
+        - GroundStation
+        - AWSCloud
+        - Internet
+
+    GroundStation:
+      Type: AWS::Diagram::Resource
+      Preset: "AWS Ground Station"
+      Title: "AWS Ground Station"
+      Align: center
+
+    Internet:
+      Type: AWS::Diagram::Resource
+      Preset: "Internet"
+      Title: "Internet (TLE, mises a jour)"
+      Align: center
+
+    AWSCloud:
+      Type: AWS::Diagram::Cloud
+      Preset: AWSCloudNoLogo
+      Align: center
+      Children:
+        - VPC
+
+    VPC:
+      Type: AWS::EC2::VPC
+      Title: "VPC 10.0.0.0/16"
+      Direction: vertical
+      Children:
+        - PublicSubnet
+        - PrivateSubnet
+        - Endpoints
+
+    PublicSubnet:
+      Type: AWS::EC2::Subnet
+      Preset: PublicSubnet
+      Title: "Subnet public"
+      Children:
+        - NAT
+
+    NAT:
+      Type: AWS::EC2::NatGateway
+      Title: "NAT Gateway"
+
+    PrivateSubnet:
+      Type: AWS::EC2::Subnet
+      Preset: PrivateSubnet
+      Title: "Subnet prive 10.0.2.x"
+      Direction: horizontal
+      Children:
+        - ENI
+        - EC2
+
+    ENI:
+      Type: AWS::EC2::NetworkInterface
+      Title: "ENI publique + EIP"
+
+    EC2:
+      Type: AWS::EC2::Instance
+      Title: "EC2 SDR + agent GS"
+
+    Endpoints:
+      Type: AWS::EC2::VPCEndpoint
+      Title: "VPC Endpoints : S3, SQS, KMS"
+
+  Links:
+    - Source: GroundStation
+      SourcePosition: E
+      Target: ENI
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        AutoLeft:
+          Title: "UDP 55888-56000"
+
+    - Source: ENI
+      SourcePosition: E
+      Target: EC2
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: EC2
+      SourcePosition: N
+      Target: NAT
+      TargetPosition: S
+      TargetArrowHead:
+        Type: Open
+
+    - Source: NAT
+      SourcePosition: E
+      Target: Internet
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        AutoRight:
+          Title: "via Internet Gateway"
+
+    - Source: EC2
+      SourcePosition: S
+      Target: Endpoints
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open

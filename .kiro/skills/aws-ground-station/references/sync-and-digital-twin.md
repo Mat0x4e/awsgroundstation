@@ -65,8 +65,34 @@ Still different between the working template and ours (not yet isolated):
 Trial 2 already excluded the profile durations and `DataflowEndpointRegion` against OUR group, which
 points at the group (or the objects it references) rather than the profile.
 
-Next: bisect with the template stack up - one profile using our demod config + the template's endpoint
-config, one using the template's demod config + our endpoint config - to see which side breaks it.
+**Trial 4 - bisect** (`scripts/gs_bisect_trial.ps1`, template stack up, 4 throwaway profiles created together,
+listed after 150 s so propagation is not the explanation; same tracking config in all):
+
+| Profile | Antenna config | Endpoint config (+ its group) | Contacts |
+|---|---|---|---|
+| A | ours | template's | 0 |
+| B | template's | ours | 0 |
+| C | template's | template's | **22 / 19 / 30 / 30 / 40** (Cape Town / Hawaii / Ohio / Oregon / Stockholm) |
+| D | ours | ours (= the real sync profile) | 0 |
+
+Only the template's PAIR works; swapping either half breaks it. Our tracking config is not the problem.
+
+**Diff of the stored objects** (`scripts/gs_diff_template_vs_ours.ps1`, read-only):
+- antenna config: **semantically identical**. Only differences: name/tags and the formatting of
+  `unvalidatedJSON` - the template's is the AWS sample string as written (spaces, order `type`, `qpsk`,
+  `edges`, `nodeConfigs`...), ours is machine-compacted with alphabetically sorted keys (Terraform
+  `jsonencode`). **H6: the backend may match this string textually.** `[unverified]`
+- endpoint config: the template's has `dataflowEndpointRegion: eu-central-1` (tested alone in trial 2: no effect).
+- endpoint group: ours has an explicit `"mtu": 1500`, the template's has none; ours uses the shared
+  `groundstation-noaa20-demo-groundstation-role` and its own SG; post-pass 120 s vs 180 s. Both HEALTHY.
+  **H7: something in our group (explicit mtu, role, SG) makes contacts unavailable.** `[unverified]`
+
+Two separate breakages (A and B) need two separate causes: H6 for the antenna side, H7 for the group side.
+
+Next (cheap, template stack up, throwaway objects): (1) copy the template's antenna JSON, re-serialise it
+compact + key-sorted like ours, pair with the template endpoint -> if it fails, H6 is confirmed;
+(2) throwaway endpoint group copied from ours but without `mtu` / with a dedicated role -> pair with the
+template antenna config.
 
 ## Hypotheses for "no contact offered" (to test, not to assume)
 

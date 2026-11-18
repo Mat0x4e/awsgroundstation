@@ -38,7 +38,35 @@ Also checked: the demod/decode config (7812 MHz, 30 MHz, RHCP, QPSK 15 Msps, Vit
 endpoint name in the group. Satellite `33f035e1-...` is onboarded on Cape Town 1, Hawaii 1, Ohio 1,
 Oregon 1, Stockholm 1, ephemeris source SPACE_TRACK. Remaining suspects: H5 (satellite/account not
 onboarded for demod/decode, onboarding is per capability `[unverified]`) or an undocumented rule.
-Next: trial 2 with the AWS `AquaSnppJpss` template, and/or ask AWS support.
+AWS support confirmed (2026-11-18) that the account is onboarded for demod/decode -> H5 ruled out.
+
+**Trial 2 (`scripts/gs_sync_profile_trial2.ps1`)**: AWS's template sets `DataflowEndpointRegion` on the
+endpoint config; ours does not. Throwaway endpoint config WITH the region + throwaway profile (our demod
+config, our tracking config, 120/60/180 s): **still 0 contacts**. Both deleted.
+
+**Trial 3 (`scripts/gs_aqua_template_trial.ps1`)**: AWS's own `AquaSnppJpss.yml`
+(`s3://groundstation-cloudformation-templates-eu-central-1/AquaSnppJpss.yml`) deployed in minimal form
+(`CreateReceiverInstance=No`, no Lambdas, no SNS; needs an existing EC2 key pair even without EC2, a
+throwaway one was created and deleted). Result, window 2026-11-18 -> 2026-11-25:
+
+| Profile (from the AWS template) | Cape Town 1 | Hawaii 1 | Ohio 1 | Oregon 1 | Stockholm 1 | Ireland 1 / Singapore 1 |
+|---|---|---|---|---|---|---|
+| `37849 SNPP And 43013 JPSS` (demod/decode) | 22 | 19 | 30 | 30 | 39 | 0 / 0 |
+
+**A demod/decode profile does get contacts for this satellite and account.** The template's JPSS
+profile has the same antenna config as ours, so the cause is in what differs around it. Stack, key pair
+and stack resources were deleted; only our 3 original profiles and 1 endpoint group remain.
+
+Still different between the working template and ours (not yet isolated):
+- the dataflow endpoint group: ours was built by Terraform (`awscc`), pinned to an existing ENI
+  172.31.23.74 and the shared `groundstation-noaa20-demo-groundstation-role`; the template's group uses
+  its own ENI, security groups and `DataDeliveryServiceRole`, endpoint name `<stack>-Downlink`;
+- our endpoint config name/ARN and tracking config (same `PREFERRED` setting).
+Trial 2 already excluded the profile durations and `DataflowEndpointRegion` against OUR group, which
+points at the group (or the objects it references) rather than the profile.
+
+Next: bisect with the template stack up - one profile using our demod config + the template's endpoint
+config, one using the template's demod config + our endpoint config - to see which side breaks it.
 
 ## Hypotheses for "no contact offered" (to test, not to assume)
 

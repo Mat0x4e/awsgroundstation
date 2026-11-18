@@ -89,10 +89,31 @@ Only the template's PAIR works; swapping either half breaks it. Our tracking con
 
 Two separate breakages (A and B) need two separate causes: H6 for the antenna side, H7 for the group side.
 
-Next (cheap, template stack up, throwaway objects): (1) copy the template's antenna JSON, re-serialise it
-compact + key-sorted like ours, pair with the template endpoint -> if it fails, H6 is confirmed;
-(2) throwaway endpoint group copied from ours but without `mtu` / with a dedicated role -> pair with the
-template antenna config.
+**Trial 5** (`scripts/gs_h6_h7_trial.ps1`), all paired with the template's antenna config unless noted:
+
+| Profile | What changed | Contacts |
+|---|---|---|
+| P1 | template antenna JSON copied verbatim into a NEW config (not CloudFormation-created) + template endpoint | **22 / 18 / 30 / 31 / 40** |
+| P2 | CLI group copied from ours, **no mtu**, our role, our SG | 0 |
+| P3 | CLI group, mtu 1500, **template role + template SG** | 0 |
+| P4 | CLI group, no mtu, template role + template SG | 0 |
+
+P1: a config does not need CloudFormation origin to work. H6 (string formatting) not yet directly tested.
+P2-P4: mtu, IAM role and security group are ruled out one by one.
+
+**Trial 6** (`scripts/gs_trial6_address.ps1`): CLI groups identical to ours (mtu 1500, our role, our SG) on
+(P1) the template's ENI, (P2) a fresh unattached ENI, (P3, control) our ENI 172.31.23.74 (attached as
+device 1 to the STOPPED sync receiver `i-06a51f5b29e26aeaa`): **0 contacts in all three**. The endpoint
+address / ENI state is ruled out.
+
+**What remains different** between every failing CLI group and the working template group: the endpoint
+config used by our groups never carries `dataflowEndpointRegion` (trial 2 tested region with OUR group
+only), the endpoint names (`<stack>-Downlink` vs ours), and the group post-pass (180 s vs 120 s).
+None proven. Next: a CLI group that is a FULL copy of the template group (template address, no mtu,
+template role + SG, 120/180 s) + an endpoint config WITH region; if it works, flip one factor back at a time.
+
+Cleanup note: a trial interrupted mid-run leaves the template stack and the `trial-aqua-key` key pair;
+check `list-stacks`, `describe-key-pairs`, profiles, groups and `trial*` configs/ENIs before re-running.
 
 ## Hypotheses for "no contact offered" (to test, not to assume)
 

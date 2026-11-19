@@ -1,3 +1,14 @@
+# === HISTORICAL TRIAL SCRIPT (2026-11-18) - NOT SAFE TO RUN BLIND ===
+# Creates and deletes REAL objects in account 471112743408 (CloudFormation stack, EC2 key pair,
+# Ground Station configs / mission profiles / endpoint groups, ENIs) using FIXED names. Its cleanup
+# deletes by name, so it can remove objects another session created with the same names. Kept as the
+# record of the sync "0 contacts" investigation (.kiro/skills/aws-ground-station/references/
+# sync-and-digital-twin.md). Before re-running: check no other session is mid-run (docs/WORKSTREAMS.md),
+# then set $env:GS_TRIAL_I_UNDERSTAND = "yes".
+if ($env:GS_TRIAL_I_UNDERSTAND -ne "yes") {
+  Write-Error "Refusing to run: historical trial script that creates and deletes shared AWS objects. See the header."
+  exit 1
+}
 # Trial 5: test H6 (antenna JSON string formatting) and H7 (our endpoint group: mtu / role / SG).
 # Template stack deployed minimally for reference objects; everything created here is throwaway and deleted at the end.
 #   P1 = X1 (template's antenna config copied byte-for-byte under a NEW name, no CloudFormation origin) + template endpoint

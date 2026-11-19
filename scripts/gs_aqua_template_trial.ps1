@@ -1,3 +1,14 @@
+# === HISTORICAL TRIAL SCRIPT (2026-11-18) - NOT SAFE TO RUN BLIND ===
+# Creates and deletes REAL objects in account 471112743408 (CloudFormation stack, EC2 key pair,
+# Ground Station configs / mission profiles / endpoint groups, ENIs) using FIXED names. Its cleanup
+# deletes by name, so it can remove objects another session created with the same names. Kept as the
+# record of the sync "0 contacts" investigation (.kiro/skills/aws-ground-station/references/
+# sync-and-digital-twin.md). Before re-running: check no other session is mid-run (docs/WORKSTREAMS.md),
+# then set $env:GS_TRIAL_I_UNDERSTAND = "yes".
+if ($env:GS_TRIAL_I_UNDERSTAND -ne "yes") {
+  Write-Error "Refusing to run: historical trial script that creates and deletes shared AWS objects. See the header."
+  exit 1
+}
 # Trial 3: deploy AWS's own AquaSnppJpss.yml in MINIMAL form (no EC2, no Lambdas, no SNS),
 # list NOAA-20 contacts with the template's JPSS mission profile, then delete the stack and the throwaway key pair.
 # Creates (temporarily, outside Terraform): IAM role, 2 SGs, 1 ENI, endpoint group, configs, 2 mission profiles. No contact reserved.

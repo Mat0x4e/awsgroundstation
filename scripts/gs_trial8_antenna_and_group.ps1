@@ -1,3 +1,14 @@
+# === HISTORICAL TRIAL SCRIPT (2026-11-18) - NOT SAFE TO RUN BLIND ===
+# Creates and deletes REAL objects in account 471112743408 (CloudFormation stack, EC2 key pair,
+# Ground Station configs / mission profiles / endpoint groups, ENIs) using FIXED names. Its cleanup
+# deletes by name, so it can remove objects another session created with the same names. Kept as the
+# record of the sync "0 contacts" investigation (.kiro/skills/aws-ground-station/references/
+# sync-and-digital-twin.md). Before re-running: check no other session is mid-run (docs/WORKSTREAMS.md),
+# then set $env:GS_TRIAL_I_UNDERSTAND = "yes".
+if ($env:GS_TRIAL_I_UNDERSTAND -ne "yes") {
+  Write-Error "Refusing to run: historical trial script that creates and deletes shared AWS objects. See the header."
+  exit 1
+}
 # Trial 8: (R1) is OUR existing endpoint group fine once the endpoint config carries dataflowEndpointRegion?
 #          (R2/R3) is the antenna-side failure the unvalidatedJSON string formatting (H6)?
 #   R1 = template antenna + NEW endpoint config WITH region -> OUR existing group (groundstation-noaa20-demo-sync-endpoint)

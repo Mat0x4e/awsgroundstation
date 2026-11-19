@@ -27,8 +27,9 @@ Anything not verified is marked `[unverified]`. Do not turn an `[unverified]` it
 
 1. **A reservation is a paid act.** ~$110-130 for a ~10.5 min narrowband contact. Never script
    `reserve-contact` without the user's explicit go-ahead.
-2. **`terraform apply` is a deliberate user act.** This repo has no CI pipeline (no `.github/workflows`);
-   apply runs locally from `infra/`, only after the user has read the `plan`. Agents stop at `plan`.
+2. **`terraform apply` is run by the agent, only with the user's explicit agreement.** This repo has
+   no CI pipeline (no `.github/workflows`); apply runs locally from `infra/`. Show the `plan` summary
+   first, wait for the go-ahead, then apply. No go-ahead, no apply.
    Re-enabling the scheduler cron through an apply once booked two unintended paid contacts.
 3. **7-day wall** [practice]: `ListContacts` throws `ResourceLimitExceededException` beyond 7 days
    ahead on this account.

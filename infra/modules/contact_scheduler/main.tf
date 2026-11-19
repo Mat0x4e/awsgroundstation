@@ -2,6 +2,9 @@ data "archive_file" "contact_scheduler" {
   type        = "zip"
   source_file = "${path.module}/../../../lambdas/contact_scheduler/handler.py"
   output_path = "${path.module}/../../../.build/contact_scheduler.zip"
+
+  # Fixed mode keeps the zip hash identical across Windows/Linux runners.
+  output_file_mode = "0644"
 }
 
 resource "aws_lambda_function" "contact_scheduler" {

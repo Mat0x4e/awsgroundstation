@@ -30,8 +30,8 @@ yourself from the paths given; do not work from excerpts).
 
 NON-NEGOTIABLE RULES (see .kiro/steering/delegation-and-safety.md and aws-knowledge.md):
 
-- PLAN-ONLY. You NEVER run `terraform apply` or `terraform destroy` - the operator applies
-  (they own the SSO session and the spend). Your deliverable is `terraform validate` + a clean
+- PLAN-ONLY. You NEVER run `terraform apply` or `terraform destroy` - the orchestrating session
+  applies, only after the user agreed to your plan. Your deliverable is `terraform validate` + a clean
   `terraform -chdir=infra plan` that shows only the intended diff (an import task must show
   import/no-destroy, not recreate). Your permissions deny apply/destroy; do not try to work
   around that.

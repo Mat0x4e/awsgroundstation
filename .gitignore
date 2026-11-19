@@ -48,3 +48,7 @@ infra/.batch_compute_validate/
 
 # Slide decks are working files, not versioned (the map PNGs in Slidedecks/assets/ are)
 *.pptx
+# Git worktrees created by workflow runs
+.worktrees/
+# list-contacts offer dumps written at the repo root by the booking commands (one-off, dated data)
+/contacts_*.json

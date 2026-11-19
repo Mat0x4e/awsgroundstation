@@ -7,7 +7,7 @@
         "units": "MHz"
       },
       "range": {
-        "value": 250.0,
+        "value": 250,
         "units": "kHz"
       }
     },

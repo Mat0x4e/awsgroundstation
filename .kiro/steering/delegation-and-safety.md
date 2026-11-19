@@ -26,10 +26,17 @@ without needing to invoke a workflow file. Keep this file short so the always-on
   summary shown in the conversation (resources, change type, any destroy/replace). No agreement,
   no apply. A general "go ahead with the work" is not agreement to apply.
 - Save the agreed plan as `$env:TEMP\<name>.approved.tfplan` and apply exactly that file
-  (`terraform apply <file>.approved.tfplan`). The `block-terraform-apply` hook only lets through an
-  apply of a `*.approved.tfplan` file. Prefer `-target` when the full plan contains unrelated changes.
+  (`terraform apply <file>.approved.tfplan`), as one unchained command. Prefer `-target` when the
+  full plan contains unrelated changes. Never reuse a plan file for a second apply.
+- **Delete the plan file right after the apply attempt**, success or failure: plan files hold
+  variable values and resource attributes in cleartext.
 - One apply at a time across all sessions (see `docs/WORKSTREAMS.md`). After applying, verify by
   evidence (read the resources back, re-run `terraform plan`).
+- **What the guard is and is not.** `.kiro/hooks/block-terraform-apply.sh` (tests:
+  `scripts/test_block_terraform_apply_hook.ps1`) blocks `destroy`, `apply -destroy` and any apply
+  other than a single unchained apply of a `*.approved.tfplan` file. It catches accidents and
+  subagents; it cannot prove the user agreed, because approval is only a filename. The agreement in
+  the conversation is the control. Terraform itself rejects a saved plan once state has moved.
 - Exception: after a `latest_version`-pinned launch-template change, a saved plan file throws
   "Provider produced inconsistent final plan" (see aws-knowledge.md). Then apply FRESH (no plan
   file), which the hook blocks: ask the user to run that apply themselves.

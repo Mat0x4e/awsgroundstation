@@ -30,7 +30,8 @@ Anything not verified is marked `[unverified]`. Do not turn an `[unverified]` it
 2. **`terraform apply` is run by the orchestrating session only, with the user's explicit agreement**
    (rule in `.kiro/steering/delegation-and-safety.md`). No CI pipeline; apply runs locally from
    `infra/`. Show the plan summary, wait for the go-ahead, save it as `*.approved.tfplan`, apply that
-   file. Subagents stay plan-only; the `block-terraform-apply` hook enforces it.
+   file, then delete it. Subagents stay plan-only; the `block-terraform-apply` hook guards against
+   accidents (it cannot prove agreement: approval is a filename).
    Re-enabling the scheduler cron through an apply once booked two unintended paid contacts.
 3. **7-day wall** [practice]: `ListContacts` throws `ResourceLimitExceededException` beyond 7 days
    ahead on this account.

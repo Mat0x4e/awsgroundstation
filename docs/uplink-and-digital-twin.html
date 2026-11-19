@@ -66,7 +66,7 @@
 
 <section class="summary" aria-labelledby="summary-title">
   <h2 id="summary-title" style="margin-top:0;border:0;padding:0">Summary</h2>
-  <p><strong>A real uplink to a public satellite through AWS Ground Station is not possible.</strong> Public broadcast satellites are downlink-only, and AWS transmits only in S-band (2025-2110 MHz), where no public satellite listens.</p>
+  <p><strong>A real uplink to a public satellite through Amazon Web Services (AWS) Ground Station is not possible.</strong> Public broadcast satellites are downlink-only, and AWS transmits only in S-band (2025-2110 MHz), where no public satellite listens.</p>
   <p><strong>The digital twin can rehearse the control plane</strong> (scheduling, configs, events, automation) without antenna time or spectrum licensing. It moves no radio signal and no data.</p>
   <p><strong>None of the other uplink-capable satellites works with AWS Ground Station either</strong>: their uplink frequencies are outside the AWS S-band range. A real uplink through AWS Ground Station needs your own (or a partner's) S-band satellite, onboarded and licensed.</p>
 </section>
@@ -82,13 +82,13 @@
     <tbody>
       <tr>
         <td>Public broadcast satellites are downlink-only</td>
-        <td>The AWS user guide lists four public broadcast satellites: Aqua, SNPP, JPSS-1/NOAA-20 and Terra. They are <strong>not enabled by default</strong>: each one is onboarded on request, through the Satellite Onboarding Questionnaire, for the ground stations you ask for. This account also has NOAA-21, which is not yet on the AWS list. Only their public downlink can be used.</td>
+        <td>The AWS user guide lists four public broadcast satellites: Aqua, Suomi National Polar-orbiting Partnership (SNPP), Joint Polar Satellite System 1, also called National Oceanic and Atmospheric Administration 20 (JPSS-1/NOAA-20) and Terra. They are <strong>not enabled by default</strong>: each one is onboarded on request, through the Satellite Onboarding Questionnaire, for the ground stations you ask for. This account also has NOAA-21, which is not yet on the AWS list. Only their public downlink can be used.</td>
         <td><span class="tag no">No uplink</span> to any public broadcast satellite</td>
       </tr>
       <tr>
         <td>AWS transmits in S-band only</td>
-        <td>Antenna uplink: 2025-2110 MHz, up to 40 MHz, RHCP or LHCP, EIRP 20-50 dBW. Uplink echo: same range.</td>
-        <td><span class="tag no">Out of band</span> for amateur uplinks (145 / 435 MHz) and QO-100 (2400 MHz)</td>
+        <td>Antenna uplink: 2025-2110 MHz, up to 40 MHz, right-hand circular polarization (RHCP) or left-hand circular polarization (LHCP), effective isotropic radiated power (EIRP) 20-50 dBW. Uplink echo: same range.</td>
+        <td><span class="tag no">Out of band</span> for amateur uplinks (145 / 435 MHz) and Qatar Orbiting Satellite Carrying Amateur Radio (OSCAR) 100 (QO-100, 2400 MHz)</td>
       </tr>
       <tr>
         <td>AWS receives in S-band and X-band only</td>
@@ -97,7 +97,7 @@
       </tr>
       <tr>
         <td>Uplink requires an onboarded satellite and a spectrum licence</td>
-        <td>Onboarding involves NDAs, technical validation and per-site licensing, applied for on behalf of the satellite operator.</td>
+        <td>Onboarding involves non-disclosure agreements (NDAs), technical validation and per-site licensing, applied for on behalf of the satellite operator.</td>
         <td>A real AWS uplink is only possible with your own (or a partner's) S-band satellite</td>
       </tr>
     </tbody>
@@ -128,12 +128,12 @@
   <table>
     <caption>Full output of <code>aws groundstation list-satellites</code> (eu-central-1, 18 November 2026): 6 satellites</caption>
     <thead>
-      <tr><th scope="col">Satellite</th><th scope="col">NORAD</th><th scope="col">Status</th><th scope="col">Ground stations</th></tr>
+      <tr><th scope="col">Satellite</th><th scope="col">North American Aerospace Defense Command (NORAD)</th><th scope="col">Status</th><th scope="col">Ground stations</th></tr>
     </thead>
     <tbody>
       <tr><td>Terra</td><td>25994</td><td>PBS</td><td>Cape Town 1, Hawaii 1, Ireland 1, Ohio 1, Oregon 1, Stockholm 1</td></tr>
-      <tr><td>CALIPSO</td><td>29108</td><td>Operator-authorized (non-PBS); origin of the approval unknown</td><td>Stockholm 1</td></tr>
-      <tr><td>Suomi NPP</td><td>37849</td><td>PBS</td><td>Cape Town 1, Hawaii 1, Ohio 1, Oregon 1, Stockholm 1</td></tr>
+      <tr><td>Cloud-Aerosol Lidar and Infrared Pathfinder Satellite Observation (CALIPSO)</td><td>29108</td><td>Operator-authorized (non-PBS); origin of the approval unknown</td><td>Stockholm 1</td></tr>
+      <tr><td>Suomi National Polar-orbiting Partnership (NPP)</td><td>37849</td><td>PBS</td><td>Cape Town 1, Hawaii 1, Ohio 1, Oregon 1, Stockholm 1</td></tr>
       <tr><td>Jason-3</td><td>41240</td><td>Operator-authorized (non-PBS); origin of the approval unknown</td><td>Stockholm 1</td></tr>
       <tr><td>JPSS-1 / NOAA-20</td><td>43013</td><td>PBS</td><td>Cape Town 1, Hawaii 1, Ohio 1, Oregon 1, Stockholm 1</td></tr>
       <tr><td>JPSS-2 / NOAA-21</td><td>54234</td><td>PBS (onboarded, not yet in the AWS user guide)</td><td>Cape Town 1, Ohio 1, Oregon 1, Singapore 1, Stockholm 1</td></tr>
@@ -150,7 +150,7 @@
     </thead>
     <tbody>
       <tr>
-        <td>Amateur LEO satellites (ISS, SO-50, AO-91, AO-73, SONATE-2...)</td>
+        <td>Amateur low Earth orbit (LEO) satellites (International Space Station (ISS), SO-50, AO-91, AO-73, SONATE-2...)</td>
         <td>145 / 435 MHz (some 29 MHz)</td>
         <td>145 / 435 MHz</td>
         <td>Uplink and downlink are both far below the AWS S-band and X-band ranges. Transmitting also requires a licensed amateur operator and callsign, which is not how AWS licenses its sites.</td>
@@ -169,8 +169,8 @@
       </tr>
       <tr>
         <td>Argos / Kineis</td>
-        <td>UHF, ~401 MHz</td>
-        <td>Delivered through CLS / Kineis ground processing</td>
+        <td>ultra high frequency (UHF), ~401 MHz</td>
+        <td>Delivered through Collecte Localisation Satellites (CLS) / Kineis ground processing</td>
         <td>Outside the AWS ranges. Only certified transmitters are allowed, and the data is processed by the operator's ground segment, not by a customer ground station.</td>
       </tr>
       <tr>
@@ -185,9 +185,9 @@
   <h3>How such an uplink would be verified</h3>
   <p>AWS Ground Station cannot hear these satellites, so it cannot confirm an uplink to them. The confirmation would come from receivers outside AWS:</p>
   <ul>
-    <li><strong>APRS digipeaters</strong> (ISS, SONATE-2): the relayed packet appears on aprs.fi and ariss.net.</li>
-    <li><strong>FM and linear transponders</strong>: listen to the downlink while transmitting (full duplex), or check a recording of the pass on the SatNOGS network.</li>
-    <li><strong>QO-100</strong>: watch your signal on the public BATC / AMSAT-UK WebSDR at Goonhilly.</li>
+    <li><strong>Automatic Packet Reporting System (APRS) digipeaters</strong> (ISS, SONATE-2): the relayed packet appears on aprs.fi and ariss.net.</li>
+    <li><strong>Frequency modulation (FM) and linear transponders</strong>: listen to the downlink while transmitting (full duplex), or check a recording of the pass on the Satellite Networked Open Ground Station (SatNOGS) network.</li>
+    <li><strong>QO-100</strong>: watch your signal on the public WebSDR at Goonhilly, run by the British Amateur Television Club (BATC) and the United Kingdom branch of the Radio Amateur Satellite Corporation (AMSAT-UK).</li>
   </ul>
   <p>None of these uses AWS Ground Station, which is why they are out of scope for this project.</p>
 </section>
@@ -195,7 +195,7 @@
 <section aria-labelledby="twin-title">
   <h2 id="twin-title">2. What we will test with the digital twin</h2>
 
-  <p>The digital twin provides copies of every AWS Ground Station location, named <code>Digital Twin &lt;station&gt;</code>, with the same capabilities, site masks and coordinates. It returns the same API responses and emits the same EventBridge events as production. It has been generally available since August 2024 in every region where Ground Station runs.</p>
+  <p>The digital twin provides copies of every AWS Ground Station location, named <code>Digital Twin &lt;station&gt;</code>, with the same capabilities, site masks and coordinates. It returns the same application programming interface (API) responses and emits the same EventBridge events as production. It has been generally available since August 2024 in every region where Ground Station runs.</p>
 
   <h3>Onboarding status</h3>
   <table>
@@ -213,9 +213,9 @@
 
   <h3>Test scope</h3>
   <ol>
-    <li><strong>Scheduling:</strong> <code>ListContacts</code>, <code>ReserveContact</code> and <code>CancelContact</code> for the async (DigIF to S3) and sync (demod/decode to EC2) mission profiles, with production-like contention.</li>
-    <li><strong>Config regression:</strong> deploy Terraform changes to mission profiles, configs and dataflow endpoint groups, and confirm contacts are still offered. The two defects that left the sync profile with 0 contacts (missing <code>dataflowEndpointRegion</code>; re-serialised demod/decode JSON) took manual trials against production. The twin would catch this kind of defect without touching production.</li>
-    <li><strong>Event-driven chain:</strong> PREPASS event to <code>receiver_arm</code> Lambda, receiver EC2 start, SSM arm, listener bind; then COMPLETED event to Step Functions, IAM permissions and CloudWatch alarms.</li>
+    <li><strong>Scheduling:</strong> <code>ListContacts</code>, <code>ReserveContact</code> and <code>CancelContact</code> for the async (digital intermediate frequency (DigIF) to Simple Storage Service (S3)) and sync (demod/decode to Elastic Compute Cloud (EC2)) mission profiles, with production-like contention.</li>
+    <li><strong>Config regression:</strong> deploy Terraform changes to mission profiles, configs and dataflow endpoint groups, and confirm contacts are still offered. The two defects that left the sync profile with 0 contacts (missing <code>dataflowEndpointRegion</code>; re-serialised demod/decode JavaScript Object Notation (JSON)) took manual trials against production. The twin would catch this kind of defect without touching production.</li>
+    <li><strong>Event-driven chain:</strong> PREPASS event to <code>receiver_arm</code> Lambda, receiver EC2 start, AWS Systems Manager (SSM) arm, listener bind; then COMPLETED event to Step Functions, Identity and Access Management (IAM) permissions and CloudWatch alarms.</li>
     <li><strong>Timing:</strong> receiver arm sequence against the mission profile pre-pass duration.</li>
     <li><strong>Contact lifecycle against dataflow endpoints:</strong> endpoint group handling during a synthetic contact.</li>
     <li><strong>Uplink control plane (exploratory):</strong> whether an S-band <code>AntennaUplinkConfig</code> + <code>UplinkEchoConfig</code> mission profile can be created and scheduled. This depends on AWS's answer.</li>
@@ -242,7 +242,7 @@
         <li>Any radio transmission, uplink or downlink</li>
         <li>Payload data: no dataflow delivery, nothing reaches S3 or EC2</li>
         <li>Telemetry: not supported on twin stations</li>
-        <li>Packet format of the sync egress, frame sync, RT-STPS, CSPP</li>
+        <li>Packet format of the sync egress, frame sync, Real-time Software Telemetry Processing System (RT-STPS), Community Satellite Processing Package (CSPP)</li>
         <li>Link budget, elevation and weather effects</li>
       </ul>
     </div>
@@ -262,7 +262,7 @@
     </tbody>
   </table>
 
-  <p>Conclusion: the digital twin validates the <strong>control plane</strong> only. The <strong>data plane</strong> still needs one real contact, and an <strong>RF uplink</strong> through AWS Ground Station needs your own S-band satellite.</p>
+  <p>Conclusion: the digital twin validates the <strong>control plane</strong> only. The <strong>data plane</strong> still needs one real contact, and a <strong>radio frequency (RF) uplink</strong> through AWS Ground Station needs your own S-band satellite.</p>
 </section>
 
 <section aria-labelledby="next-title">

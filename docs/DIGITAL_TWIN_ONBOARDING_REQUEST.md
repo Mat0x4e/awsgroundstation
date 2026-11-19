@@ -7,8 +7,8 @@ matching fields of the Satellite Onboarding Questionnaire (see "How to submit" a
 
 ## Request summary
 
-Please onboard the public broadcast satellite **JPSS-1 / NOAA-20 (NORAD 43013)** to the
-**AWS Ground Station digital twin** for AWS account **`<non-production account ID>`**.
+Please onboard the public broadcast satellite **Joint Polar Satellite System 1, also called National Oceanic and Atmospheric Administration 20 (JPSS-1/NOAA-20), North American Aerospace Defense Command (NORAD) catalogue number 43013** to the
+**Amazon Web Services (AWS) Ground Station digital twin** for AWS account **`<non-production account ID>`**.
 
 The account will only be used for testing. Our production Ground Station account is
 `471112743408`, where NOAA-20 is already onboarded and has flown several real contacts.
@@ -27,15 +27,15 @@ The account will only be used for testing. Our production Ground Station account
 
 A research prototype ground segment for NOAA-20 direct broadcast, **receive-only**, using
 public data. Production flow: Ground Station contact -> data delivery -> processing on AWS
-(SatDump / RT-STPS / CSPP) -> VIIRS imagery products in S3.
+(SatDump / Real-time Software Telemetry Processing System (RT-STPS) / Community Satellite Processing Package (CSPP)) -> Visible Infrared Imaging Radiometer Suite (VIIRS) imagery products in Simple Storage Service (S3).
 
 We want the digital twin to test changes to the ground segment before they reach production,
 without using production antenna time:
 
-1. Contact scheduling through the API (`ListContacts` / `ReserveContact` / `CancelContact`).
+1. Contact scheduling through the application programming interface (API): `ListContacts`, `ReserveContact`, `CancelContact`.
 2. Mission profile and config validation after infrastructure-as-code changes (Terraform).
-3. The event-driven chain: EventBridge pre-pass and completed events -> Lambda -> receiver EC2
-   start -> Step Functions, including IAM permissions and CloudWatch alarms.
+3. The event-driven chain: EventBridge pre-pass and completed events -> Lambda -> receiver Elastic Compute Cloud (EC2)
+   start -> Step Functions, including Identity and Access Management (IAM) permissions and CloudWatch alarms.
 4. Timing of the receiver arm sequence against the mission profile pre-pass duration.
 
 ## Satellite and signal
@@ -44,9 +44,9 @@ without using production antenna time:
 |---|---|
 | Satellite | JPSS-1 / NOAA-20, NORAD 43013 (public broadcast satellite) |
 | Launch date | 2017-11-18 (in orbit, operational) |
-| Orbit | LEO, sun-synchronous, ~824 km |
+| Orbit | Low Earth orbit (LEO), sun-synchronous, ~824 km |
 | Ephemeris | AWS-managed (Space-Track), as in production |
-| Downlink | HRD X-band, 7812 MHz centre, 30 MHz bandwidth, RHCP, QPSK 15 Msps |
+| Downlink | High Rate Data (HRD) X-band, 7812 MHz centre, 30 MHz bandwidth, right-hand circular polarization (RHCP), quadrature phase-shift keying (QPSK) 15 Msps |
 | Uplink | None for the satellite (public broadcast, downlink only) |
 
 ## Ground stations requested (digital twin)
@@ -63,7 +63,7 @@ Mirror of the production onboarding:
 
 | Path | Configs | Delivery |
 |---|---|---|
-| Asynchronous (DigIF) | `TrackingConfig`, `AntennaDownlinkConfig` -> `S3RecordingConfig` | Amazon S3 |
+| Asynchronous (digital intermediate frequency (DigIF)) | `TrackingConfig`, `AntennaDownlinkConfig` -> `S3RecordingConfig` | Amazon S3 |
 | Synchronous (demod/decode) | `TrackingConfig`, `AntennaDownlinkDemodDecodeConfig` (`UncodedFramesEgress`) -> `DataflowEndpointConfig` | Dataflow endpoint group on EC2 (narrowband) |
 
 Both are based on the AWS examples `AquaSnppJpssTerraDigIF.yml` and `AquaSnppJpss.yml`.
@@ -81,7 +81,7 @@ Both are based on the AWS examples `AquaSnppJpssTerraDigIF.yml` and `AquaSnppJps
 5. **Uplink (exploratory):** can a mission profile with an S-band `AntennaUplinkConfig`
    (2025-2110 MHz) and `UplinkEchoConfig` be created and scheduled on the twin, to exercise the
    uplink control plane? If not against NOAA-20, is there another option, such as a notional test
-   satellite with customer-provided ephemeris? No RF transmission is expected or requested.
+   satellite with customer-provided ephemeris? No radio frequency (RF) transmission is expected or requested.
 6. **Data path:** the documentation states that no data is delivered on the twin. Does the twin
    still check dataflow endpoint group health and emit the dataflow endpoint group state events
    (pre-pass / post-pass), as in production?
@@ -93,7 +93,7 @@ Both are based on the AWS examples `AquaSnppJpssTerraDigIF.yml` and `AquaSnppJps
 1. **Choose the account.** AWS states that digital twin onboarding happens in a non-production
    account. Either create one (in your AWS Organization), or send the request from production
    with question 1 and let AWS answer. Creating an account is your decision: it adds a new
-   account to the organization, with its own billing and guardrails (SCPs).
+   account to the organization, with its own billing and guardrails (service control policies (SCPs)).
 2. **Sign in to the account to be onboarded** and open the AWS Ground Station console in
    `eu-central-1`.
 3. Go to **Satellites and Resources**

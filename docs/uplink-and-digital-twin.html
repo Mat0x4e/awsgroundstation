@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uplink testing with AWS Ground Station and the digital twin</title>
+<style>
+  :root {
+    --ink: #1d2733;
+    --muted: #5a6675;
+    --line: #d8dee6;
+    --bg-soft: #f4f6f9;
+    --accent: #0b5cad;
+    --ok: #1f7a3a;
+    --no: #a12a2a;
+    --warn: #8a5a00;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 16px/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: #fff;
+  }
+  header, main, footer { max-width: 960px; margin: 0 auto; padding: 0 1.25rem; }
+  header { padding-top: 2rem; padding-bottom: 1rem; border-bottom: 3px solid var(--accent); }
+  h1 { font-size: 1.75rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.3rem; margin: 2.25rem 0 .75rem; padding-bottom: .25rem; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 1.05rem; margin: 1.5rem 0 .5rem; }
+  .meta { color: var(--muted); margin: 0; }
+  .summary {
+    background: var(--bg-soft);
+    border-left: 4px solid var(--accent);
+    padding: 1rem 1.25rem;
+    margin: 1.5rem 0;
+  }
+  .summary p { margin: .4rem 0; }
+  table { width: 100%; border-collapse: collapse; margin: .75rem 0 1rem; font-size: .95rem; }
+  caption { text-align: left; font-weight: 600; padding-bottom: .4rem; }
+  th, td { border: 1px solid var(--line); padding: .5rem .6rem; text-align: left; vertical-align: top; }
+  thead th { background: var(--bg-soft); }
+  code { font-family: Consolas, "Courier New", monospace; font-size: .9em; background: var(--bg-soft); padding: 0 .25em; border-radius: 3px; }
+  .tag { display: inline-block; font-size: .8rem; font-weight: 600; padding: .05rem .45rem; border-radius: 3px; border: 1px solid currentColor; white-space: nowrap; }
+  .yes { color: var(--ok); }
+  .no { color: var(--no); }
+  .unk { color: var(--warn); }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: .25rem 0; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+  .card { border: 1px solid var(--line); border-radius: 6px; padding: .75rem 1rem; }
+  .card h3 { margin-top: .25rem; }
+  footer { margin-top: 2.5rem; padding-top: 1rem; padding-bottom: 2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+  a { color: var(--accent); }
+  @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+  @media print { a { color: inherit; } header { border-bottom-color: #000; } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Uplink testing with AWS Ground Station and the digital twin</h1>
+  <p class="meta">protogroundstation - compiled 18 November 2026 - account <code>471112743408</code>, region <code>eu-central-1</code></p>
+</header>
+
+<main>
+
+<section class="summary" aria-labelledby="summary-title">
+  <h2 id="summary-title" style="margin-top:0;border:0;padding:0">Summary</h2>
+  <p><strong>A real uplink to a public satellite through AWS Ground Station is not possible.</strong> Public broadcast satellites are downlink-only, and AWS transmits only in S-band (2025-2110 MHz), where no public satellite listens.</p>
+  <p><strong>The digital twin can rehearse the control plane</strong> (scheduling, configs, events, automation) without antenna time or spectrum licensing. It moves no radio signal and no data.</p>
+  <p><strong>None of the other uplink-capable satellites works with AWS Ground Station either</strong>: their uplink frequencies are outside the AWS S-band range. A real uplink through AWS Ground Station needs your own (or a partner's) S-band satellite, onboarded and licensed.</p>
+</section>
+
+<section aria-labelledby="why-title">
+  <h2 id="why-title">1. Why AWS Ground Station cannot uplink to a public satellite</h2>
+
+  <table>
+    <caption>Constraints checked against AWS documentation and the account</caption>
+    <thead>
+      <tr><th scope="col">Constraint</th><th scope="col">Detail</th><th scope="col">Consequence</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Public broadcast satellites are downlink-only</td>
+        <td>The AWS user guide lists four public broadcast satellites: Aqua, SNPP, JPSS-1/NOAA-20 and Terra. They are <strong>not enabled by default</strong>: each one is onboarded on request, through the Satellite Onboarding Questionnaire, for the ground stations you ask for. This account also has NOAA-21, which is not yet on the AWS list. Only their public downlink can be used.</td>
+        <td><span class="tag no">No uplink</span> to any public broadcast satellite</td>
+      </tr>
+      <tr>
+        <td>AWS transmits in S-band only</td>
+        <td>Antenna uplink: 2025-2110 MHz, up to 40 MHz, RHCP or LHCP, EIRP 20-50 dBW. Uplink echo: same range.</td>
+        <td><span class="tag no">Out of band</span> for amateur uplinks (145 / 435 MHz) and QO-100 (2400 MHz)</td>
+      </tr>
+      <tr>
+        <td>AWS receives in S-band and X-band only</td>
+        <td>X-band downlink: 7750-8500 MHz.</td>
+        <td><span class="tag no">Cannot verify</span> an amateur uplink from the satellite side (downlinks at 145 / 435 MHz, QO-100 at 10489 MHz). See "How such an uplink would be verified" below.</td>
+      </tr>
+      <tr>
+        <td>Uplink requires an onboarded satellite and a spectrum licence</td>
+        <td>Onboarding involves NDAs, technical validation and per-site licensing, applied for on behalf of the satellite operator.</td>
+        <td>A real AWS uplink is only possible with your own (or a partner's) S-band satellite</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Terminology</h3>
+  <table>
+    <caption>Two categories of satellite in AWS Ground Station</caption>
+    <thead>
+      <tr><th scope="col">Category</th><th scope="col">Definition</th><th scope="col">Onboarding procedure</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Public broadcast satellites (PBS)</strong></td>
+        <td>AWS's own term: satellites with a public, downlink-only direct-broadcast path that AWS has validated. Aqua, Terra, SNPP and JPSS-1/NOAA-20 in the user guide; NOAA-21 in practice.</td>
+        <td>On request, through the Satellite Onboarding Questionnaire, for the ground stations you name. Not enabled by default.</td>
+      </tr>
+      <tr>
+        <td><strong>Operator-authorized satellites (non-PBS)</strong></td>
+        <td>Our term; AWS has none. Any other satellite, including ones whose data is public. AWS documentation treats it as "your satellite".</td>
+        <td>Full onboarding: NDAs, technical validation, per-site spectrum licensing, and the satellite operator's authorization.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>"Public data" does not mean "public downlink": a satellite whose products are freely published is not PBS unless AWS lists it.</p>
+
+  <h3>Satellites onboarded in the account</h3>
+  <table>
+    <caption>Full output of <code>aws groundstation list-satellites</code> (eu-central-1, 18 November 2026): 6 satellites</caption>
+    <thead>
+      <tr><th scope="col">Satellite</th><th scope="col">NORAD</th><th scope="col">Status</th><th scope="col">Ground stations</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Terra</td><td>25994</td><td>PBS</td><td>Cape Town 1, Hawaii 1, Ireland 1, Ohio 1, Oregon 1, Stockholm 1</td></tr>
+      <tr><td>CALIPSO</td><td>29108</td><td>Operator-authorized (non-PBS); origin of the approval unknown</td><td>Stockholm 1</td></tr>
+      <tr><td>Suomi NPP</td><td>37849</td><td>PBS</td><td>Cape Town 1, Hawaii 1, Ohio 1, Oregon 1, Stockholm 1</td></tr>
+      <tr><td>Jason-3</td><td>41240</td><td>Operator-authorized (non-PBS); origin of the approval unknown</td><td>Stockholm 1</td></tr>
+      <tr><td>JPSS-1 / NOAA-20</td><td>43013</td><td>PBS</td><td>Cape Town 1, Hawaii 1, Ohio 1, Oregon 1, Stockholm 1</td></tr>
+      <tr><td>JPSS-2 / NOAA-21</td><td>54234</td><td>PBS (onboarded, not yet in the AWS user guide)</td><td>Cape Town 1, Ohio 1, Oregon 1, Singapore 1, Stockholm 1</td></tr>
+    </tbody>
+  </table>
+  <p>Aqua (27424) is PBS but not onboarded in this account. All six satellites use AWS-managed ephemeris from Space-Track.</p>
+
+  <h3>Other uplink-capable satellites: why none works with AWS Ground Station</h3>
+  <p>AWS Ground Station transmits only between 2025 and 2110 MHz and receives only in S-band and X-band (7750-8500 MHz). Every option below falls outside those ranges. On top of that, an AWS uplink requires the satellite to be onboarded by (or on behalf of) its operator, with a spectrum licence per site.</p>
+  <table>
+    <caption>Uplink-capable satellite services and their compatibility with AWS Ground Station</caption>
+    <thead>
+      <tr><th scope="col">Option</th><th scope="col">Uplink</th><th scope="col">Downlink</th><th scope="col">Why it is not compatible with AWS Ground Station</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Amateur LEO satellites (ISS, SO-50, AO-91, AO-73, SONATE-2...)</td>
+        <td>145 / 435 MHz (some 29 MHz)</td>
+        <td>145 / 435 MHz</td>
+        <td>Uplink and downlink are both far below the AWS S-band and X-band ranges. Transmitting also requires a licensed amateur operator and callsign, which is not how AWS licenses its sites.</td>
+      </tr>
+      <tr>
+        <td>QO-100 (Es'hail-2, geostationary)</td>
+        <td>2400-2410 MHz</td>
+        <td>10489-10499 MHz</td>
+        <td>The uplink is about 290 MHz above the AWS uplink band (2025-2110 MHz), and the downlink is above the X-band receive range (8500 MHz). Same amateur-licence requirement.</td>
+      </tr>
+      <tr>
+        <td>Iridium</td>
+        <td>L-band, ~1616-1626.5 MHz</td>
+        <td>Same band</td>
+        <td>Outside both AWS ranges. It is also a closed commercial network: only Iridium-certified modems can transmit, and traffic goes through Iridium's own gateways.</td>
+      </tr>
+      <tr>
+        <td>Argos / Kineis</td>
+        <td>UHF, ~401 MHz</td>
+        <td>Delivered through CLS / Kineis ground processing</td>
+        <td>Outside the AWS ranges. Only certified transmitters are allowed, and the data is processed by the operator's ground segment, not by a customer ground station.</td>
+      </tr>
+      <tr>
+        <td>Eutelsat OneWeb</td>
+        <td>Ku-band (~14 GHz)</td>
+        <td>Ku-band (~11 GHz)</td>
+        <td>Outside the AWS ranges. It is an internet service through the operator's own approved terminals, not a satellite a third-party ground station can address.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>How such an uplink would be verified</h3>
+  <p>AWS Ground Station cannot hear these satellites, so it cannot confirm an uplink to them. The confirmation would come from receivers outside AWS:</p>
+  <ul>
+    <li><strong>APRS digipeaters</strong> (ISS, SONATE-2): the relayed packet appears on aprs.fi and ariss.net.</li>
+    <li><strong>FM and linear transponders</strong>: listen to the downlink while transmitting (full duplex), or check a recording of the pass on the SatNOGS network.</li>
+    <li><strong>QO-100</strong>: watch your signal on the public BATC / AMSAT-UK WebSDR at Goonhilly.</li>
+  </ul>
+  <p>None of these uses AWS Ground Station, which is why they are out of scope for this project.</p>
+</section>
+
+<section aria-labelledby="twin-title">
+  <h2 id="twin-title">2. What we will test with the digital twin</h2>
+
+  <p>The digital twin provides copies of every AWS Ground Station location, named <code>Digital Twin &lt;station&gt;</code>, with the same capabilities, site masks and coordinates. It returns the same API responses and emits the same EventBridge events as production. It has been generally available since August 2024 in every region where Ground Station runs.</p>
+
+  <h3>Onboarding status</h3>
+  <table>
+    <caption>Checked on 18 November 2026</caption>
+    <thead>
+      <tr><th scope="col">Item</th><th scope="col">Status</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Onboarding required</td><td><span class="tag yes">Yes</span> - through the Satellite Onboarding Questionnaire in the console (Satellites and Resources). Public broadcast satellites are accepted.</td></tr>
+      <tr><td>Account</td><td>AWS states it must be a <strong>non-production account</strong>. Whether this is enforced is to be confirmed.</td></tr>
+      <tr><td>Current account</td><td><span class="tag no">Not onboarded</span> - no <code>Digital Twin</code> station in <code>list-ground-stations</code> (5 regions checked); <code>list-contacts</code> on <code>Digital Twin Stockholm 1</code> returns 0.</td></tr>
+      <tr><td>Request</td><td>Drafted in <code>docs/DIGITAL_TWIN_ONBOARDING_REQUEST.md</code> (NOAA-20, five sites, six questions).</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Test scope</h3>
+  <ol>
+    <li><strong>Scheduling:</strong> <code>ListContacts</code>, <code>ReserveContact</code> and <code>CancelContact</code> for the async (DigIF to S3) and sync (demod/decode to EC2) mission profiles, with production-like contention.</li>
+    <li><strong>Config regression:</strong> deploy Terraform changes to mission profiles, configs and dataflow endpoint groups, and confirm contacts are still offered. The two defects that left the sync profile with 0 contacts (missing <code>dataflowEndpointRegion</code>; re-serialised demod/decode JSON) took manual trials against production. The twin would catch this kind of defect without touching production.</li>
+    <li><strong>Event-driven chain:</strong> PREPASS event to <code>receiver_arm</code> Lambda, receiver EC2 start, SSM arm, listener bind; then COMPLETED event to Step Functions, IAM permissions and CloudWatch alarms.</li>
+    <li><strong>Timing:</strong> receiver arm sequence against the mission profile pre-pass duration.</li>
+    <li><strong>Contact lifecycle against dataflow endpoints:</strong> endpoint group handling during a synthetic contact.</li>
+    <li><strong>Uplink control plane (exploratory):</strong> whether an S-band <code>AntennaUplinkConfig</code> + <code>UplinkEchoConfig</code> mission profile can be created and scheduled. This depends on AWS's answer.</li>
+  </ol>
+</section>
+
+<section aria-labelledby="limits-title">
+  <h2 id="limits-title">3. Limits of the digital twin test</h2>
+
+  <div class="cols">
+    <div class="card">
+      <h3 class="yes">Validated</h3>
+      <ul>
+        <li>API calls and responses</li>
+        <li>Mission profile and config acceptance</li>
+        <li>Contact scheduling and contention</li>
+        <li>EventBridge events and the automation they trigger</li>
+        <li>IAM, Lambda, EC2, Step Functions, alarms</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 class="no">Not validated</h3>
+      <ul>
+        <li>Any radio transmission, uplink or downlink</li>
+        <li>Payload data: no dataflow delivery, nothing reaches S3 or EC2</li>
+        <li>Telemetry: not supported on twin stations</li>
+        <li>Packet format of the sync egress, frame sync, RT-STPS, CSPP</li>
+        <li>Link budget, elevation and weather effects</li>
+      </ul>
+    </div>
+  </div>
+
+  <table>
+    <caption>Open points</caption>
+    <thead>
+      <tr><th scope="col">Open point</th><th scope="col">Status</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Price of digital twin contacts</td><td><span class="tag unk">Unknown</span> AWS only says "significantly lower" than production</td></tr>
+      <tr><td>Quotas, 7-day listing horizon, minimum contact duration</td><td><span class="tag unk">Unknown</span></td></tr>
+      <tr><td>Onboarding lead time</td><td><span class="tag unk">Unknown</span></td></tr>
+      <tr><td>Uplink config accepted against a downlink-only satellite</td><td><span class="tag unk">Unknown</span> - not allowed in production</td></tr>
+      <tr><td>Non-production account mandatory</td><td><span class="tag unk">To confirm</span> - if yes, a test account with its own copy of <code>infra/</code> is needed</td></tr>
+    </tbody>
+  </table>
+
+  <p>Conclusion: the digital twin validates the <strong>control plane</strong> only. The <strong>data plane</strong> still needs one real contact, and an <strong>RF uplink</strong> through AWS Ground Station needs your own S-band satellite.</p>
+</section>
+
+<section aria-labelledby="next-title">
+  <h2 id="next-title">4. Next steps</h2>
+  <ol>
+    <li>Decide on the account (new non-production account, or ask AWS first).</li>
+    <li>Fill the placeholders in <code>docs/DIGITAL_TWIN_ONBOARDING_REQUEST.md</code> and submit it through the console questionnaire.</li>
+    <li>Once onboarded, check that <code>Digital Twin</code> stations are listed, deploy the infrastructure, and run the test scope above.</li>
+  </ol>
+</section>
+
+</main>
+
+<footer>
+  <p><strong>Sources</strong></p>
+  <ul>
+    <li><a href="https://docs.aws.amazon.com/ground-station/latest/ug/getting-started.step1.html">AWS Ground Station - Onboard satellite / public broadcast satellites</a></li>
+    <li><a href="https://docs.aws.amazon.com/ground-station/latest/ug/locations.capabilities.html">AWS Ground Station - Site capabilities</a></li>
+    <li><a href="https://docs.aws.amazon.com/ground-station/latest/ug/digital-twin.html">AWS Ground Station - Digital twin</a></li>
+    <li><a href="https://aws.amazon.com/about-aws/whats-new/2024/08/digital-twin-available-aws-ground-station/">AWS What's New - Digital twin generally available (August 2024)</a></li>
+    <li><a href="https://aws.amazon.com/blogs/publicsector/test-and-integrate-ground-segment-with-aws-ground-station-digital-twin/">AWS Public Sector Blog - Test and integrate ground segment with the digital twin</a></li>
+    <li>Account checks: <code>list-satellites</code>, <code>list-ground-stations</code>, <code>list-contacts</code> (18 November 2026)</li>
+    <li>Full detail: <code>docs/SATELLITES_PBS_AND_UPLINK.md</code></li>
+  </ul>
+  <p>Content from the sources above was rephrased for compliance with licensing restrictions.</p>
+</footer>
+
+</body>
+</html>

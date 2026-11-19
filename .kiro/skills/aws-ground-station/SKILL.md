@@ -27,9 +27,10 @@ Anything not verified is marked `[unverified]`. Do not turn an `[unverified]` it
 
 1. **A reservation is a paid act.** ~$110-130 for a ~10.5 min narrowband contact. Never script
    `reserve-contact` without the user's explicit go-ahead.
-2. **`terraform apply` is run by the agent, only with the user's explicit agreement.** This repo has
-   no CI pipeline (no `.github/workflows`); apply runs locally from `infra/`. Show the `plan` summary
-   first, wait for the go-ahead, then apply. No go-ahead, no apply.
+2. **`terraform apply` is run by the orchestrating session only, with the user's explicit agreement**
+   (rule in `.kiro/steering/delegation-and-safety.md`). No CI pipeline; apply runs locally from
+   `infra/`. Show the plan summary, wait for the go-ahead, save it as `*.approved.tfplan`, apply that
+   file. Subagents stay plan-only; the `block-terraform-apply` hook enforces it.
    Re-enabling the scheduler cron through an apply once booked two unintended paid contacts.
 3. **7-day wall** [practice]: `ListContacts` throws `ResourceLimitExceededException` beyond 7 days
    ahead on this account.
@@ -43,6 +44,11 @@ Anything not verified is marked `[unverified]`. Do not turn an `[unverified]` it
 
 - NOAA-20 HRD is 30 MHz wide, below the 40 MHz threshold, so it bills as **narrowband ($10/min)**,
   not wideband (AWS pricing page). The v15 deck assumed wideband: wrong.
+- On-demand rates are **per site**; the pricing web page shows no figures, the Price List API does:
+  `aws pricing get-products --service-code AWSGroundStation --region us-east-1`. Effective
+  2026-09-01: $10 narrowband / $22 wideband at Bahrain, Cape Town, Ireland, Ohio, Oregon,
+  Singapore, Stockholm; **$15 / $25 at Alaska, Dubbo, Hawaii, Punta Arenas**. Cost Explorer for
+  this account confirms (Hawaii 1 billed $15/min) [practice]. Reserved rates are not in the API.
 - DigIF ships ~30x the demodulated bitstream: one ~10 min contact is ~43-59 GB of `.pcap`
   (22-27 chunks of ~2.18 GB) [practice].
 - Public-broadcast (PBS) satellites such as NOAA-20: AWS manages the ephemeris; custom ephemeris

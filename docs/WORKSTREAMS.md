@@ -26,8 +26,9 @@ from `cdcfbfa`.
   them. Before running a trial, check nothing from another session is mid-run with the same names.
 - **Nothing is reserved without the user's go-ahead.** A contact is a paid act (~$110-130); the scheduler
   cron stays disabled.
-- **`terraform apply` is run by the agent, with the user's explicit agreement** given after reading the
-  plan summary. One apply at a time across all sessions.
+- **`terraform apply` is run by the orchestrating session, with the user's explicit agreement** given
+  after reading the plan summary; subagents are plan-only (`.kiro/steering/delegation-and-safety.md`).
+  One apply at a time across all sessions.
 - **SSO sessions expire** roughly every few hours; any session may need `aws sso login --use-device-code`.
 - Findings that change how the project works go to `.kiro/steering/aws-knowledge.md` (practice) and the
   Ground Station SKILL, so the other sessions pick them up.

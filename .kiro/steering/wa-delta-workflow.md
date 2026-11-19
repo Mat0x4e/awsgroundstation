@@ -45,7 +45,7 @@ excerpts) and implements exactly one task's scope.
 
 ### Gate 2 — VALIDATE (correctness)
 - **Terraform:** `terraform validate` then `terraform -chdir=infra plan`. **Plan-only — never
-  `apply`** (operators/pipeline own apply). The plan must show only the intended diff; an import
+  `apply`** (the orchestrating session applies, with the user's agreement). The plan must show only the intended diff; an import
   task must show import/no-destroy, not recreate.
 - **Python:** run the relevant pytest (and moto tests) via the project venv
   (`./test_env/Scripts/python.exe -m pytest ...`). New behaviour needs a test that fails if the
@@ -92,8 +92,8 @@ treat it as a hard stop.
 
 ## Rules
 
-- **Plan-only Terraform.** This workflow never runs `terraform apply`. The CI/CD pipeline or an
-  operator applies after review.
+- **Plan-only Terraform.** This workflow never runs `terraform apply`. The orchestrating session
+  applies after the user agrees to the plan (`delegation-and-safety.md`); there is no CI/CD pipeline.
 - **One concern per commit.** Stage only the files for the task at hand; review `git status`
   first. Never `git add -A`.
 - **Backport learnings.** A gotcha discovered mid-task is written back into the most specific

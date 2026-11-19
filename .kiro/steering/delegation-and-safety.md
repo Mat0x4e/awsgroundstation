@@ -16,14 +16,23 @@ without needing to invoke a workflow file. Keep this file short so the always-on
   edit Python directly.
 - Docs (`*.md`, diagram YAML) may be edited directly, or via `docs-writer` for large rewrites.
 
-## Terraform is PLAN-ONLY from agents
+## Terraform apply: orchestrator only, with the user's explicit agreement
 
-- Agents NEVER run `terraform apply`. Produce `terraform validate` + `terraform plan` only,
-  then hand the plan to the operator. The operator applies (they own the SSO session and the
-  spend). This is a hard rule, not a preference.
-- When re-applying after a `latest_version`-pinned launch-template change, the operator must
-  run a FRESH `terraform apply` (no saved `-out` plan file), or Terraform throws
-  "Provider produced inconsistent final plan" (see aws-knowledge.md).
+(Decided by the project owner 2026-11-19; replaces the earlier "operator applies" rule.)
+
+- **Subagents are PLAN-ONLY.** The `terraform` subagent and every workflow step produce
+  `terraform validate` + `terraform plan` and stop. They never run `terraform apply` / `destroy`.
+- **The orchestrating session applies**, and only after the user has explicitly agreed to a plan
+  summary shown in the conversation (resources, change type, any destroy/replace). No agreement,
+  no apply. A general "go ahead with the work" is not agreement to apply.
+- Save the agreed plan as `$env:TEMP\<name>.approved.tfplan` and apply exactly that file
+  (`terraform apply <file>.approved.tfplan`). The `block-terraform-apply` hook only lets through an
+  apply of a `*.approved.tfplan` file. Prefer `-target` when the full plan contains unrelated changes.
+- One apply at a time across all sessions (see `docs/WORKSTREAMS.md`). After applying, verify by
+  evidence (read the resources back, re-run `terraform plan`).
+- Exception: after a `latest_version`-pinned launch-template change, a saved plan file throws
+  "Provider produced inconsistent final plan" (see aws-knowledge.md). Then apply FRESH (no plan
+  file), which the hook blocks: ask the user to run that apply themselves.
 
 ## Verify by evidence, not by exit code
 

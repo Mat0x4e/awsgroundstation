@@ -1,0 +1,217 @@
+Diagram:
+  DefinitionFiles:
+    - Type: URL
+      Url: "https://raw.githubusercontent.com/awslabs/diagram-as-code/main/definitions/definition-for-aws-icons-light.yaml"
+
+  Resources:
+    Canvas:
+      Type: AWS::Diagram::Canvas
+      Direction: vertical
+      Children:
+        - Title
+        - Body
+
+    Title:
+      Type: AWS::Diagram::Resource
+      Title: "Case A - Uplink with AWS Ground Station: operator brings the modem (software, on EC2), AWS brings antenna + RF"
+      Align: center
+
+    Body:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - Unmanaged
+        - AWSCloud
+
+    Unmanaged:
+      Type: AWS::Diagram::VerticalStack
+      Children:
+        - Satellite
+        - Operators
+
+    Satellite:
+      Type: AWS::Diagram::Resource
+      Preset: "Satellite"
+      Title: "Own satellite - S-band RX 2025-2110 MHz"
+      Align: center
+
+    Operators:
+      Type: AWS::Diagram::Resource
+      Preset: "Users"
+      Title: "Flight operations team"
+      Align: center
+
+    AWSCloud:
+      Type: AWS::Diagram::Cloud
+      Preset: AWSCloudNoLogo
+      Direction: horizontal
+      Align: center
+      Children:
+        - RegionAntenna
+        - RegionMain
+
+    RegionAntenna:
+      Type: AWS::Region
+      Title: "Antenna region (e.g. eu-north-1)"
+      Direction: vertical
+      Children:
+        - GroundStation
+        - Kinesis
+
+    GroundStation:
+      Type: AWS::Diagram::Resource
+      Preset: "AWS Ground Station"
+      Title: "Stockholm 1 - S-band TX 20-50 dBW, <=40 MHz"
+      Align: center
+
+    Kinesis:
+      Type: AWS::Kinesis::Stream
+      Title: "Antenna telemetry (Kinesis)"
+      Align: center
+
+    RegionMain:
+      Type: AWS::Region
+      Title: "Operations region (e.g. eu-central-1)"
+      Direction: vertical
+      Children:
+        - VPC
+        - RowServices
+
+    VPC:
+      Type: AWS::EC2::VPC
+      Direction: horizontal
+      Children:
+        - PublicSubnet
+        - PrivateSubnet
+
+    PublicSubnet:
+      Type: AWS::EC2::Subnet
+      Preset: PublicSubnet
+      Children:
+        - ModemInstance
+
+    ModemInstance:
+      Type: AWS::EC2::Instance
+      Title: "GS Agent + SDR modem, EIP"
+      Align: center
+
+    PrivateSubnet:
+      Type: AWS::EC2::Subnet
+      Preset: PrivateSubnet
+      Children:
+        - MCSInstance
+
+    MCSInstance:
+      Type: AWS::EC2::Instance
+      Title: "Mission control (YAMCS / OpenC3)"
+      Align: center
+
+    RowServices:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - EventBridge
+        - ArmLambda
+        - KMS
+        - Archive
+
+    EventBridge:
+      Type: AWS::Events::Rule
+      Title: "Contact state events"
+      Align: center
+
+    ArmLambda:
+      Type: AWS::Lambda::Function
+      Title: "Start/stop modem EC2"
+      Align: center
+
+    KMS:
+      Type: AWS::KMS
+      Title: "KMS key (DigIF encryption)"
+      Align: center
+
+    Archive:
+      Type: AWS::S3::Bucket
+      Title: "Command log, echo, TM"
+      Align: center
+
+  Links:
+    - Source: GroundStation
+      SourcePosition: W
+      Target: Satellite
+      TargetPosition: E
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        AutoLeft:
+          Title: "S-band TC up / TM down"
+
+    - Source: Operators
+      SourcePosition: E
+      Target: MCSInstance
+      TargetPosition: S
+      Type: orthogonal
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceLeft:
+          Title: "SSM / VPN"
+
+    - Source: MCSInstance
+      SourcePosition: W
+      Target: ModemInstance
+      TargetPosition: E
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        AutoLeft:
+          Title: "TC frames"
+
+    - Source: ModemInstance
+      SourcePosition: NW
+      Target: GroundStation
+      TargetPosition: E
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceLeft:
+          Title: "VITA-49 IQ uplink"
+
+    - Source: GroundStation
+      SourcePosition: SE
+      Target: ModemInstance
+      TargetPosition: W
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetRight:
+          Title: "echo + TM"
+
+    - Source: GroundStation
+      SourcePosition: S
+      Target: Kinesis
+      TargetPosition: N
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+
+    - Source: GroundStation
+      SourcePosition: SSE
+      Target: EventBridge
+      TargetPosition: W
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+
+    - Source: EventBridge
+      SourcePosition: E
+      Target: ArmLambda
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: MCSInstance
+      SourcePosition: S
+      Target: Archive
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open

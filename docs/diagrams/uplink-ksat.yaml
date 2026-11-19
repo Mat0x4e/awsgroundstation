@@ -1,0 +1,237 @@
+Diagram:
+  DefinitionFiles:
+    - Type: URL
+      Url: "https://raw.githubusercontent.com/awslabs/diagram-as-code/main/definitions/definition-for-aws-icons-light.yaml"
+
+  Resources:
+    Canvas:
+      Type: AWS::Diagram::Canvas
+      Direction: vertical
+      Children:
+        - Title
+        - Body
+
+    Title:
+      Type: AWS::Diagram::Resource
+      Title: "Case B - Uplink with KSAT (KSATlite): KSAT brings antenna + modem, operator sends TC frames over a secure link"
+      Align: center
+
+    Body:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - Unmanaged
+        - KSATNet
+        - AWSCloud
+
+    Unmanaged:
+      Type: AWS::Diagram::VerticalStack
+      Children:
+        - Satellite
+        - Operators
+
+    Satellite:
+      Type: AWS::Diagram::Resource
+      Preset: "Satellite"
+      Title: "Own satellite - S-band RX"
+      Align: center
+
+    Operators:
+      Type: AWS::Diagram::Resource
+      Preset: "Users"
+      Title: "Flight operations team"
+      Align: center
+
+    KSATNet:
+      Type: AWS::Diagram::VerticalStack
+      Children:
+        - KSATAntenna
+        - KSATModem
+        - KSATNOC
+        - KSATAPI
+
+    KSATAntenna:
+      Type: AWS::Diagram::Resource
+      Preset: "Corporate data center"
+      Title: "KSAT site antenna (3.7-6.1 m, S up/down)"
+      Align: center
+
+    KSATModem:
+      Type: AWS::Diagram::Resource
+      Preset: "Server"
+      Title: "KSAT modem (TC mod / TM demod)"
+      Align: center
+
+    KSATAPI:
+      Type: AWS::Diagram::Resource
+      Preset: "Internet"
+      Title: "KSATlite portal + REST scheduling API"
+      Align: center
+
+    KSATNOC:
+      Type: AWS::Diagram::Resource
+      Preset: "Office building"
+      Title: "TNOC Tromso - 24/7 network ops"
+      Align: center
+
+    AWSCloud:
+      Type: AWS::Diagram::Cloud
+      Preset: AWSCloudNoLogo
+      Direction: vertical
+      Align: center
+      Children:
+        - RegionMain
+
+    RegionMain:
+      Type: AWS::Region
+      Title: "Operator account (e.g. eu-central-1)"
+      Direction: vertical
+      Children:
+        - VPC
+        - RowServices
+
+    VPC:
+      Type: AWS::EC2::VPC
+      Direction: horizontal
+      Children:
+        - VPNGW
+        - PrivateSubnet
+
+    VPNGW:
+      Type: AWS::EC2::VPNGateway
+      Title: "Site-to-Site VPN to KSAT"
+      Align: center
+
+    PrivateSubnet:
+      Type: AWS::EC2::Subnet
+      Preset: PrivateSubnet
+      Children:
+        - MCSInstance
+
+    MCSInstance:
+      Type: AWS::EC2::Instance
+      Title: "Mission control + SLE / TCP client"
+      Align: center
+
+    RowServices:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - Scheduler
+        - SchedLambda
+        - Secret
+        - Archive
+
+    Scheduler:
+      Type: AWS::Events::Rule
+      Title: "EventBridge schedule"
+      Align: center
+
+    SchedLambda:
+      Type: AWS::Lambda::Function
+      Title: "Pass booking (KSATlite API)"
+      Align: center
+
+    Secret:
+      Type: AWS::SecretsManager::Secret
+      Title: "KSAT API credentials"
+      Align: center
+
+    Archive:
+      Type: AWS::S3::Bucket
+      Title: "Command log, TM, payload data delivery"
+      Align: center
+
+  Links:
+    - Source: KSATAntenna
+      SourcePosition: W
+      Target: Satellite
+      TargetPosition: E
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        AutoLeft:
+          Title: "S-band TC uplink / TM downlink"
+
+    - Source: KSATModem
+      SourcePosition: N
+      Target: KSATAntenna
+      TargetPosition: S
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        AutoRight:
+          Title: "RF"
+
+    - Source: MCSInstance
+      SourcePosition: W
+      Target: VPNGW
+      TargetPosition: E
+      TargetArrowHead:
+        Type: Open
+
+    - Source: VPNGW
+      SourcePosition: W
+      Target: KSATModem
+      TargetPosition: E
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        AutoLeft:
+          Title: "TC frames out, TM frames in (SLE or TCP - per KSAT ICD)"
+
+    - Source: Operators
+      SourcePosition: S
+      Target: MCSInstance
+      TargetPosition: S
+      Type: orthogonal
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "SSM / VPN"
+
+    - Source: Scheduler
+      SourcePosition: E
+      Target: SchedLambda
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: SchedLambda
+      SourcePosition: W
+      Target: KSATAPI
+      TargetPosition: E
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetRight:
+          Title: "HTTPS - book passes"
+
+    - Source: SchedLambda
+      SourcePosition: E
+      Target: Secret
+      TargetPosition: W
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+
+    - Source: KSATModem
+      SourcePosition: SE
+      Target: Archive
+      TargetPosition: N
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetLeft:
+          Title: "data delivery (optional)"
+
+    - Source: KSATNOC
+      SourcePosition: N
+      Target: KSATModem
+      TargetPosition: S
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        AutoRight:
+          Title: "monitors"

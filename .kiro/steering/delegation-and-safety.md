@@ -37,6 +37,8 @@ without needing to invoke a workflow file. Keep this file short so the always-on
   other than a single unchained apply of a `*.approved.tfplan` file. It catches accidents and
   subagents; it cannot prove the user agreed, because approval is only a filename. The agreement in
   the conversation is the control. Terraform itself rejects a saved plan once state has moved.
+  It errs on the side of blocking: any command whose TEXT contains "terraform ... apply" (a commit
+  message, an echo) is blocked too. Reword the text rather than working around the hook.
 - Exception: after a `latest_version`-pinned launch-template change, a saved plan file throws
   "Provider produced inconsistent final plan" (see aws-knowledge.md). Then apply FRESH (no plan
   file), which the hook blocks: ask the user to run that apply themselves.

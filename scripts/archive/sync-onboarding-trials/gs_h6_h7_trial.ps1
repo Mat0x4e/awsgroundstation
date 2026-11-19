@@ -79,7 +79,7 @@ try {
   "objects created; waiting 150 s"; Start-Sleep -Seconds 150
   foreach ($k in $ids.Keys) {
     "== $k"
-    if ($ids[$k]) { powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\gs_list_sync_contacts.ps1" -ProfileId $ids[$k] | Select-String "contacts|ERROR" }
+    if ($ids[$k]) { powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\..\gs_list_sync_contacts.ps1" -ProfileId $ids[$k] | Select-String "contacts|ERROR" }
   }
 } catch { "ERROR: $_" }
 finally {

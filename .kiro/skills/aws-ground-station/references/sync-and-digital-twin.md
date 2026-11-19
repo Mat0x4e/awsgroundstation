@@ -39,7 +39,7 @@ Observed differences, none proven causal: sync profile has pre-pass 600 s / min 
 endpoint group has pre-pass 120 s (the AWS example uses 120 s on both); the sync profile is the only one
 using `AntennaDownlinkDemodDecodeConfig`. The AWS API docs state no constraint tying the two durations.
 
-**Trial 1 (2026-11-13, `scripts/gs_sync_profile_trial.ps1`)**: throwaway clone of the sync profile with
+**Trial 1 (2026-11-13, `scripts/archive/sync-onboarding-trials/gs_sync_profile_trial.ps1`)**: throwaway clone of the sync profile with
 pre-pass 120 s / post 120 s / min viable 180 s (same edges, same tracking config), deleted right after.
 Result: **still 0 contacts on all 7 stations** -> H3 (durations) is ruled out.
 Also checked: the demod/decode config (7812 MHz, 30 MHz, RHCP, QPSK 15 Msps, Viterbi 1/2, NRZ-M,
@@ -49,11 +49,11 @@ Oregon 1, Stockholm 1, ephemeris source SPACE_TRACK. Remaining suspects: H5 (sat
 onboarded for demod/decode, onboarding is per capability `[unverified]`) or an undocumented rule.
 AWS support confirmed (2026-11-18) that the account is onboarded for demod/decode -> H5 ruled out.
 
-**Trial 2 (`scripts/gs_sync_profile_trial2.ps1`)**: AWS's template sets `DataflowEndpointRegion` on the
+**Trial 2 (`scripts/archive/sync-onboarding-trials/gs_sync_profile_trial2.ps1`)**: AWS's template sets `DataflowEndpointRegion` on the
 endpoint config; ours does not. Throwaway endpoint config WITH the region + throwaway profile (our demod
 config, our tracking config, 120/60/180 s): **still 0 contacts**. Both deleted.
 
-**Trial 3 (`scripts/gs_aqua_template_trial.ps1`)**: AWS's own `AquaSnppJpss.yml`
+**Trial 3 (`scripts/archive/sync-onboarding-trials/gs_aqua_template_trial.ps1`)**: AWS's own `AquaSnppJpss.yml`
 (`s3://groundstation-cloudformation-templates-eu-central-1/AquaSnppJpss.yml`) deployed in minimal form
 (`CreateReceiverInstance=No`, no Lambdas, no SNS; needs an existing EC2 key pair even without EC2, a
 throwaway one was created and deleted). Result, window 2026-11-18 -> 2026-11-25:
@@ -74,7 +74,7 @@ Still different between the working template and ours (not yet isolated):
 Trial 2 already excluded the profile durations and `DataflowEndpointRegion` against OUR group, which
 points at the group (or the objects it references) rather than the profile.
 
-**Trial 4 - bisect** (`scripts/gs_bisect_trial.ps1`, template stack up, 4 throwaway profiles created together,
+**Trial 4 - bisect** (`scripts/archive/sync-onboarding-trials/gs_bisect_trial.ps1`, template stack up, 4 throwaway profiles created together,
 listed after 150 s so propagation is not the explanation; same tracking config in all):
 
 | Profile | Antenna config | Endpoint config (+ its group) | Contacts |
@@ -86,7 +86,7 @@ listed after 150 s so propagation is not the explanation; same tracking config i
 
 Only the template's PAIR works; swapping either half breaks it. Our tracking config is not the problem.
 
-**Diff of the stored objects** (`scripts/gs_diff_template_vs_ours.ps1`, read-only):
+**Diff of the stored objects** (`scripts/archive/sync-onboarding-trials/gs_diff_template_vs_ours.ps1`, read-only):
 - antenna config: **semantically identical**. Only differences: name/tags and the formatting of
   `unvalidatedJSON` - the template's is the AWS sample string as written (spaces, order `type`, `qpsk`,
   `edges`, `nodeConfigs`...), ours is machine-compacted with alphabetically sorted keys (Terraform
@@ -98,7 +98,7 @@ Only the template's PAIR works; swapping either half breaks it. Our tracking con
 
 Two separate breakages (A and B) need two separate causes: H6 for the antenna side, H7 for the group side.
 
-**Trial 5** (`scripts/gs_h6_h7_trial.ps1`), all paired with the template's antenna config unless noted:
+**Trial 5** (`scripts/archive/sync-onboarding-trials/gs_h6_h7_trial.ps1`), all paired with the template's antenna config unless noted:
 
 | Profile | What changed | Contacts |
 |---|---|---|
@@ -111,12 +111,12 @@ P1: a config does not need CloudFormation origin to work. H6 (string formatting)
 P2-P4: **confounded** - their endpoint configs had no `dataflowEndpointRegion` (see trial 7), which alone
 explains the zeros. mtu, role and SG are NOT ruled out by this trial.
 
-**Trial 6** (`scripts/gs_trial6_address.ps1`): CLI groups identical to ours (mtu 1500, our role, our SG) on
+**Trial 6** (`scripts/archive/sync-onboarding-trials/gs_trial6_address.ps1`): CLI groups identical to ours (mtu 1500, our role, our SG) on
 (P1) the template's ENI, (P2) a fresh unattached ENI, (P3, control) our ENI 172.31.23.74 (attached as
 device 1 to the STOPPED sync receiver `i-06a51f5b29e26aeaa`): 0 contacts in all three. **Also confounded**
 (endpoint configs without region) - the ENI is not ruled out by this trial.
 
-**Trial 7** (`scripts/gs_trial7_full_copy.ps1`): CLI group = full copy of the template group (template
+**Trial 7** (`scripts/archive/sync-onboarding-trials/gs_trial7_full_copy.ps1`): CLI group = full copy of the template group (template
 address, no mtu, template role + SG, pre 120 / post 180), template antenna config, our tracking config.
 
 | Variant | Single change from Q1 | Contacts (Cape Town / Hawaii / Ohio / Oregon / Stockholm) |
@@ -135,7 +135,7 @@ optional; in practice it is required for contacts to be offered `[practice]`.
 and trial 2 (our antenna + region + our group) = 0, so our antenna config fails even when the endpoint
 side is good.
 
-**Trial 8** (`scripts/gs_trial8_antenna_and_group.ps1`), all with a known-good counterpart:
+**Trial 8** (`scripts/archive/sync-onboarding-trials/gs_trial8_antenna_and_group.ps1`), all with a known-good counterpart:
 
 | Profile | Test | Contacts (CT / HI / OH / OR / STO) |
 |---|---|---|

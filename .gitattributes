@@ -10,3 +10,10 @@
 *.tf    text eol=lf
 *.yaml  text eol=lf
 *.yml   text eol=lf
+
+# Ground Station unvalidatedJSON payloads are sent to AWS as the exact file bytes
+# (file()/templatefile() in infra/modules/sync_pipeline/groundstation.tf). The backend
+# matches that string closely (a key-sorted rewrite of the same JSON gets 0 contacts),
+# so a CRLF rewrite on checkout is a functional change. Keep them LF everywhere.
+*.json  text eol=lf
+*.tpl   text eol=lf

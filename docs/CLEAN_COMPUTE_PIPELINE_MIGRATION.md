@@ -296,8 +296,7 @@ after a real sync contact validates `RTSTPS=off` (contact-7 is async DigIF and c
 
 **Done (was flagged for separate cleanup):** `satdump-noaa20-processing`, the old out-of-IaC CodeBuild
 project (OE-1 finding), and its role `codebuild-satdump-role` were deleted on 2026-10-22 (confirmed
-absent 2026-11-19). Its log group `/aws/codebuild/satdump-noaa20-processing` is still there (see
-`docs/WORKSTREAMS.md`, Terraform clean reference).
+absent 2026-11-19). Its log group `/aws/codebuild/satdump-noaa20-processing` was deleted 2026-11-19.
 
 ### State after task 8
 

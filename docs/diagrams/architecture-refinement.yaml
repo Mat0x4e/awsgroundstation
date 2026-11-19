@@ -13,7 +13,7 @@ Diagram:
 
     Title:
       Type: AWS::Diagram::Resource
-      Title: "protogroundstation - Well-Architected refinement - target state (deltas marked [+] new / [~] changed)"
+      Title: "protogroundstation - Well-Architected refinement - DEPLOYED state 2026-10-22 (deltas [+] new / [~] changed); runtime compute now AWS Batch (ADR-002)"
       Align: center
 
     Body:
@@ -94,7 +94,7 @@ Diagram:
 
     CodeBuildImage:
       Type: AWS::CodeBuild::Project
-      Title: "[+] CodeBuild - SDR image build (OE-1, now in Terraform)"
+      Title: "[+] CodeBuild - SDR + viirs image builds (OE-1, in Terraform; build from main)"
       Align: center
 
     LUTCache:
@@ -128,22 +128,22 @@ Diagram:
       Type: AWS::Diagram::HorizontalStack
       Children:
         - ECR
-        - CodeBuildChunks
-        - CodeBuildAgg
+        - BatchChunks
+        - BatchAgg
 
     ECR:
       Type: AWS::ECR
       Title: "ECR - SatDump, RT-STPS, CSPP"
       Align: center
 
-    CodeBuildChunks:
-      Type: AWS::CodeBuild::Project
-      Title: "CodeBuild - 22 chunks, 19 parallel"
+    BatchChunks:
+      Type: AWS::Batch
+      Title: "[~] AWS Batch - Spot fan-out, N chunk jobs (ADR-002, was CodeBuild)"
       Align: center
 
-    CodeBuildAgg:
-      Type: AWS::CodeBuild::Project
-      Title: "CodeBuild - aggregation"
+    BatchAgg:
+      Type: AWS::Batch
+      Title: "[~] AWS Batch - on-demand aggregation (ADR-002, was CodeBuild)"
       Align: center
 
     RowProducts:
@@ -151,6 +151,7 @@ Diagram:
       Children:
         - OutputBucket
         - VizLambda
+        - BatchRender
         - CloudWatch
 
     OutputBucket:
@@ -160,7 +161,12 @@ Diagram:
 
     VizLambda:
       Type: AWS::Lambda::Function
-      Title: "[~] VIIRS visualization (emits ProductsWritten, REL-4)"
+      Title: "[~] VIIRS orchestrator (RENDER_COMPUTE=batch -> submit_job)"
+      Align: center
+
+    BatchRender:
+      Type: AWS::Batch
+      Title: "[+] AWS Batch - on-demand render, dedicated viirs image (ADR-002 Stage 3)"
       Align: center
 
     CloudWatch:
@@ -192,7 +198,7 @@ Diagram:
       TargetArrowHead:
         Type: Open
       Labels:
-        AutoLeft:
+        SourceLeft:
           Title: "X-band HRD 15 Mbps"
 
     - Source: Planner
@@ -221,7 +227,7 @@ Diagram:
         Type: Open
       Type: orthogonal
       Labels:
-        AutoRight:
+        SourceRight:
           Title: "DigIF cross-region"
 
     - Source: GroundStation
@@ -254,7 +260,7 @@ Diagram:
 
     - Source: LUTCache
       SourcePosition: S
-      Target: CodeBuildAgg
+      Target: BatchAgg
       TargetPosition: NW
       LineStyle: dashed
       TargetArrowHead:
@@ -276,29 +282,29 @@ Diagram:
 
     - Source: StepFunctions
       SourcePosition: S
-      Target: CodeBuildChunks
+      Target: BatchChunks
       TargetPosition: NE
       TargetArrowHead:
         Type: Open
       Labels:
         TargetRight:
-          Title: "Map fan-out"
+          Title: "Map -> submitJob.sync"
 
     - Source: ECR
       SourcePosition: E
-      Target: CodeBuildChunks
+      Target: BatchChunks
       TargetPosition: W
       TargetArrowHead:
         Type: Open
 
-    - Source: CodeBuildChunks
+    - Source: BatchChunks
       SourcePosition: E
-      Target: CodeBuildAgg
+      Target: BatchAgg
       TargetPosition: W
       TargetArrowHead:
         Type: Open
 
-    - Source: CodeBuildChunks
+    - Source: BatchChunks
       SourcePosition: S
       Target: OutputBucket
       TargetPosition: NE
@@ -308,7 +314,7 @@ Diagram:
         SourceLeft:
           Title: "cadu"
 
-    - Source: CodeBuildAgg
+    - Source: BatchAgg
       SourcePosition: S
       Target: OutputBucket
       TargetPosition: E
@@ -326,6 +332,16 @@ Diagram:
         Type: Open
 
     - Source: VizLambda
+      SourcePosition: E
+      Target: BatchRender
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetRight:
+          Title: "[+] submit_job"
+
+    - Source: BatchRender
       SourcePosition: S
       Target: CloudWatch
       TargetPosition: N
@@ -334,7 +350,7 @@ Diagram:
         Type: Open
       Labels:
         SourceRight:
-          Title: "[+] ProductsWritten"
+          Title: "[+] ProductsWritten (post-sync, REL-4)"
 
     - Source: StepFunctions
       SourcePosition: E

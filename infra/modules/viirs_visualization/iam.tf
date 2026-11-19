@@ -59,6 +59,37 @@ resource "aws_iam_policy" "lambda_execution" {
         Action   = "codebuild:StartBuild"
         Resource = "arn:aws:codebuild:*:${var.account_id}:project/${var.project_name}-viirs-*"
       },
+      # Batch - submit the render job (Stage 3b). Scoped to BOTH the shared
+      # on-demand aggregation queue (render reuses project_name-agg-queue) and
+      # the unversioned render job definition. Region uses the * wildcard to
+      # match this file's existing ARN convention (no region var in this module).
+      {
+        Sid    = "SubmitRenderBatchJob"
+        Effect = "Allow"
+        Action = "batch:SubmitJob"
+        Resource = [
+          "arn:aws:batch:*:${var.account_id}:job-queue/${var.project_name}-agg-queue",
+          "arn:aws:batch:*:${var.account_id}:job-definition/${var.project_name}-render",
+        ]
+      },
+      # IAM PassRole is required so the Lambda can submit a job whose job
+      # definition references these task/execution roles. The PassedToService
+      # condition limits the grant to ECS tasks (Batch on EC2 uses the ECS task
+      # model, matching the render job roles' trust policy principal).
+      {
+        Sid    = "PassRenderJobRoles"
+        Effect = "Allow"
+        Action = "iam:PassRole"
+        Resource = [
+          "arn:aws:iam::${var.account_id}:role/${var.project_name}-batch-render-job",
+          "arn:aws:iam::${var.account_id}:role/${var.project_name}-batch-render-execution",
+        ]
+        Condition = {
+          StringEquals = {
+            "iam:PassedToService" = "ecs-tasks.amazonaws.com"
+          }
+        }
+      },
       # S3 — list and read objects from the SDR output bucket
       {
         Sid      = "S3ListBucket"

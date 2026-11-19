@@ -1,3 +1,11 @@
+> ## ⚠ LEGACY (demo-era) — 2026-10-22
+>
+> One of the three original demo-era specs (French), kept for history. The VIIRS
+> visualization render it describes was re-platformed from CodeBuild to AWS Batch by the
+> `clean-compute-pipeline` spec (ADR-002, Stage 3); render now runs as an AWS Batch job on a
+> dedicated image (`RENDER_COMPUTE=batch`), with CodeBuild retained only as a fallback. The
+> current runtime is documented in `docs/ARCHITECTURE.md`. Read this for the original intent only.
+
 # Requirements Document
 
 ## Introduction

@@ -3,7 +3,11 @@
 What is deployed, what works, and the exact conditions the NASA stack needs.
 Supersedes the former `DEPLOYMENT_STATUS.md` and `CSPP_SOLVED.md`.
 
-**Last verified 2026-09-01.**
+**Last verified 2026-09-01** (CSPP science recipe). **Compute updated 2026-10-22:** the
+runtime moved from CodeBuild to AWS Batch (fan-out, aggregation, render) per ADR-002 / the
+`clean-compute-pipeline` spec. Where this doc says "CodeBuild" for aggregation/CSPP, read
+"the on-demand AWS Batch aggregation job"; the CSPP *science* requirements below are
+compute-agnostic and unchanged.
 
 ---
 
@@ -45,10 +49,14 @@ with an error that points somewhere else entirely.
    redundant ~10 GB fills the CodeBuild disk and breaks `sdr_luts.sh`.
 
 3. **Run `sdr_luts.sh` ONLINE.** It populates the cache DB from `jpssdb.ssec.wisc.edu`
-   (~10 min). **CodeBuild reaches it; the EC2 aggregation instance cannot** — its security
-   group is SSM-outbound-only. Offline, CSPP times out five times over ~11 minutes and then
-   dies inside its own error handler with `TypeError: object of type 'bool' has no len()`.
-   **⇒ Run CSPP in CodeBuild, not on EC2.**
+   over HTTP (port 80, ~10 min). The compute running CSPP must have outbound 80 + 443.
+   The AWS Batch on-demand aggregation CE provides exactly this (its security group opens
+   port 80 egress to jpssdb.ssec.wisc.edu; `infra/modules/batch_compute/main.tf`). The
+   standalone EC2 aggregation instance could NOT (SSM-outbound-only) — which is why
+   aggregation originally ran on CodeBuild and now runs on Batch, not on that instance.
+   Offline, CSPP times out five times over ~11 minutes and then dies inside its own error
+   handler with `TypeError: object of type 'bool' has no len()`. PERF-1 (S3 LUT cache)
+   lets a warm run skip most of this fetch. **⇒ Run CSPP in the Batch aggregation job.**
 
 4. **Feed the `.h5` RDR, not `.PDS`.** CSPP's `ADL_Unpacker` rejects PDS.
 
@@ -65,9 +73,14 @@ tar xzf CSPP_SDR_V4.1_static_luts_j01.tar.gz -C /opt/     # req 2
     /tmp/rdr/RNSCA-RVIRS_j01_....h5                       # req 1 (keep the name!)
 ```
 
-Both steps are wired into [`../buildspecs/aggregation.yml`](../buildspecs/aggregation.yml),
-which the Step Functions state machine reads via `file()` — so the pipeline and any manual
-run use the same file. Reference/diagnostic buildspec: `../scripts/cspp_viirs_sdr.yml`.
+Both steps now live in [`../scripts/aggregation_entrypoint.sh`](../scripts/aggregation_entrypoint.sh),
+deployed to `s3://.../software/aggregation_entrypoint.sh` by
+[`../scripts/deploy_aggregation_entrypoint.sh`](../scripts/deploy_aggregation_entrypoint.sh);
+the AWS Batch aggregation job downloads and execs it at container start (so a script update
+takes effect without rebuilding the ECR image). The former
+`buildspecs/aggregation.yml` is no longer read by Terraform and is effectively retired
+(`aggregation_sync.yml` is still `file()`-read, but only on the CodeBuild **sync fallback**
+branch). Reference/diagnostic buildspec: `../scripts/cspp_viirs_sdr.yml`.
 
 ### Not the cause — do not re-litigate
 
@@ -105,11 +118,11 @@ mosaic is capped by link margin, not by CSPP.**
 |---|---|
 | Terraform (`infra/`) | Deployed. `enable_sdr_pipeline = true`, `enable_processing_pipeline = false` |
 | ECR image | SatDump 1.2.2 + RT-STPS 7.0+P1 + CSPP SDR 4.1.1 + straylight LUTs + ecotiles + AWS CLI |
-| Per-chunk processing | Working — I/Q extraction + SatDump + S3 upload |
+| Per-chunk processing | Working — I/Q extraction + SatDump + S3 upload, on **AWS Batch Spot** (`...-fanout-queue`, `...-chunk` job def) |
 | RT-STPS | Working — 5 RDRs (VIIRS, CrIS, ATMS, 2×OMPS) from concatenated CADU |
-| CSPP SDR | Working **in CodeBuild** (see recipe above) |
-| Trigger | `groundstation-noaa20-contact-completed-sdr`, once per contact. `…-pcap-uploaded` superseded, DISABLED |
-| VIIRS visualisation | Lambda + CodeBuild + ECR deployed. Invoked by the state machine (`StartVisualization`), **not** by S3 events — the output bucket deliberately emits none |
+| CSPP SDR | Working in the **AWS Batch on-demand aggregation job** (`...-agg-queue`, `...-aggregation`); see recipe above. Validated end-to-end on contact-7 (2026-10-17 warm data) |
+| Trigger | `groundstation-noaa20-contact-completed-sdr`, once per contact. `...-pcap-uploaded` superseded, DISABLED |
+| VIIRS visualisation | Lambda + **AWS Batch render** (`...-render` on the dedicated viirs image, `RENDER_COMPUTE=batch`) + retained CodeBuild fallback. Invoked by the state machine (`StartVisualization`), **not** by S3 events — the output bucket deliberately emits none. Both branches (satdump/nasa) validated on contact-7, 2026-10-22 |
 | Contact scheduler | **DISABLED on purpose.** Enabling it previously booked two unintended paid contacts. Reserve manually. |
 | CloudTrail, contact_scheduler resources | Declared in Terraform, deliberately **not applied** |
 

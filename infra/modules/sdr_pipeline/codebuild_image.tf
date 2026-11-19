@@ -4,56 +4,15 @@
 # pushes it to the sdr_pipeline ECR repository. Mirrors the pattern used by
 # viirs_visualization/codebuild.tf (viirs_docker_build).
 #
-# Requirement 1 (OE-1 / SEC-3): codifies the out-of-band "satdump-noaa20-processing"
-# project so that terraform apply can create and repair it.
+# This project (aws_codebuild_project.sdr_docker_build =>
+# groundstation-noaa20-sdr-docker-build) builds the SDR Docker image and pushes
+# it to the sdr_pipeline ECR repo.
 #
-# ─── IMPORT — adopting the existing deployed project (run once) ──────────────
-#
-# (a) ADOPTION: This resource codifies the project previously created out-of-band
-#     as "satdump-noaa20-processing". Importing it brings the existing project
-#     under Terraform management — no parallel project is created alongside it.
-#
-# (b) FIRST-APPLY REPLACEMENT — EXPECTED, ONE-TIME: CodeBuild project names are
-#     immutable. Renaming from "satdump-noaa20-processing" to the IaC-convention
-#     name "${var.project_name}-sdr-docker-build" (= "groundstation-noaa20-sdr-
-#     docker-build") forces destroy+recreate on the first apply after import.
-#     This is the accepted outcome — the old project is torn down and the new one
-#     is created; the project is immediately usable afterwards.
-#
-# (c) REPLACEMENT IS SAFE: The project has NO_ARTIFACTS and an idempotent purpose
-#     — it only clones the GitHub repo, builds the SDR Docker image, and pushes
-#     it to ECR. No build history, artifact archives, or caches are stored in the
-#     project itself. The ECR image is the sole durable artefact; it is completely
-#     unaffected by the rename. Running the project once after recreate restores
-#     full functionality.
-#
-# (d) NOTHING IS LOST: The hand-added S3 docker-build/* read that existed on the
-#     out-of-band "satdump-noaa20-processing" role is fully codified in iam.tf
-#     (aws_iam_role_policy.codebuild_docker_build, Sids S3GetDockerBuildArtifacts
-#     and S3ListDockerBuildPrefix). The new role is created before the project is
-#     destroyed; no access gap occurs during the replacement.
-#
-# ── How to import ─────────────────────────────────────────────────────────────
-#
-# Option A (preferred — TF ≥ 1.5 native import block; uncomment the block below):
-#   1. Uncomment the `import { ... }` block below.
-#   2. terraform -chdir=infra plan
-#      → expect: 1 to import (satdump-noaa20-processing) + 1 to replace
-#   3. terraform -chdir=infra apply   ← imports AND replaces in one step
-#   4. Re-comment the import block after apply completes (keeps the file clean).
-#
-# Option B (CLI — equivalent result):
-#   terraform -chdir=infra import \
-#     'module.sdr_pipeline[0].aws_codebuild_project.sdr_docker_build' \
-#     satdump-noaa20-processing
-#   Then: terraform -chdir=infra plan / apply.
-#
-# ─────────────────────────────────────────────────────────────────────────────
-
-# import {
-#   to = aws_codebuild_project.sdr_docker_build
-#   id = "satdump-noaa20-processing"
-# }
+# Historical note: an out-of-band project "satdump-noaa20-processing" (and its
+# role "codebuild-satdump-role") predated this IaC project. Rather than
+# import+rename it, this IaC project was created fresh; the out-of-band project
+# became dead once the chunk fan-out moved to AWS Batch and was deleted from the
+# account on 2026-10-22. No import is needed or possible now.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CloudWatch log group

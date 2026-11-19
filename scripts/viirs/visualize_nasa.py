@@ -467,15 +467,11 @@ def main(argv: list[str] | None = None) -> int:
             swath_width_km=swath_km,
             output_png=tc_png,
         )
-        if geotiff_enabled:
-            tc_meta_dict["geotiff_file"] = tc_tif.name
-        meta_gen.save(tc_meta_dict, tc_png)
-        logger.info("True Color JSON written: %s", tc_png.with_suffix(".json"))
 
-        # PNG + JSON are the primary product — count success now so a later
-        # (optional) GeoTIFF failure cannot discard a good render.
-        success_count += 1
-
+        # GeoTIFF is a best-effort secondary product. Attempt it BEFORE saving
+        # the sidecar so the "geotiff_file" key reflects reality — it is only
+        # set when the .tif was actually written. A GeoTIFF failure must not
+        # fail the render: PNG + JSON remain the guaranteed primary product.
         if geotiff_enabled and geotiff_exp is not None:
             try:
                 logger.info("True Color — exporting GeoTIFF → %s", tc_tif)
@@ -486,8 +482,18 @@ def main(argv: list[str] | None = None) -> int:
                     output_path=tc_tif,
                 )
                 logger.info("True Color TIF written: %s", tc_tif)
+                tc_meta_dict["geotiff_file"] = tc_tif.name
             except Exception as exc:  # noqa: BLE001 — GeoTIFF is best-effort
                 logger.error("True Color GeoTIFF export failed: %s", exc, exc_info=True)
+                # Leave "geotiff_file" unset so the sidecar does not advertise
+                # a file that was never written.
+
+        meta_gen.save(tc_meta_dict, tc_png)
+        logger.info("True Color JSON written: %s", tc_png.with_suffix(".json"))
+
+        # PNG + JSON are the primary product — count success now so a later
+        # (optional) GeoTIFF failure cannot discard a good render.
+        success_count += 1
 
     except Exception as exc:  # noqa: BLE001
         logger.error("True Color rendering failed: %s", exc, exc_info=True)
@@ -541,15 +547,11 @@ def main(argv: list[str] | None = None) -> int:
             swath_width_km=swath_km,
             output_png=th_png,
         )
-        if geotiff_enabled:
-            th_meta_dict["geotiff_file"] = th_tif.name
-        meta_gen.save(th_meta_dict, th_png)
-        logger.info("Thermal JSON written: %s", th_png.with_suffix(".json"))
 
-        # PNG + JSON are the primary product — count success now so a later
-        # (optional) GeoTIFF failure cannot discard a good render.
-        success_count += 1
-
+        # GeoTIFF is a best-effort secondary product. Attempt it BEFORE saving
+        # the sidecar so the "geotiff_file" key reflects reality — it is only
+        # set when the .tif was actually written. A GeoTIFF failure must not
+        # fail the render: PNG + JSON remain the guaranteed primary product.
         if geotiff_enabled and geotiff_exp is not None:
             try:
                 logger.info("Thermal — exporting GeoTIFF → %s", th_tif)
@@ -560,8 +562,18 @@ def main(argv: list[str] | None = None) -> int:
                     output_path=th_tif,
                 )
                 logger.info("Thermal TIF written: %s", th_tif)
+                th_meta_dict["geotiff_file"] = th_tif.name
             except Exception as exc:  # noqa: BLE001 — GeoTIFF is best-effort
                 logger.error("Thermal GeoTIFF export failed: %s", exc, exc_info=True)
+                # Leave "geotiff_file" unset so the sidecar does not advertise
+                # a file that was never written.
+
+        meta_gen.save(th_meta_dict, th_png)
+        logger.info("Thermal JSON written: %s", th_png.with_suffix(".json"))
+
+        # PNG + JSON are the primary product — count success now so a later
+        # (optional) GeoTIFF failure cannot discard a good render.
+        success_count += 1
 
     except Exception as exc:  # noqa: BLE001
         logger.error("Thermal rendering failed: %s", exc, exc_info=True)

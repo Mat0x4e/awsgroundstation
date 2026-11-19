@@ -504,3 +504,234 @@ resource "aws_iam_role_policy" "batch_aggregation_job" {
     ]
   })
 }
+
+###############################################################################
+# 7. Render Job Role (container task role) - Stage 3
+###############################################################################
+# Assumed by the running render container (render_entrypoint.sh, VIIRS
+# visualization). Scoped precisely to what the entrypoint actually calls:
+#   - S3 read on output_bucket/contacts/* (aws s3 sync reads satdump/,
+#       coordinates/, and sdr/ - all nested under contacts/{date}/{id}/)
+#   - S3 write on output_bucket/products/* (PutObject/GetObject/DeleteObject)
+#   - S3 ListBucket on output bucket conditioned to contacts/* and products/*
+#   - KMS Encrypt/Decrypt/GenerateDataKey on the pipeline key
+#   - ECR pull on the VIIRS visualization repository only (NOT the sdr repo)
+#   - ecr:GetAuthorizationToken on Resource:"*" (AWS service constraint - see comment)
+#   - logs:Create*/PutLogEvents on this module's render log group only
+#   - cloudwatch:PutMetricData conditioned on namespace=SDRPipeline
+#       (the entrypoint emits ProductsWritten and VisualizationFailed)
+
+resource "aws_iam_role" "batch_render_job" {
+  name        = "${var.project_name}-batch-render-job"
+  description = "Task role for render Batch jobs - S3 read contacts/*, write products/*, ECR pull viirs repo, KMS, logs, namespace-conditioned metrics"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { Service = "ecs-tasks.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = var.account_id
+          }
+        }
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-batch-render-job"
+  })
+}
+
+resource "aws_iam_role_policy" "batch_render_job" {
+  name = "${var.project_name}-batch-render-job-policy"
+  role = aws_iam_role.batch_render_job.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # S3 - read the render inputs under contacts/*. The entrypoint aws s3 sync
+      # reads from contacts/{date}/{id}/satdump/, /coordinates/, and /sdr/.
+      # coordinates/ is nested under contacts/, so contacts/* covers it - no
+      # separate statement is needed.
+      {
+        Sid      = "S3ReadContactsPrefix"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${var.output_bucket_arn}/contacts/*"
+      },
+      # S3 - write the rendered products under products/*.
+      # PutObject    - upload rendered PNG/GeoTIFF visualizations
+      # GetObject    - aws s3 sync reads existing dest objects before writing
+      # DeleteObject - idempotent-retry parity with the other job roles
+      {
+        Sid    = "S3WriteProductsPrefix"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:DeleteObject",
+        ]
+        Resource = "${var.output_bucket_arn}/products/*"
+      },
+      # s3:ListBucket is a bucket-level action (Resource = bucket ARN, not object
+      # ARN). Conditioned to contacts/ and products/ so it cannot enumerate keys
+      # outside the two prefixes the render job touches.
+      {
+        Sid      = "S3ListOutputBucketPermittedPrefixes"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = var.output_bucket_arn
+        Condition = {
+          StringLike = {
+            "s3:prefix" = [
+              "contacts/*",
+              "products/*",
+            ]
+          }
+        }
+      },
+      # KMS - encrypt/decrypt data keys for S3 SSE-KMS reads and uploads
+      {
+        Sid    = "KMSAccess"
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:GenerateDataKey",
+        ]
+        Resource = var.kms_key_arn
+      },
+      # ECR - pull the VIIRS visualization image from the specific repository only.
+      # This is the dedicated viirs repo, NOT the sdr-pipeline repo.
+      {
+        Sid    = "ECRPullImage"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability",
+        ]
+        Resource = local.viirs_ecr_repo_arn
+      },
+      # ECR - GetAuthorizationToken cannot be scoped to a specific repository ARN.
+      # AWS service constraint: this action authenticates the Docker client to the
+      # registry endpoint (account-level), not a specific repository. Resource:"*"
+      # is the only valid value the IAM policy evaluator accepts for this action.
+      {
+        Sid      = "ECRAuthTokenUnScopeable"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      # CloudWatch Logs - three write actions, scoped to the render log group only.
+      # No logs:* wildcard. The :* suffix covers all log streams under the group ARN.
+      {
+        Sid    = "CloudWatchLogsWrite"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = "${aws_cloudwatch_log_group.render.arn}:*"
+      },
+      # CloudWatch Metrics - emit render metrics (ProductsWritten, VisualizationFailed).
+      # Conditioned on namespace=SDRPipeline so this grant cannot write to any other
+      # namespace. Resource:"*" is required - cloudwatch:PutMetricData has no resource
+      # ARN scope.
+      {
+        Sid      = "CloudWatchPutMetricDataScopedNamespace"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricData"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "SDRPipeline"
+          }
+        }
+      },
+    ]
+  })
+}
+
+###############################################################################
+# 8. Render Execution Role (ECS task execution role) - Stage 3
+###############################################################################
+# Used by the ECS agent on the EC2 instance to pull the render image from ECR
+# and route container logs to CloudWatch before the container process starts.
+#
+# DEDICATED execution role: the shared batch_execution role (role 5) is scoped to
+# the sdr-pipeline repo. The render job pulls the dedicated viirs-visualization
+# image, so it needs its own execution role scoped to the viirs repo and the
+# render log group. Mirrors the batch_execution policy exactly, but points ECR at
+# the viirs repo and logs at the render log group. Minimal scope only.
+
+resource "aws_iam_role" "batch_render_execution" {
+  name        = "${var.project_name}-batch-render-execution"
+  description = "ECS task execution role for render Batch jobs - ECR pull on the viirs repo and CloudWatch Logs write only (pre-container phase)"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { Service = "ecs-tasks.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = var.account_id
+          }
+        }
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-batch-render-execution"
+  })
+}
+
+resource "aws_iam_role_policy" "batch_render_execution" {
+  name = "${var.project_name}-batch-render-execution-policy"
+  role = aws_iam_role.batch_render_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # ECR - pull the VIIRS visualization image from the specific repository only
+      {
+        Sid    = "ECRPullImage"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability",
+        ]
+        Resource = local.viirs_ecr_repo_arn
+      },
+      # ECR - GetAuthorizationToken cannot be scoped to a specific repository ARN
+      # (AWS service constraint - authenticates to the registry endpoint, not a repo)
+      {
+        Sid      = "ECRAuthTokenUnScopeable"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      # CloudWatch Logs - write container start-up logs; three actions, never logs:*
+      {
+        Sid    = "CloudWatchLogsWrite"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = "${aws_cloudwatch_log_group.render.arn}:*"
+      },
+    ]
+  })
+}

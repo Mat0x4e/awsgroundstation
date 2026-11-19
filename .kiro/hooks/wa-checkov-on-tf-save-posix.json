@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "WA Delta — Checkov on Terraform save (POSIX/Linux/CI)",
+      "trigger": "PostFileSave",
+      "description": "POSIX-shell sibling of wa-checkov-on-tf-save.json so the Checkov security tripwire also fires on Linux/CI (the pwsh hook only runs on the Windows operator box). Early-warning only; Gate 3 via the security-scanner subagent remains the blocking checkpoint.",
+      "matcher": "\\.tf$",
+      "action": {
+        "type": "command",
+        "command": "if command -v checkov >/dev/null 2>&1; then echo 'wa-delta security gate: running Checkov on infra/ (HIGH/CRITICAL block the task)...'; checkov -d infra --quiet --compact --download-external-modules false 2>&1 | tail -n 40; else echo 'wa-delta security gate: checkov not found on PATH -- install it (pip install checkov) to enable the automatic Terraform security tripwire. Gate 3 must still be run via the security-scanner subagent before the task is done.'; fi; exit 0",
+        "timeout": 180
+      }
+    }
+  ]
+}

@@ -1,3 +1,11 @@
+> ## ⚠ LEGACY (demo-era) — 2026-10-22
+>
+> This is one of the three original demo-era specs (French), kept for history. The compute
+> stages it describes were re-platformed from CodeBuild to AWS Batch by the
+> `clean-compute-pipeline` spec (ADR-002), and the Ground Station foundation it set up is now
+> documented in `docs/ARCHITECTURE.md` and `docs/CONTACTS.md`. Read this for the original
+> intent only; it does not reflect the current deployed runtime.
+
 # Requirements Document
 
 ## Introduction

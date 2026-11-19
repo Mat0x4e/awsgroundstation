@@ -52,6 +52,16 @@ locals {
   # agg-queue and project_name-aggregation (unversioned job def).
   batch_aggregation_job_queue_arn      = "arn:aws:batch:${var.region}:${data.aws_caller_identity.current.account_id}:job-queue/${var.project_name}-agg-queue"
   batch_aggregation_job_definition_arn = "arn:aws:batch:${var.region}:${data.aws_caller_identity.current.account_id}:job-definition/${var.project_name}-aggregation"
+
+  # Stage 3 render Batch ARNs (same cycle-break pattern as Stage 1/2 above).
+  # Render REUSES the on-demand aggregation queue (project_name-agg-queue) - it is
+  # the SAME queue as aggregation, not a dedicated render queue. Render is a single
+  # job (not a fan-out), so it rides the existing on-demand CE via that queue.
+  batch_render_job_queue_arn = "arn:aws:batch:${var.region}:${data.aws_caller_identity.current.account_id}:job-queue/${var.project_name}-agg-queue"
+  # Unversioned job-definition ARN (no ":N" suffix). submitJob resolves the ARN to
+  # the latest ACTIVE revision at runtime, which is more robust than pinning a
+  # revision number and avoids Terraform churn when the job def revs.
+  batch_render_job_definition_arn = "arn:aws:batch:${var.region}:${data.aws_caller_identity.current.account_id}:job-definition/${var.project_name}-render"
 }
 
 module "security" {
@@ -158,6 +168,14 @@ module "viirs_visualization" {
   kms_key_id             = module.security.kms_key_id
   sns_topic_arn          = module.security.sns_topic_arn
   tags                   = local.common_tags
+
+  # Stage 3b strangler - flips the orchestrator Lambda to AWS Batch render when
+  # enable_batch_compute is set; CodeBuild remains the fallback. Deterministic
+  # ARNs (not module.batch_compute outputs) avoid a module cycle (batch_compute
+  # already depends on viirs_visualization for the image URL).
+  render_compute                  = var.enable_batch_compute ? "batch" : "codebuild"
+  batch_render_job_queue_arn      = var.enable_batch_compute ? local.batch_render_job_queue_arn : ""
+  batch_render_job_definition_arn = var.enable_batch_compute ? local.batch_render_job_definition_arn : ""
 }
 
 module "sync_pipeline" {
@@ -237,6 +255,14 @@ module "batch_compute" {
   sdr_ecr_image_url  = var.enable_sdr_pipeline ? "${module.sdr_pipeline[0].ecr_repository_url}:latest" : ""
   output_bucket_name = var.enable_sdr_pipeline ? module.sdr_pipeline[0].output_bucket_name : ""
   output_bucket_arn  = var.enable_sdr_pipeline ? module.sdr_pipeline[0].output_bucket_arn : ""
+
+  # Stage 3 render job targets the DEDICATED viirs-visualization image, not the
+  # sdr-pipeline image. Same ternary guard as sdr_ecr_image_url (module is count=0
+  # when disabled, so the [0] is never evaluated). This creates a one-way
+  # dependency batch_compute -> viirs_visualization which is acyclic
+  # (viirs_visualization does not read batch_compute outputs), so no
+  # deterministic-ARN cycle-break is needed here.
+  viirs_ecr_image_url = var.enable_sdr_pipeline ? "${module.viirs_visualization[0].ecr_repository_url}:latest" : ""
 
   reception_bucket_name = module.s3_delivery.bucket_name
   reception_bucket_arn  = module.s3_delivery.bucket_arn

@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Terraform non-ASCII guard on save",
+      "trigger": "PostFileSave",
+      "description": "Warns when a saved .tf file contains a non-ASCII character. If it lands in a description/name/tag VALUE, terraform apply fails at create time even though validate passes (see .kiro/steering/aws-knowledge.md). Prevents a documented partial-apply hazard.",
+      "matcher": "\\.tf$",
+      "action": {
+        "type": "command",
+        "command": "f=$(python3 -c \"import sys,json;print(json.load(sys.stdin).get('filePath',''))\" 2>/dev/null); [ -z \"$f\" ] && exit 0; [ -f \"$f\" ] || exit 0; if LC_ALL=C grep -nP \"[^\\x00-\\x7F]\" \"$f\" >/dev/null 2>&1; then echo \"WARNING non-ASCII char in $f. If it is in a description/name/tag VALUE, terraform apply will fail at create time (validate will NOT catch it). Replace em/en-dash->-, arrow->-> , smart quotes->double/single, ellipsis->... , x-sign->x. See .kiro/steering/aws-knowledge.md.\" >&2; LC_ALL=C grep -nP \"[^\\x00-\\x7F]\" \"$f\" >&2; fi; exit 0",
+        "timeout": 20
+      }
+    }
+  ]
+}

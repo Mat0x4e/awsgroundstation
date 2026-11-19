@@ -1,3 +1,11 @@
+> ## ⚠ LEGACY (demo-era) — 2026-10-22
+>
+> One of the three original demo-era specs (French), kept for history. The DigIF -> SDR
+> pipeline it describes was re-platformed from CodeBuild to AWS Batch by the
+> `clean-compute-pipeline` spec (ADR-002); fan-out and aggregation now run on AWS Batch, not
+> CodeBuild. The current runtime is documented in `docs/ARCHITECTURE.md` and `docs/DEPLOYMENT.md`.
+> Read this for the original intent only.
+
 # Requirements Document
 
 ## Introduction

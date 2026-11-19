@@ -1,7 +1,8 @@
 • Here is the full pipeline — current (CodeBuild) and target (all-Batch) — both branches, end to end.
 
   ═══════════════════════════════════════════════════════════════════════════════════════════════
-    NOAA-20 SDR PIPELINE — CURRENT (CodeBuild)          account 471112743408 · eu-central-1
+    NOAA-20 SDR PIPELINE — PRE-MIGRATION (CodeBuild, RETIRED 2026-10-22)   account 471112743408 · eu-central-1
+    Kept for history. The all-Batch diagram below is the CURRENT deployed state.
   ═══════════════════════════════════════════════════════════════════════════════════════════════
 
                             ┌─────────────────────────────────────────┐
@@ -56,7 +57,7 @@
      KEPT:  image-build CI (builds the ECR sdr-pipeline image)
 
   ═══════════════════════════════════════════════════════════════════════════════════════════════
-    NOAA-20 SDR PIPELINE — TARGET (all-Batch · ADR-002)      CodeBuild removed from runtime
+    NOAA-20 SDR PIPELINE — CURRENT (all-Batch · ADR-002, DEPLOYED 2026-10-22)   CodeBuild removed from runtime
   ═══════════════════════════════════════════════════════════════════════════════════════════════
 
                             ┌─────────────────────────────────────────┐
@@ -106,5 +107,7 @@
                                         products/  →  .png  +  .geotiff  +  .json
                                        (NASA fixes: ① granule-token ∩  ② thermal NaN guard  ③ single-stretch)
 
-     shared ECR image "sdr-pipeline" unchanged · Spot=fan-out only · on-demand=agg+render · RT-STPS live demod stays on EC2
+     fan-out + aggregation use the shared "sdr-pipeline" image · RENDER uses the DEDICATED "viirs-visualization" image
+     Spot=fan-out only · on-demand CE/agg-queue carries BOTH aggregation and render jobs (different images) · RT-STPS live demod stays on EC2
+     RENDER_COMPUTE=batch is DEPLOYED (not "behind a flag" as a future state) · CodeBuild retained only as fallback
   

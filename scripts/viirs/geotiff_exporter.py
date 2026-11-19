@@ -107,14 +107,23 @@ class GeoTIFFExporter:
     ) -> Path:
         """Interpolate swath data onto a regular grid and export as GeoTIFF.
 
+        Supports both single-band and three-band RGB swath data:
+
+        * Single-band (Thermal IR): *data* has shape ``(H, W)`` (or any shape
+          that matches *lat*/*lon*). A 1-band float32 GeoTIFF is written.
+        * Three-band (NASA True Color): *data* has shape ``(H, W, 3)`` while
+          *lat*/*lon* stay ``(H, W)``. A 3-band float32 GeoTIFF is written.
+
         Parameters
         ----------
         data:
-            1-D or 2-D float array of measured values (flattened inside).
+            Float array of measured values. Either per-pixel scalars with the
+            same shape as *lat*/*lon*, or an ``(H, W, 3)`` RGB cube whose first
+            two axes match *lat*/*lon*.
         lat:
-            Array of per-pixel latitudes (same shape as *data*).
+            Array of per-pixel latitudes, shape ``(H, W)``.
         lon:
-            Array of per-pixel longitudes (same shape as *data*).
+            Array of per-pixel longitudes, shape ``(H, W)``.
         output_path:
             Destination file path.
 
@@ -129,13 +138,27 @@ class GeoTIFFExporter:
         from scipy.interpolate import LinearNDInterpolator  # heavy dep — import lazily
 
         output_path = Path(output_path)
-        data_flat = np.asarray(data, dtype=np.float32).ravel()
+        data = np.asarray(data, dtype=np.float32)
         lat_flat = np.asarray(lat, dtype=np.float64).ravel()
         lon_flat = np.asarray(lon, dtype=np.float64).ravel()
 
-        # Drop fill values / masked pixels
-        valid = np.isfinite(data_flat) & np.isfinite(lat_flat) & np.isfinite(lon_flat)
-        data_flat = data_flat[valid]
+        # Determine band count. A 3-D array is interpreted as (H, W, bands);
+        # anything else is flattened to a single per-pixel channel.
+        if data.ndim == 3:
+            n_bands = data.shape[2]
+            # (H, W, B) → (H*W, B) so each column is one channel's samples.
+            values = data.reshape(-1, n_bands)
+            # A pixel is usable when lat, lon AND every channel are finite.
+            data_finite = np.all(np.isfinite(values), axis=1)
+        else:
+            n_bands = 1
+            values = data.ravel()[:, np.newaxis]  # (H*W, 1)
+            data_finite = np.isfinite(values[:, 0])
+
+        # Drop fill values / masked pixels (shared across all bands so the
+        # triangulation is built once on a single consistent point set).
+        valid = data_finite & np.isfinite(lat_flat) & np.isfinite(lon_flat)
+        values = values[valid]
         lat_flat = lat_flat[valid]
         lon_flat = lon_flat[valid]
 
@@ -148,20 +171,30 @@ class GeoTIFFExporter:
         width = len(grid_lon)
         height = len(grid_lat)
 
+        # Build the triangulation ONCE on the valid (lon, lat) points. Passing
+        # all channels as multi-column values reuses the single triangulation
+        # for every band — no re-triangulation, no full 3× grid up front.
         interp = LinearNDInterpolator(
-            np.column_stack((lon_flat, lat_flat)), data_flat
+            np.column_stack((lon_flat, lat_flat)), values
         )
 
         # Evaluate in row-strips of at most ~QUERY_BUDGET points to cap memory.
-        gridded = np.empty((height, width), dtype=np.float32)
-        rows_per_strip = max(1, min(height, self.QUERY_BUDGET // max(width, 1)))
+        # Strip width is budgeted against the total query volume (width × bands).
+        gridded = np.empty((n_bands, height, width), dtype=np.float32)
+        per_row = max(width * n_bands, 1)
+        rows_per_strip = max(1, min(height, self.QUERY_BUDGET // per_row))
         for r0 in range(0, height, rows_per_strip):
             r1 = min(r0 + rows_per_strip, height)
             gx, gy = np.meshgrid(grid_lon, grid_lat[r0:r1])
-            gridded[r0:r1, :] = interp(gx, gy).astype(np.float32)
+            strip = interp(gx, gy)  # (rows, width) or (rows, width, bands)
+            if strip.ndim == 2:
+                strip = strip[:, :, np.newaxis]
+            # (rows, width, bands) → (bands, rows, width)
+            gridded[:, r0:r1, :] = np.transpose(strip, (2, 0, 1)).astype(np.float32)
 
-        # rasterio north-up: first row = northernmost latitude
-        gridded = np.flipud(gridded)
+        # rasterio north-up: first row = northernmost latitude. Flip each band
+        # consistently along the latitude axis.
+        gridded = gridded[:, ::-1, :]
 
         transform = from_bounds(
             west=lon_min,
@@ -179,13 +212,13 @@ class GeoTIFFExporter:
             driver="GTiff",
             height=height,
             width=width,
-            count=1,
+            count=n_bands,
             dtype=rasterio.float32,
             crs=CRS.from_epsg(4326),
             transform=transform,
             nodata=float("nan"),
         ) as dst:
-            dst.write(gridded[np.newaxis, :, :])
+            dst.write(gridded)
 
         return output_path
 

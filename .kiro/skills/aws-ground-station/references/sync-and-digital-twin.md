@@ -99,18 +99,59 @@ Two separate breakages (A and B) need two separate causes: H6 for the antenna si
 | P4 | CLI group, no mtu, template role + template SG | 0 |
 
 P1: a config does not need CloudFormation origin to work. H6 (string formatting) not yet directly tested.
-P2-P4: mtu, IAM role and security group are ruled out one by one.
+P2-P4: **confounded** - their endpoint configs had no `dataflowEndpointRegion` (see trial 7), which alone
+explains the zeros. mtu, role and SG are NOT ruled out by this trial.
 
 **Trial 6** (`scripts/gs_trial6_address.ps1`): CLI groups identical to ours (mtu 1500, our role, our SG) on
 (P1) the template's ENI, (P2) a fresh unattached ENI, (P3, control) our ENI 172.31.23.74 (attached as
-device 1 to the STOPPED sync receiver `i-06a51f5b29e26aeaa`): **0 contacts in all three**. The endpoint
-address / ENI state is ruled out.
+device 1 to the STOPPED sync receiver `i-06a51f5b29e26aeaa`): 0 contacts in all three. **Also confounded**
+(endpoint configs without region) - the ENI is not ruled out by this trial.
 
-**What remains different** between every failing CLI group and the working template group: the endpoint
-config used by our groups never carries `dataflowEndpointRegion` (trial 2 tested region with OUR group
-only), the endpoint names (`<stack>-Downlink` vs ours), and the group post-pass (180 s vs 120 s).
-None proven. Next: a CLI group that is a FULL copy of the template group (template address, no mtu,
-template role + SG, 120/180 s) + an endpoint config WITH region; if it works, flip one factor back at a time.
+**Trial 7** (`scripts/gs_trial7_full_copy.ps1`): CLI group = full copy of the template group (template
+address, no mtu, template role + SG, pre 120 / post 180), template antenna config, our tracking config.
+
+| Variant | Single change from Q1 | Contacts (Cape Town / Hawaii / Ohio / Oregon / Stockholm) |
+|---|---|---|
+| Q1 | - (endpoint config WITH `dataflowEndpointRegion`) | 23 / 20 / 28 / 32 / 42 |
+| Q2 | endpoint config **without** `dataflowEndpointRegion` | **0 everywhere** |
+| Q3 | group post-pass 120 s | 23 / 20 / 28 / 32 / 42 |
+| Q4 | endpoint name in our style | 23 / 20 / 28 / 32 / 42 |
+
+**Cause #1 confirmed: a `DataflowEndpointConfig` without `dataflowEndpointRegion` gets no contacts**
+(single-factor test). Our Terraform `awscc_groundstation_config.dataflow_endpoint` does not set it.
+Post-pass duration and endpoint naming are ruled out. The AWS API reference marks the region field as
+optional; in practice it is required for contacts to be offered `[practice]`.
+
+**Cause #2 (antenna side):** trial 4 A (our antenna + template endpoint WITH region + template group) = 0,
+and trial 2 (our antenna + region + our group) = 0, so our antenna config fails even when the endpoint
+side is good.
+
+**Trial 8** (`scripts/gs_trial8_antenna_and_group.ps1`), all with a known-good counterpart:
+
+| Profile | Test | Contacts (CT / HI / OH / OR / STO) |
+|---|---|---|
+| R1 | template antenna + NEW endpoint config WITH region -> **our existing Terraform group** | 23 / 20 / 28 / 32 / 41 |
+| R2 | copy of **our** antenna configData (new name) + template endpoint | **0 everywhere** |
+| R3 | copy of the **template** antenna configData (new name) + template endpoint | 23 / 20 / 28 / 32 / 41 |
+
+**Cause #2 confirmed: the `unvalidatedJSON` string of our demod/decode config.** R2 and R3 differ only
+by that string (both new names, no tags, same spectrum). Ours is Terraform `jsonencode` output: compact,
+keys sorted alphabetically (`qpsk` before `type`, `nodeConfigs` before `edges` order changes). The
+template's is the AWS sample string (`type` first, original key order, whitespace). Whether key order or
+whitespace is what matters is **not isolated** `[unverified]`; a key-order dependence (e.g. the `type`
+discriminator read first) is the likelier of the two but unproven.
+
+**Our existing group is fine** (R1): mtu 1500, shared role, our SG, our ENI 172.31.23.74 all work.
+
+## Root cause - summary (2026-11-18)
+
+The sync mission profile gets 0 contacts because of **two independent defects**, each sufficient alone:
+1. `DataflowEndpointConfig` lacks `dataflowEndpointRegion` (trial 7 Q1 vs Q2);
+2. the demod and decode `unvalidatedJSON` strings are re-serialised by `jsonencode` (trial 8 R2 vs R3).
+
+Fix (Terraform, `infra/modules/sync_pipeline/groundstation.tf`): set the endpoint region on the
+dataflow-endpoint config, and pass the AWS sample JSON strings verbatim (heredoc / file), not `jsonencode`.
+Verify after apply with `scripts/gs_list_sync_contacts.ps1` (expect contacts on the 5 onboarded stations).
 
 Cleanup note: a trial interrupted mid-run leaves the template stack and the `trial-aqua-key` key pair;
 check `list-stacks`, `describe-key-pairs`, profiles, groups and `trial*` configs/ENIs before re-running.

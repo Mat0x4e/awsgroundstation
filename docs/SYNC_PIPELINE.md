@@ -198,10 +198,14 @@ against the same satellite.
 
 ## Choosing which pipeline runs for a given contact
 
-**The mission profile ARN you reserve the contact against decides everything downstream.**
-Both pipelines' EventBridge rules filter on `detail.missionProfileArn`
-(`eventbridge.tf` in each module), so a contact reserved under one mission profile never
-triggers the other's state machine.
+**The mission profile ARN you reserve the contact against decides which pipeline runs** - with
+one known gap. The **sync** rules (`infra/modules/sync_pipeline/eventbridge.tf`) filter on
+`detail.missionProfileArn`, so an async contact never triggers the sync pipeline. The **async**
+rule `contact-completed-sdr` (`infra/modules/sdr_pipeline/eventbridge.tf`) filters only on
+`contactStatus = COMPLETED`, **not** on the mission profile (checked in code 2026-11-19). A sync
+contact therefore also starts the async SDR state machine, which finds no `.pcap` chunks in S3.
+Its exact behaviour on zero chunks has not been observed. Fix it (add the async profile ARN to
+that rule's pattern) before the first sync contact - see the checklist below.
 
 ```bash
 # Async (DigIF) — existing pipeline
@@ -231,5 +235,44 @@ aws groundstation reserve-contact \
 ```
 
 Reserving against the async mission profile ARN (the existing `mission_profile_arn`
-output) runs the DigIF pipeline exactly as before — the two are independent per-contact,
-not a global switch.
+output) runs the DigIF pipeline exactly as before. The choice is per contact, not a global
+switch.
+
+## First sync contact - checklist
+
+A first sync contact is a **packet-format experiment**, not a production pass: expect RT-STPS
+frame sync to fail on the first try. The goal is a raw capture you can inspect. Do the steps in
+order; each one is cheap except step 6 (paid, ~$105 at Stockholm 1, explicit user go-ahead).
+
+1. **Fix the async rule overlap** (Terraform, plan then apply with agreement): add the async
+   profile ARN to `contact-completed-sdr`'s event pattern, so a sync contact does not also start
+   the async state machine (see "Choosing which pipeline runs" above).
+2. **Install the receiver prerequisites.** Start `groundstation-noaa20-sync-receiver`
+   (`i-06a51f5b29e26aeaa`, stopped between contacts), then via SSM install the files listed in
+   "Manual prerequisites" above: the three `/opt/scripts/sync_receiver_*` scripts from this repo
+   and `/opt/rt-stps/` with the **default** `jpss1.xml` (`PnEncoded="true"`). Check
+   `python3 --version` and that `/opt/scripts/*.sh` are executable.
+3. **Dry arm, no contact.** Run the same command the `receiver_arm` Lambda sends
+   (`lambdas/receiver_arm/handler.py`), with a fake contact id:
+   `/opt/scripts/sync_receiver_arm.sh <bucket> dryrun-0000 <yyyy/mm/dd> 55888`
+   (SSM `AWS-RunShellScript`). Confirm the listener is bound (`ss -ulpn | grep 55888`) and the
+   work dir exists under `/var/tmp/sync_receiver/dryrun-0000/`. Then run
+   `/opt/scripts/sync_receiver_finish.sh <bucket> dryrun-0000 <yyyy/mm/dd>` and check it stops the
+   listener and fails cleanly on an empty capture. Stop the instance.
+4. **Check the alarm path.** The sync alarms (`ReceiverReadyFailure`, receiver-arm Lambda errors,
+   Step Functions failures) should be `OK` and their SNS topic should have a confirmed subscription.
+5. **Choose the window.** `scripts/gs_list_sync_contacts.ps1` (read-only). Prefer Stockholm 1:
+   same region as the receiver, and the most offers. Avoid passes in the next 30 minutes: the
+   PREPASS arm needs the 600 s pre-pass budget.
+6. **Reserve** with the **sync** profile ARN (`reserve-contact` above). Record it in
+   `docs/CONTACTS.md` immediately (contact id, window, profile, "sync, format experiment").
+7. **During PREPASS** (T-600 s): watch `/aws/lambda/...receiver-arm` logs - EC2 running, SSM
+   Online, arm command sent. If `ReceiverReadyFailure` fires, the pass is lost (no S3 buffer).
+8. **After LOS**: the sync state machine runs `sync_receiver_finish.sh`, stops the instance, then
+   aggregation. Whatever the outcome, fetch
+   `s3://<bucket>/contacts/<date>/<contact>/raw/raw_capture.bin`.
+9. **Inspect the capture** against the onboarding-provided VITA-49 Extension layout
+   ("Clearing the gate" above): header word count, packet type and size fields, payload offset.
+10. **Record the result** in this file (verified header layout or what differed) and in
+    `docs/CONTACTS.md`. Verify products by evidence, not execution status: `scripts/verify_pass.py`
+    does not know the sync state machine yet, so check the S3 prefixes by hand.

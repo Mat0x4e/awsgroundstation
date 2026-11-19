@@ -400,13 +400,22 @@ demodulation_config = {
 ```hcl
 dataflow_endpoint_config = {
   dataflow_endpoint_name   = local.dataflow_endpoint_name
-  dataflow_endpoint_region = data.aws_region.current.name
+  dataflow_endpoint_region = data.aws_region.current.id
 }
 demodulation_config = {
-  # AWS sample string verbatim (key order preserved), e.g. from a file or heredoc - never jsonencode
-  unvalidated_json = file("${path.module}/files/jpss1_demodulation.json")
+  # AWS sample string verbatim (key order preserved) - never jsonencode. templatefile() only
+  # substitutes the two numbers and keeps the file's bytes otherwise.
+  unvalidated_json = templatefile("${path.module}/files/jpss1_demodulation.json.tpl", {
+    center_frequency_mhz = var.center_frequency_mhz
+    symbol_rate_msps     = var.symbol_rate_msps
+  })
+}
+decode_config = {
+  unvalidated_json = file("${path.module}/files/jpss1_decode.json")
 }
 ```
+(As implemented in `infra/modules/sync_pipeline/groundstation.tf`. The payload files are pinned to LF
+in `.gitattributes`: a CRLF checkout would change the bytes sent to AWS.)
 
 **Rule**: for Ground Station `unvalidatedJSON` fields, pass the AWS-validated JSON string verbatim;
 do not round-trip it through `jsonencode`/`ConvertTo-Json`, which reorder keys. Always set

@@ -1,9 +1,18 @@
 # Sync reception and the digital twin
 
-Purpose: a side project that exercises the **synchronous** (demod/decode, live UDP) path against
-the AWS Ground Station **digital twin**, because no real sync contact has ever been obtained.
+> **Current status (2026-11-19) - read this first.** The "0 contacts" problem is **solved**: two
+> config defects (missing `dataflowEndpointRegion`; `jsonencode`d `unvalidatedJSON`), fixed in
+> `infra/modules/sync_pipeline/groundstation.tf` and applied. The sync profile now gets 21-34
+> contacts per onboarded station over 7 days. Account onboarding for demod/decode confirmed by AWS
+> support. **Open:** no sync contact flown yet (packet-format gate, `docs/SYNC_PIPELINE.md`); this
+> account is not onboarded to the digital twin. Everything below "Status of the sync path" up to
+> "Root cause - summary" is the **historical trial log**: its hypotheses and "not established"
+> statements are superseded by the trials that follow them.
 
-## Status of the sync path
+Purpose: a side project that exercises the **synchronous** (demod/decode, live UDP) path against
+the AWS Ground Station **digital twin**.
+
+## Status of the sync path (historical, before 2026-11-18)
 
 - Built and deployed as `infra/modules/sync_pipeline` (mission profile `noaa20_sync`,
   receiver EC2, `receiver_arm` Lambda, Step Functions, EventBridge PREPASS/COMPLETED rules).

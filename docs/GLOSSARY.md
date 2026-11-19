@@ -27,8 +27,8 @@ satellite's **X-band** direct-broadcast downlink as raw digitized radio (**DigIF
 clean data frames (**CADU**), assembles them into Level-0 **RDR** files (**RT-STPS**),
 calibrates and geolocates them into Level-1 **SDR + GEO** files (**CSPP**), and renders
 georeferenced **VIIRS** imagery (GeoTIFF/PNG). An alternative "synchronous" path would let the
-antenna do the demod/decode itself (**demod/decode** delivery) - but that path is blocked on
-satellite onboarding (see `docs/SYNC_ONBOARDING_INVESTIGATION.md`).
+antenna do the demod/decode itself (**demod/decode** delivery) - built, offered contacts since
+2026-11-19, not flown yet (see `docs/SYNC_PIPELINE.md`).
 
 ---
 
@@ -138,15 +138,15 @@ satellite onboarding (see `docs/SYNC_ONBOARDING_INVESTIGATION.md`).
 |---|---|
 | **mission profile** | The AWS Ground Station object that ties together the antenna config + tracking + data delivery for a satellite. This project has an async (DigIF -> S3) profile and a separate sync (demod/decode) profile. |
 | **dataflow endpoint / endpoint group** | For synchronous delivery, the network endpoint (on a receiver EC2's ENI) that AWS Ground Station streams demod/decoded frames to live during the contact. |
-| **S3 data delivery vs demod/decode delivery** | Two AWS Ground Station delivery modes. S3 delivery drops raw DigIF into a bucket (async; what we fly). Demod/decode delivery streams decoded frames to a live endpoint (sync; built but onboarding-blocked). They are onboarded separately. |
-| **onboarding** | The AWS process (data collection, technical validation, spectrum licensing, NDAs) that authorizes a satellite for a given delivery mode on an account. NOAA-20 is onboarded here for DigIF but NOT for demod/decode (see `docs/SYNC_ONBOARDING_INVESTIGATION.md`). |
+| **S3 data delivery vs demod/decode delivery** | Two AWS Ground Station delivery modes. S3 delivery drops raw DigIF into a bucket (async; what we fly). Demod/decode delivery streams decoded frames to a live endpoint (sync; built, not flown yet). |
+| **onboarding** | The AWS process (data collection, technical validation, spectrum licensing, NDAs) that authorizes a satellite for a given delivery mode on an account. NOAA-20 is onboarded here for both DigIF and demod/decode (demod/decode confirmed by AWS support 2026-11-18; the earlier "not onboarded" reading in `docs/SYNC_ONBOARDING_INVESTIGATION.md` is superseded). |
 
 ## Project-specific terms
 
 | Term | Meaning |
 |---|---|
 | **async / DigIF pipeline** | The reception path that is deployed and flown: S3-delivered DigIF -> SatDump -> RT-STPS -> CSPP -> VIIRS imagery. |
-| **sync / demod-decode pipeline** | The alternative path: live antenna-side demod/decode streamed to a receiver EC2, which runs RT-STPS locally, then CSPP. Built and deployed but never flown (onboarding-blocked). |
+| **sync / demod-decode pipeline** | The alternative path: live antenna-side demod/decode streamed to a receiver EC2, which runs RT-STPS locally, then CSPP. Built and deployed, contacts offered since 2026-11-19, never flown (packet-format gate open). |
 | **fan-out / aggregation / render** | The three runtime compute stages, all on AWS Batch since 2026-10-22: fan-out = per-chunk SatDump (Spot); aggregation = RT-STPS + CSPP over the whole pass (on-demand); render = VIIRS visualization (on-demand, dedicated image). |
 | **chunk** | One ~30 s segment of the DigIF downlink, delivered as one `.pcap` object and processed by one fan-out job. A pass is ~17-27 chunks. |
 | **PERF-1 / REL-x / OE-x** | Well-Architected refinement tracking IDs (Performance, Reliability, Operational Excellence) from `docs/ARCHITECTURE_REFINEMENT.md`; e.g. PERF-1 = the S3 LUT cache, REL-5 = the sync packet-format validation gate. |

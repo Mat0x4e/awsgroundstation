@@ -22,9 +22,10 @@ CodeBuild (the chunk fan-out, the aggregation, and the visualization render were
 migrated off CodeBuild per ADR-002 / the `clean-compute-pipeline` spec;
 `enable_batch_compute = true`). The CodeBuild projects are retained only as a strangler
 fallback behind feature flags. A second, live demod/decode path exists alongside it — see
-[`SYNC_PIPELINE.md`](SYNC_PIPELINE.md) — but it **cannot currently be flown**: NOAA-20 is
-not onboarded for demod/decode on this account (zero schedulable windows), see
-[`SYNC_ONBOARDING_INVESTIGATION.md`](SYNC_ONBOARDING_INVESTIGATION.md).
+[`SYNC_PIPELINE.md`](SYNC_PIPELINE.md) — not flown yet. Its mission profile gets contacts offered
+since 2026-11-19 (it got zero before because of two config defects, not onboarding; the earlier
+[`SYNC_ONBOARDING_INVESTIGATION.md`](SYNC_ONBOARDING_INVESTIGATION.md) conclusion is superseded).
+The open gate is the packet-format check on a first real sync contact.
 
 ---
 

@@ -53,29 +53,13 @@ export AWS_PROFILE=AWSAdminAccess-471112743408 AWS_REGION=eu-central-1
 cd infra && terraform plan        # review the diff first
 ```
 
-### One-time: adopt-then-rename the SDR-image CodeBuild project (Task 1.1 / OE-1)
+### ~~One-time: adopt-then-rename the SDR-image CodeBuild project (Task 1.1 / OE-1)~~ - obsolete
 
-The deployed out-of-band project `satdump-noaa20-processing` must be **imported** before the
-first apply, or Terraform creates a parallel project. In
-`infra/modules/sdr_pipeline/codebuild_image.tf`:
-
-```bash
-# Option A (preferred — native import block):
-#   1. Uncomment the import { } block in codebuild_image.tf
-terraform -chdir=infra plan       # expect: 1 to import + 1 to replace
-terraform -chdir=infra apply      # imports AND renames in one step
-#   2. Re-comment the import block after apply
-
-# Option B (CLI equivalent):
-terraform -chdir=infra import \
-  'module.sdr_pipeline[0].aws_codebuild_project.sdr_docker_build' \
-  satdump-noaa20-processing
-```
-
-The first apply **replaces** the project (CodeBuild names are immutable → rename forces
-destroy+recreate). This is expected and safe: the project is stateless (NO_SOURCE, only
-builds+pushes the ECR image, which is untouched), and its hand-added S3 `docker-build/*` read
-is now codified, so there is no access gap during the swap.
+No longer applicable. The out-of-band project `satdump-noaa20-processing` and its role
+`codebuild-satdump-role` were **deleted on 2026-10-22** instead of being imported (confirmed absent
+2026-11-19: `batch-get-projects` returns it in `projectsNotFound`, `get-role` returns `NoSuchEntity`).
+The SDR image is built by the IaC project `groundstation-noaa20-sdr-docker-build`
+(`infra/modules/sdr_pipeline/codebuild_image.tf`). Do not run the old import steps.
 
 ### New standing cost (minor)
 

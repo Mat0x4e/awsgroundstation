@@ -383,7 +383,7 @@ Deployed 2026-06-25 via Terraform (`enable_sdr_pipeline = true`).
 
 ---
 
-## Contact #6 — Mediterranean retry (scheduled)
+## Contact #6 — Mediterranean retry
 
 Second attempt at the objective contact #5 missed. Chosen on the metric that actually
 failed: link elevation **while the basin is scanned**.
@@ -391,7 +391,7 @@ failed: link elevation **while the basin is scanned**.
 | Property | Value |
 |----------|-------|
 | **Contact ID** | `8fb38af8-080a-445a-bf10-50d14f4ba85e` |
-| **Status** | ⚠️ OUTCOME NOT RECORDED. Was reserved 2026-08-31 for 2026-09-06; that date is now well in the past (contact #7 flew 2026-10-17), but no flown/failed/cancelled result was ever logged here. **Needs verification** against Ground Station history / S3 output, then update to the real disposition. |
+| **Status** | ✅ FLOWN 2026-09-06 — reception clean; 1 granule calibrated, not over the basin (same as #5) |
 | **Ground Station** | Stockholm 1 (`eu-north-1`) |
 | **Max Elevation** | 61.27° (AWS) — planner computed 56.9°, a 4.4° spread worth watching |
 | **Visibility** | 2026-09-06 11:47:16 → 11:57:59 UTC (10m43s) |
@@ -405,6 +405,53 @@ failed: link elevation **while the basin is scanned**.
 AOS — structural, since the Mediterranean sits at the southern edge of reach. On contact #5
 nothing before ~AOS+2.5 min survived calibration. Higher elevation improves the link budget
 but does not move the basin out of that window.
+
+### Outcome — recorded 2026-11-12 from S3
+
+Reception clean, and the same structural outcome as contact #5: the basin did not calibrate.
+S3 figures read from the live account (`471112743408`, `eu-central-1`) 2026-11-12; local
+products/composites in `output/contact-06_stockholm-1_2026-09-06/` (`chunk_0` only).
+
+| Stage | Result |
+|---|---|
+| Reception | 22 × `.pcap`, **47.1 GB** (`year=2026/month=09/day=06/`) — a touch larger than #5's 43.1 GB |
+| SatDump | 22 chunks, 9,130 objects, 4.3 GB — full fan-out decoded |
+| RT-STPS | 5 RDRs — VIIRS 675.6 MiB, ROTCS 31.9, RONPS 2.9, + 2 others (910.8 MiB total) |
+| CSPP | 35 SDR/GEO files, 2.9 GiB → **GEO for 4 granules, calibrated SDR for 1** |
+| Visualisation | ✅ 3 SatDump products (True Color, Thermal IR, Day Microphysics) PNG + GeoTIFF + JSON, rendered 12:47 UTC (~60 min after AOS) |
+
+**The calibrated granule misses the Mediterranean — exactly as on #5.** Reading the granule
+filenames (times UTC on 2026-09-06, AOS at 11:47:16):
+
+| Product | Granule windows |
+|---|---|
+| GITCO / GMTCO (geolocated) | 11:49:47–11:51:10 · 11:52:37–11:54:01 · 11:54:02–11:55:27 · 11:55:28–11:56:51 |
+| SVI05 / calibrated I-band (**only one**) | **11:54:02–11:55:27** — AOS+6m46s |
+
+The earliest geolocated granule starts at **AOS+2m31s**; the single calibrated I-band granule
+is at **AOS+6m46s**, over Scandinavia along the ascending track, not the basin. The basin is
+scanned in the opening ~2 minutes — before any granule survived calibration, the same failure
+window `MEDITERRANEAN_PASS.md` §3 predicted. The higher link elevation (61.27° max, basin at
+18.8–19.5° vs #5's 11.6–17.4°) improved reception but **did not** move the basin out of the
+opening-granule window, as the residual-risk note warned.
+
+**The basin is in the SatDump imagery, not in CSPP** — same split as #5. `chunk_0`
+(acquisition `2026-09-06T11:47:25Z`, 9 s after AOS) renders the southern Tyrrhenian and the
+Ionian side of Italy in clear daytime conditions — what #5 missed. The three sidecars agree
+on lat ≈36.1–43.0°, lon ≈1.1–36.3°E, the bounding rectangle of one 30 s strip laid WSW→ENE;
+it over-covers (the 36°E corner is the Black Sea coast). The coastline overlay sits on the
+land edges by eye; land/sea agreement (MCC) was **not** measured.
+
+**Verdict on the retry.** The pass improved the link budget as intended and produced clean
+SatDump imagery of the target, but the calibrated-science objective failed the same way as #5:
+no calibrated or terrain-corrected product covers the Mediterranean. The limit is the
+geometry — the basin at the southern edge of Stockholm's reach is always in the first
+granule — not the link margin, and not a pipeline regression.
+
+Still to do:
+
+- [ ] Measure land/sea agreement on the True Color product, as done for contacts #2 and #5
+- [ ] Pull a later chunk (Gulf of Lion / Ligurian / N. Adriatic) if the area is wanted locally
 
 
 ---

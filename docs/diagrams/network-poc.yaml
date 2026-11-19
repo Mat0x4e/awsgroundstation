@@ -1,0 +1,93 @@
+Diagram:
+  DefinitionFiles:
+    - Type: URL
+      Url: "https://raw.githubusercontent.com/awslabs/diagram-as-code/main/definitions/definition-for-aws-icons-light.yaml"
+
+  Resources:
+    Canvas:
+      Type: AWS::Diagram::Canvas
+      Direction: horizontal
+      Children:
+        - GroundStation
+        - AWSCloud
+        - Internet
+
+    GroundStation:
+      Type: AWS::Diagram::Resource
+      Preset: "AWS Ground Station"
+      Title: "AWS Ground Station"
+      Align: center
+
+    Internet:
+      Type: AWS::Diagram::Resource
+      Preset: "Internet"
+      Title: "Internet (TLE, mises a jour)"
+      Align: center
+
+    AWSCloud:
+      Type: AWS::Diagram::Cloud
+      Preset: AWSCloudNoLogo
+      Align: center
+      Children:
+        - VPC
+
+    VPC:
+      Type: AWS::EC2::VPC
+      Title: "VPC 10.0.0.0/16"
+      Direction: vertical
+      Children:
+        - IGW
+        - PublicSubnet
+
+    IGW:
+      Type: AWS::EC2::InternetGateway
+      Title: "Internet Gateway"
+
+    PublicSubnet:
+      Type: AWS::EC2::Subnet
+      Preset: PublicSubnet
+      Title: "Subnet public 10.0.1.x"
+      Direction: horizontal
+      Children:
+        - ENI
+        - EC2
+
+    ENI:
+      Type: AWS::EC2::NetworkInterface
+      Title: "ENI + Elastic IP"
+
+    EC2:
+      Type: AWS::EC2::Instance
+      Title: "EC2 SDR + agent GS"
+
+  Links:
+    - Source: GroundStation
+      SourcePosition: E
+      Target: ENI
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        AutoLeft:
+          Title: "UDP 55888-56000"
+
+    - Source: ENI
+      SourcePosition: E
+      Target: EC2
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: EC2
+      SourcePosition: N
+      Target: IGW
+      TargetPosition: S
+      TargetArrowHead:
+        Type: Open
+
+    - Source: IGW
+      SourcePosition: E
+      Target: Internet
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open

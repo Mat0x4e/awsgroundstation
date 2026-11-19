@@ -22,9 +22,10 @@ CodeBuild (the chunk fan-out, the aggregation, and the visualization render were
 migrated off CodeBuild per ADR-002 / the `clean-compute-pipeline` spec;
 `enable_batch_compute = true`). The CodeBuild projects are retained only as a strangler
 fallback behind feature flags. A second, live demod/decode path exists alongside it — see
-[`SYNC_PIPELINE.md`](SYNC_PIPELINE.md) — but it **cannot currently be flown**: NOAA-20 is
-not onboarded for demod/decode on this account (zero schedulable windows), see
-[`SYNC_ONBOARDING_INVESTIGATION.md`](SYNC_ONBOARDING_INVESTIGATION.md).
+[`SYNC_PIPELINE.md`](SYNC_PIPELINE.md) — not flown yet. Its mission profile gets contacts offered
+since 2026-11-19 (it got zero before because of two config defects, not onboarding; the earlier
+[`SYNC_ONBOARDING_INVESTIGATION.md`](SYNC_ONBOARDING_INVESTIGATION.md) conclusion is superseded).
+The open gate is the packet-format check on a first real sync contact.
 
 ---
 
@@ -205,9 +206,7 @@ against the products prefix, never the execution status.
 - **The SDR image is built by an IaC CodeBuild project, `groundstation-noaa20-sdr-docker-build`.**
   The old out-of-band project `satdump-noaa20-processing` (role `codebuild-satdump-role`)
   that predated it was **deleted on 2026-10-22** (orphaned, not in Terraform, superseded by
-  the IaC image-build project and the Batch fan-out — see
-  [`SYNC_ONBOARDING_INVESTIGATION.md`](SYNC_ONBOARDING_INVESTIGATION.md) history and the
-  `codebuild_image.tf` note). The IaC project (`infra/modules/sdr_pipeline/codebuild_image.tf`)
+  the IaC image-build project and the Batch fan-out - see the `codebuild_image.tf` note). The IaC project (`infra/modules/sdr_pipeline/codebuild_image.tf`)
   builds the SatDump/RT-STPS/CSPP image and pushes it to the sdr-pipeline ECR repo. The
   dedicated VIIRS image is built by a separate IaC project,
   `groundstation-noaa20-viirs-docker-build`. **Image-build gotcha:** both image-build

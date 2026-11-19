@@ -367,6 +367,62 @@ loop -- first re-run the SAME command directly in PowerShell. If that works, the
 bash subshell's credential inheritance, not the session. The repo's `scripts/deploy_*.sh` helpers
 are fine on Linux/CI but on a Windows operator box prefer the direct PowerShell `aws` invocation.
 
+
+---
+
+## Ground Station - Demod/Decode Mission Profile Offers 0 Contacts (two silent config defects)
+
+**Symptom**: `list-contacts --status-list AVAILABLE` returns 0 contacts on every ground station for a
+demod/decode (sync) mission profile, while the DigIF profile for the same satellite gets 20-40 contacts
+per station. No error anywhere: configs create fine, the dataflow endpoint group is `HEALTHY`, AWS
+support confirms the account is onboarded for demod/decode.
+
+**Root cause (isolated 2026-11-18 against AWS's own `AquaSnppJpss.yml`, single-factor trials 7-8):**
+two independent defects, each sufficient on its own to suppress every offer.
+
+1. **`DataflowEndpointConfig` without `dataflowEndpointRegion`.** The API marks it optional; without it
+   the profile gets no contacts.
+2. **`unvalidatedJSON` re-serialised by Terraform `jsonencode`.** A semantically identical demod/decode
+   config gets 0 contacts when its JSON string is compact with keys sorted alphabetically; the AWS sample
+   string (original key order, `type` first) gets contacts. Key order vs whitespace not isolated.
+
+**INCORRECT:**
+```hcl
+dataflow_endpoint_config = {
+  dataflow_endpoint_name = local.dataflow_endpoint_name          # no region -> 0 contacts
+}
+demodulation_config = {
+  unvalidated_json = jsonencode({ type = "QPSK", qpsk = { ... } }) # keys get sorted -> 0 contacts
+}
+```
+
+**CORRECT:**
+```hcl
+dataflow_endpoint_config = {
+  dataflow_endpoint_name   = local.dataflow_endpoint_name
+  dataflow_endpoint_region = data.aws_region.current.id
+}
+demodulation_config = {
+  # AWS sample string verbatim (key order preserved) - never jsonencode. templatefile() only
+  # substitutes the two numbers and keeps the file's bytes otherwise.
+  unvalidated_json = templatefile("${path.module}/files/jpss1_demodulation.json.tpl", {
+    center_frequency_mhz = var.center_frequency_mhz
+    symbol_rate_msps     = var.symbol_rate_msps
+  })
+}
+decode_config = {
+  unvalidated_json = file("${path.module}/files/jpss1_decode.json")
+}
+```
+(As implemented in `infra/modules/sync_pipeline/groundstation.tf`. The payload files are pinned to LF
+in `.gitattributes`: a CRLF checkout would change the bytes sent to AWS.)
+
+**Rule**: for Ground Station `unvalidatedJSON` fields, pass the AWS-validated JSON string verbatim;
+do not round-trip it through `jsonencode`/`ConvertTo-Json`, which reorder keys. Always set
+`dataflowEndpointRegion`. `terraform validate` and a `HEALTHY` endpoint group prove nothing here: the
+only test is `list-contacts` against the profile (`scripts/gs_list_sync_contacts.ps1`). When a profile
+gets no contacts, bisect against the AWS template with throwaway profiles rather than reasoning from docs.
+
 ---
 
 ## AWS Batch + Image-Build CodeBuild -- A Container Job Runs Image-Baked Code, So the Image Must Be Rebuilt From the Branch That Holds the New Code

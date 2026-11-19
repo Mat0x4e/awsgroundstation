@@ -1,8 +1,15 @@
 # Synchronous pipeline — live demod/decode reception
 
 A second, independent reception path for NOAA-20, alongside the DigIF pipeline described
-in [`ARCHITECTURE.md`](ARCHITECTURE.md). Not yet flown — this documents the design as
-built, consolidated from the header comments across
+in [`ARCHITECTURE.md`](ARCHITECTURE.md). Not yet flown.
+
+> **2026-11-19: the sync mission profile now gets contacts offered** (21-34 per onboarded station over
+> 7 days). Until then it got 0 on every station because of two config defects: the
+> `DataflowEndpointConfig` lacked `dataflowEndpointRegion`, and the demod/decode `unvalidatedJSON`
+> strings were re-serialised by `jsonencode` (keys sorted). Both fixed in `groundstation.tf` (JSON now in
+> `files/`). Investigation and trials: `.kiro/skills/aws-ground-station/references/sync-and-digital-twin.md`.
+
+This documents the design as built, consolidated from the header comments across
 [`infra/modules/sync_pipeline/`](../infra/modules/sync_pipeline/),
 [`lambdas/receiver_arm/`](../lambdas/receiver_arm/) and `scripts/sync_receiver_*`.
 
@@ -61,8 +68,8 @@ sequenceDiagram
 > NOTE: the sync aggregation now routes to the shared on-demand **AWS Batch** job
 > (`RTSTPS=off`, `...-agg-queue`, `...-aggregation` job def) when `enable_batch_compute=true`;
 > the CodeBuild `aggregation_sync.yml` path is the retained fallback. This Batch sync path is
-> coded and deployed but **never run on real data** (no sync contact can be scheduled -- see
-> the onboarding blocker above).
+> coded and deployed but **never run on real data** (no sync contact flown yet -- see the
+> former blocker below, resolved 2026-11-19).
 
 ## Component reference
 
@@ -98,15 +105,15 @@ sequenceDiagram
   aggregation step starts.
 - **Packet format is not fully verified.** See the open risk below.
 
-## Blocker -- onboarding (read this first)
+## Former blocker -- zero sync windows (resolved 2026-11-19)
 
-As of 2026-10-22, Ground Station offers **zero schedulable (AVAILABLE) windows** for the sync
-demod/decode mission profile on this account, while the async DigIF profile returns many for the
-same satellite/station/window. NOAA-20 appears onboarded for DigIF but NOT for the
-antenna-downlink-demod-decode dataflow (public broadcast demod/decode is gated separately). No
-sync contact has ever been scheduled. The sync path therefore cannot be flown or validated until
-onboarding is resolved with AWS -- the risk below is moot until then. Full evidence + reproduce
-steps: `docs/SYNC_ONBOARDING_INVESTIGATION.md`.
+From 2026-10-22 to 2026-11-18 Ground Station offered **zero schedulable windows** for the sync
+profile while the DigIF profile got many. `docs/SYNC_ONBOARDING_INVESTIGATION.md` attributed this
+to onboarding. **That conclusion was wrong**: AWS support confirmed demod/decode onboarding, and
+single-factor trials against AWS's `AquaSnppJpss.yml` isolated two config defects (missing
+`dataflowEndpointRegion`; `jsonencode`d `unvalidatedJSON`). After the fix the profile gets 21-34
+contacts per onboarded station over 7 days. No sync contact has been flown yet, so the packet-format
+risk below is now the live one.
 
 ## Open risk — packet format unverified
 

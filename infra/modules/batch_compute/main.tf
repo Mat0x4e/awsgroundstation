@@ -382,16 +382,12 @@ resource "aws_batch_job_definition" "chunk" {
   type                  = "container"
   platform_capabilities = ["EC2"]
 
-  # Default parameter values - overridden at submit time by the SFN Map.
-  # Ref:: substitution resolves these into the environment[] block at runtime.
+  # Only chunk_id keeps a default. Empty-string defaults are dropped by the
+  # Batch API, so declaring them produced a perpetual plan diff. The real
+  # values are supplied per job by the SFN via ContainerOverrides.Environment
+  # (the Ref:: placeholders below are never resolved at runtime).
   parameters = {
-    chunk_key     = ""
-    input_bucket  = ""
-    output_bucket = ""
-    contact_id    = ""
-    contact_date  = ""
-    chunk_id      = "0"
-    kms_key_id    = ""
+    chunk_id = "0"
   }
 
   container_properties = jsonencode({

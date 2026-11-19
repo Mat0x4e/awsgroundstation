@@ -16,6 +16,10 @@ data "archive_file" "viirs_orchestrator" {
   type        = "zip"
   source_dir  = "${path.module}/../../../lambdas/viirs_visualizer"
   output_path = "${path.module}/../../../.build/viirs_orchestrator.zip"
+
+  # Fixed mode and no bytecode keep the zip hash stable across runners.
+  output_file_mode = "0644"
+  excludes         = ["__pycache__", "__pycache__/*"]
 }
 
 # ─────────────────────────────────────────────

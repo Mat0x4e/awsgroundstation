@@ -42,3 +42,9 @@ node_modules/
 # Terraform state backups (may contain secrets) and the batch_compute validation wrapper
 infra/terraform.tfstate*
 infra/.batch_compute_validate/
+
+# Dedicated venv for the slide-map prototype (scripts/slides/)
+.venv-maps/
+
+# Slide decks are working files, not versioned (the map PNGs in Slidedecks/assets/ are)
+*.pptx

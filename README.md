@@ -47,8 +47,9 @@ end-to-end sequence with real timings, and the constraints that shaped the desig
 | [`docs/MEDITERRANEAN_PASS.md`](docs/MEDITERRANEAN_PASS.md) | Planning a targeted acquisition: reachability, the ~10° Stockholm mask, the 7-day booking wall |
 | [`docs/CONTACTS.md`](docs/CONTACTS.md) | Which passes exist, what they contain, what they cost |
 | [`docs/SATDUMP.md`](docs/SATDUMP.md) | **Before touching geolocation.** What SatDump already does — it georeferences its own composites, publishes the VIIRS scan model, stores per-scan timestamps, and needs a TLE — with the upstream file paths to check |
-| [`docs/SYNC_PIPELINE.md`](docs/SYNC_PIPELINE.md) | The second, live demod/decode reception path — architecture and how it differs from the DigIF pipeline. **Blocked: cannot be flown** (NOAA-20 not onboarded for demod/decode on this account) |
-| [`docs/SYNC_ONBOARDING_INVESTIGATION.md`](docs/SYNC_ONBOARDING_INVESTIGATION.md) | Why the sync path is blocked: evidence that NOAA-20 is onboarded for DigIF but not demod/decode (zero schedulable sync windows), the AWS-reference conformance check, and the PSA follow-up |
+| [`docs/SYNC_PIPELINE.md`](docs/SYNC_PIPELINE.md) | The second, live demod/decode reception path (not yet flown) - architecture, how it differs from the DigIF pipeline, and how to pick which one runs for a given contact. Since 2026-11-19 the sync profile gets contacts offered |
+| [`docs/SYNC_ONBOARDING_INVESTIGATION.md`](docs/SYNC_ONBOARDING_INVESTIGATION.md) | Earlier investigation of the zero sync windows. **Its conclusion (not onboarded) was superseded on 2026-11-19**: the cause was two config defects, see the note at its top |
+| [`docs/WORKSTREAMS.md`](docs/WORKSTREAMS.md) | **Before starting work.** The sessions running in parallel on this repo and AWS account, and the rules that keep them apart |
 
 ## Quick start
 

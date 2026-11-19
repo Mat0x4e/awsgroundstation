@@ -1,6 +1,6 @@
 ---
 name: terraform
-description: Owns all Terraform in this repo (infra/**). Implements exactly one task's infra change, then validate + plan only. PLAN-ONLY by contract - cannot run terraform apply (the operator applies). Use for any *.tf / *.tfvars / *.tftest.hcl change.
+description: Owns all Terraform in this repo (infra/**). Implements exactly one task's infra change, then validate + plan only. PLAN-ONLY by contract - cannot run terraform apply (the orchestrating session applies after the user agrees to the plan). Use for any *.tf / *.tfvars / *.tftest.hcl change.
 tools: ["read", "write", "shell"]
 permissions:
   rules:
@@ -30,8 +30,8 @@ yourself from the paths given; do not work from excerpts).
 
 NON-NEGOTIABLE RULES (see .kiro/steering/delegation-and-safety.md and aws-knowledge.md):
 
-- PLAN-ONLY. You NEVER run `terraform apply` or `terraform destroy` - the operator applies
-  (they own the SSO session and the spend). Your deliverable is `terraform validate` + a clean
+- PLAN-ONLY. You NEVER run `terraform apply` or `terraform destroy` - the orchestrating session
+  applies, only after the user agreed to your plan. Your deliverable is `terraform validate` + a clean
   `terraform -chdir=infra plan` that shows only the intended diff (an import task must show
   import/no-destroy, not recreate). Your permissions deny apply/destroy; do not try to work
   around that.

@@ -113,9 +113,12 @@ ADR-001/ADR-002 status to Accepted with the real contact-7 numbers when convenie
 $env:AWS_PROFILE="AWSAdminAccess-471112743408"; $env:AWS_REGION="eu-central-1"; $env:PYTHONUTF8="1"
 aws sso login --profile AWSAdminAccess-471112743408
 
-# Terraform (plan-only from agents; operator applies):
-terraform -chdir=infra plan -var "enable_batch_compute=true" -out plan.tfplan   # -out with a SPACE, not =
-terraform -chdir=infra apply -var "enable_batch_compute=true"   # fresh apply, not a saved plan (latest_version churn)
+# Terraform: subagents plan only; the orchestrating session applies the agreed plan file
+# (.kiro/steering/delegation-and-safety.md). enable_batch_compute=true is in terraform.tfvars.
+terraform -chdir=infra plan -out "$env:TEMP\<name>.approved.tfplan"   # only after the user agreed to the plan summary
+terraform -chdir=infra apply "$env:TEMP\<name>.approved.tfplan"; Remove-Item "$env:TEMP\<name>.approved.tfplan"
+# Exception: after a latest_version launch-template change a saved plan fails ("inconsistent final
+# plan"); that fresh apply is blocked for agents, so the user runs it.
 
 # Re-run a contact through the SFN (clear the idempotence marker first):
 aws s3 rm "s3://groundstation-noaa20-sdr-output-471112743408/contacts/<CONTACT_ID>/.processing"
@@ -128,7 +131,8 @@ aws stepfunctions start-execution --state-machine-arn <sdr-pipeline arn> --input
 
 ## Delegation rules (enforced)
 - All `*.tf` -> `terraform` subagent. All `*.py` -> `python` / `python-haiku` / `python-debugger`.
-  Never edit infra/Python directly. Agents run Terraform plan-only; operator applies (SSO + spend).
+  Never edit infra/Python directly. Subagents run Terraform plan-only; the orchestrating session
+  applies after the user agrees (see `.kiro/steering/delegation-and-safety.md`).
 - `bash scripts/*.sh` from PowerShell may not inherit the refreshed SSO token — run AWS CLI
   directly in PowerShell if a `bash`-wrapped command fails with `InvalidToken` (see aws-knowledge.md).
 

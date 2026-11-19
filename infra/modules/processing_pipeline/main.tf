@@ -101,6 +101,9 @@ data "archive_file" "data_processor" {
   type        = "zip"
   source_file = "${path.module}/../../../lambdas/data_processor/handler.py"
   output_path = "${path.module}/../../../.build/data_processor.zip"
+
+  # Fixed mode keeps the zip hash stable across runners.
+  output_file_mode = "0644"
 }
 
 resource "aws_lambda_function" "data_processor" {

@@ -51,71 +51,38 @@ resource "awscc_groundstation_config" "demod_decode" {
       }
 
       demodulation_config = {
-        unvalidated_json = jsonencode({
-          type = "QPSK"
-          qpsk = {
-            carrierFrequencyRecovery = {
-              centerFrequency = {
-                value = var.center_frequency_mhz
-                units = "MHz"
-              }
-              range = {
-                value = 250
-                units = "kHz"
-              }
-            }
-            symbolTimingRecovery = {
-              symbolRate = {
-                value = var.symbol_rate_msps
-                units = "Msps"
-              }
-              range = {
-                value = 0.75
-                units = "ksps"
-              }
-              matchedFilter = {
-                type          = "ROOT_RAISED_COSINE"
-                rolloffFactor = 0.5
-              }
-            }
-          }
+        # AWS Ground Station matches the unvalidatedJSON string with key order
+        # preserved from the original AWS-validated template (AquaSnppJpss.yml,
+        # SnppJpssDownlinkDemodDecodeAntennaConfig). Using templatefile() keeps
+        # the original key order ("type" before "qpsk", "value" before "units",
+        # "symbolRate" before "range" before "matchedFilter") which is required
+        # for the profile to receive contact offers (trial 8, 2026-11-18).
+        # jsonencode() was removed: it sorts object keys alphabetically, which
+        # produces a string the backend rejects (0 contacts offered).
+        # Reformatting this file is a functional change (guarded by the sha256 precondition below).
+        unvalidated_json = templatefile("${path.module}/files/jpss1_demodulation.json.tpl", {
+          center_frequency_mhz = var.center_frequency_mhz
+          symbol_rate_msps     = var.symbol_rate_msps
         })
       }
 
       decode_config = {
-        unvalidated_json = jsonencode({
-          edges = [
-            { from = "I-Ingress", to = "IQ-Recombiner" },
-            { from = "Q-Ingress", to = "IQ-Recombiner" },
-            { from = "IQ-Recombiner", to = "CcsdsViterbiDecoder" },
-            { from = "CcsdsViterbiDecoder", to = "NrzmDecoder" },
-            { from = "NrzmDecoder", to = "UncodedFramesEgress" },
-          ]
-          nodeConfigs = {
-            I-Ingress = {
-              type                = "CODED_SYMBOLS_INGRESS"
-              codedSymbolsIngress = { source = "I" }
-            }
-            Q-Ingress = {
-              type                = "CODED_SYMBOLS_INGRESS"
-              codedSymbolsIngress = { source = "Q" }
-            }
-            IQ-Recombiner = {
-              type = "IQ_RECOMBINER"
-            }
-            CcsdsViterbiDecoder = {
-              type                      = "CCSDS_171_133_VITERBI_DECODER"
-              ccsds171133ViterbiDecoder = { codeRate = "ONE_HALF" }
-            }
-            NrzmDecoder = {
-              type = "NRZ_M_DECODER"
-            }
-            UncodedFramesEgress = {
-              type = "UNCODED_FRAMES_EGRESS"
-            }
-          }
-        })
+        # Same rationale as demodulation_config above: verbatim AWS sample JSON
+        # with "type" as the first key in each nodeConfig (not alphabetically
+        # sorted). Static file -- no variable substitution needed.
+        # Reformatting this file is a functional change (guarded by the sha256 precondition below).
+        unvalidated_json = file("${path.module}/files/jpss1_decode.json")
       }
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition = (
+        filesha256("${path.module}/files/jpss1_demodulation.json.tpl") == "7c34e9a88efd4d4972844f003a25e24470064c03b5b83b94935bc35e2e8d3e17" &&
+        filesha256("${path.module}/files/jpss1_decode.json") == "c15a81ed204acf54b2aecab13fd339e5d3753377cdf299a59921979f97b07d21"
+      )
+      error_message = "files/jpss1_demodulation.json.tpl or files/jpss1_decode.json changed. These are sent to AWS as exact strings; reformatting them (CRLF, key order, whitespace) is a functional change that silently brings back 0 contact offers. Verify with scripts/gs_list_sync_contacts.ps1 after apply and update the hashes in this precondition only then."
     }
   }
 
@@ -137,6 +104,10 @@ resource "awscc_groundstation_config" "dataflow_endpoint" {
   config_data = {
     dataflow_endpoint_config = {
       dataflow_endpoint_name = local.dataflow_endpoint_name
+      # dataflowEndpointRegion is marked optional in the AWS API reference but is
+      # required in practice: a DataflowEndpointConfig without it gets 0 contacts
+      # offered on all stations (trial 7 Q1 vs Q2, 2026-11-18).
+      dataflow_endpoint_region = data.aws_region.current.id
     }
   }
 

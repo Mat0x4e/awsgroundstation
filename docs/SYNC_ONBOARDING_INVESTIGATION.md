@@ -1,5 +1,14 @@
 # Sync (demod/decode) onboarding investigation -- NOAA-20
 
+> **Superseded 2026-11-19.** The conclusion below (NOAA-20 not onboarded for demod/decode) is
+> wrong. AWS support confirmed the account is onboarded for demod/decode. The zero windows came from
+> two config defects in `infra/modules/sync_pipeline/groundstation.tf`: the `DataflowEndpointConfig`
+> lacked `dataflowEndpointRegion`, and the demod/decode `unvalidatedJSON` strings were re-serialised by
+> `jsonencode` (keys sorted). Each alone gives 0 contacts. Isolated by single-factor trials against
+> AWS's `AquaSnppJpss.yml`; after the fix the sync profile gets 21-34 contacts per onboarded station.
+> Trials and evidence: `.kiro/skills/aws-ground-station/references/sync-and-digital-twin.md`.
+> Kept for history.
+
 **Date:** 2026-10-22
 **Account:** 471112743408 (`mbonnet-adm@soprasteria.cloud`, AWSAdminAccess) . Region eu-central-1
 **Satellite:** NOAA-20 / JPSS-1 (NORAD 43013, UUID `33f035e1-73f7-47a5-9df8-fbc48636dca8`)

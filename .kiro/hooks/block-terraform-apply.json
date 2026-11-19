@@ -4,11 +4,11 @@
     {
       "name": "Block terraform apply from agent",
       "trigger": "PreToolUse",
-      "description": "Plan-only discipline: agents must never run terraform apply (the operator applies; see .kiro/steering/delegation-and-safety.md). Blocks any shell command containing a terraform apply invocation (exit 2).",
-      "matcher": "execute_bash|executeBash|shell|command",
+      "description": "Apply discipline (.kiro/steering/delegation-and-safety.md). Logic in .kiro/hooks/block-terraform-apply.sh (tested by scripts/test_block_terraform_apply_hook.ps1): blocks terraform destroy and any terraform apply except a single, unchained apply of a saved *.approved.tfplan created after the user agreed to the plan. Subagents are plan-only.",
+      "matcher": "execute_bash|executeBash|execute_pwsh|shell|command",
       "action": {
         "type": "command",
-        "command": "cmd=$(python3 -c \"import sys,json\\nd=json.load(sys.stdin)\\nti=d.get('toolInput') or d.get('tool_input') or {}\\nprint(ti.get('command','') if isinstance(ti,dict) else '')\" 2>/dev/null); if printf '%s' \"$cmd\" | grep -Eq \"terraform([[:space:]]+-chdir=[^[:space:]]+)?[[:space:]]+apply\"; then echo \"BLOCKED: terraform apply is operator-only (plan-only discipline, .kiro/steering/delegation-and-safety.md). Produce a terraform plan and hand it off to the operator.\" >&2; exit 2; fi; exit 0",
+        "command": "sh .kiro/hooks/block-terraform-apply.sh",
         "timeout": 15
       }
     }

@@ -21,6 +21,10 @@ data "archive_file" "receiver_arm" {
   type        = "zip"
   source_dir  = "${path.module}/../../../lambdas/receiver_arm"
   output_path = "${path.module}/../../../.build/receiver_arm.zip"
+
+  # Fixed mode and no bytecode keep the zip hash stable across runners.
+  output_file_mode = "0644"
+  excludes         = ["__pycache__", "__pycache__/*"]
 }
 
 ###############################################################################

@@ -294,10 +294,9 @@ With async aggregation validated on Batch, the shared CodeBuild project was reti
 **HELD:** `groundstation-noaa20-sync-aggregation` CodeBuild + its sync SFN poll-loop — retired only
 after a real sync contact validates `RTSTPS=off` (contact-7 is async DigIF and cannot exercise it).
 
-**FLAGGED for separate cleanup (out of this spec's scope):** `satdump-noaa20-processing` — the old
-out-of-IaC CodeBuild project (OE-1 finding) still exists in the account but not in Terraform. It is
-now dead (fan-out runs on Batch). It needs a deliberate manual/console removal since Terraform does
-not manage it.
+**Done (was flagged for separate cleanup):** `satdump-noaa20-processing`, the old out-of-IaC CodeBuild
+project (OE-1 finding), and its role `codebuild-satdump-role` were deleted on 2026-10-22 (confirmed
+absent 2026-11-19). Its log group `/aws/codebuild/satdump-noaa20-processing` was deleted 2026-11-19.
 
 ### State after task 8
 

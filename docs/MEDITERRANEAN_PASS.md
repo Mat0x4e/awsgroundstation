@@ -21,12 +21,21 @@ sweep + solar geometry, ranked against the windows AWS actually offers.
 > elevation at maximum slant range, "the regime that produced partial granules on contacts
 > #1–#4". The geometry was chosen correctly and the link budget still lost.
 >
-> **Retry booked: contact #6 `8fb38af8-080a-445a-bf10-50d14f4ba85e`, 2026-09-06
+> **Retry flown: contact #6 `8fb38af8-080a-445a-bf10-50d14f4ba85e`, 2026-09-06
 > 11:47:16–11:57:59 UTC**, AWS max elevation 61.27°, 6 basins / 5 in core swath. Selected on
 > the metric that actually failed — the basin is scanned at 18.8–19.5° rather than 11.6–17.4°.
-> The residual risk is unchanged and structural: every offered pass scans the basin in the
-> opening ~2 minutes, and on #5 nothing before ~AOS+2.5 min survived. See
-> [CONTACTS.md](CONTACTS.md#contact-6--mediterranean-retry-scheduled).
+>
+> **Outcome, 2026-09-06 — same structural result: the basin did not calibrate.**
+> Reception clean: 22 chunks, 47.1 GB. RT-STPS produced 5 RDRs (VIIRS 675.6 MiB). CSPP
+> geolocated 4 granules and **calibrated 1** (SVI05 11:54:02–11:55:27 UTC, AOS+6m46s, over
+> Scandinavia). The earliest geolocated granule starts at AOS+2m31s; the basin is scanned
+> in the opening ~2 minutes, before anything survived calibration. A higher link elevation
+> (18.8–19.5° vs 11.6–17.4°) did not change that, so link elevation at the basin alone did
+> not fix it: on #5 and #6 nothing before ~AOS+2.5 min survived calibration. The cause of
+> the early-granule loss is not proven; the basin remains out of reach from Stockholm 1
+> with the current chain. Details and per-stage figures: [CONTACTS.md](CONTACTS.md#contact-6--mediterranean-retry).
+> Pending measures: land/sea MCC on the contact #6 composite, and a later SatDump chunk
+> (the basin appears only in `chunk_0`).
 
 ---
 

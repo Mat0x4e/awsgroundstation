@@ -1,0 +1,32 @@
+BLOCK|terraform -chdir=infra apply
+BLOCK|terraform apply -auto-approve
+BLOCK|terraform -no-color apply -auto-approve
+BLOCK|terraform -chdir infra apply
+BLOCK|terraform -chdir=infra destroy
+BLOCK|terraform -no-color destroy -auto-approve
+BLOCK|terraform apply -destroy
+BLOCK|terraform apply -var-file=vars.approved.tfplan
+BLOCK|terraform apply x.approved.tfplan && terraform -no-color destroy
+BLOCK|terraform apply x.approved.tfplan; terraform apply -auto-approve
+BLOCK|terraform apply x.approved.tfplan | tee log
+BLOCK|terraform apply x.approved.tfplan x2.tfplan
+ALLOW|terraform -chdir=infra apply C:/Temp/x.approved.tfplan
+ALLOW|terraform apply -no-color -input=false "C:\Users\me\AppData\Local\Temp\lambda-hashes.approved.tfplan" *> "C:\Users\me\AppData\Local\Temp\a.txt"
+ALLOW|terraform apply x.approved.tfplan 2>&1
+ALLOW|terraform -chdir=infra plan -out x.tfplan
+ALLOW|terraform validate
+ALLOW|git status
+ALLOW|terraform plan -no-color -out="C:\Temp\x.approved.tfplan"
+ALLOW|$env:AWS_PROFILE="AWSAdminAccess-471112743408"; $env:AWS_REGION="eu-central-1"; terraform apply -no-color -input=false "C:\Temp\x.approved.tfplan" *> "C:\Temp\a.txt"
+BLOCK|$env:AWS_PROFILE="p"; terraform apply -auto-approve
+BLOCK|$env:AWS_PROFILE="p"; terraform apply x.approved.tfplan; terraform -no-color destroy
+BLOCK|Remove-Item x; terraform apply x.approved.tfplan
+BLOCK|terraform apply -auto-approve #x.approved.tfplan
+BLOCK|terraform apply -auto-approve # x.approved.tfplan
+BLOCK|Terraform apply -auto-approve
+BLOCK|TERRAFORM -no-color APPLY -auto-approve
+BLOCK|terraform.exe apply -auto-approve
+BLOCK|C:\tools\terraform.exe -chdir=infra apply
+BLOCK|terraform.exe destroy -auto-approve
+BLOCK|terraform apply -destroy x.approved.tfplan
+ALLOW|terraform.exe apply C:\Temp\x.approved.tfplan

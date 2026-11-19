@@ -205,9 +205,7 @@ against the products prefix, never the execution status.
 - **The SDR image is built by an IaC CodeBuild project, `groundstation-noaa20-sdr-docker-build`.**
   The old out-of-band project `satdump-noaa20-processing` (role `codebuild-satdump-role`)
   that predated it was **deleted on 2026-10-22** (orphaned, not in Terraform, superseded by
-  the IaC image-build project and the Batch fan-out — see
-  [`SYNC_ONBOARDING_INVESTIGATION.md`](SYNC_ONBOARDING_INVESTIGATION.md) history and the
-  `codebuild_image.tf` note). The IaC project (`infra/modules/sdr_pipeline/codebuild_image.tf`)
+  the IaC image-build project and the Batch fan-out - see the `codebuild_image.tf` note). The IaC project (`infra/modules/sdr_pipeline/codebuild_image.tf`)
   builds the SatDump/RT-STPS/CSPP image and pushes it to the sdr-pipeline ECR repo. The
   dedicated VIIRS image is built by a separate IaC project,
   `groundstation-noaa20-viirs-docker-build`. **Image-build gotcha:** both image-build

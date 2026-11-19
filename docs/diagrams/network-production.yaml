@@ -3,6 +3,11 @@ Diagram:
     - Type: URL
       Url: "https://raw.githubusercontent.com/awslabs/diagram-as-code/main/definitions/definition-for-aws-icons-light.yaml"
 
+  # Production pattern: the receiver EC2 sits in a private subnet with no public IP. The Ground
+  # Station flow arrives on a second ENI with an Elastic IP placed in a PUBLIC subnet (same AZ),
+  # routed through the Internet Gateway. Outbound traffic from the instance goes through the NAT
+  # Gateway; AWS service traffic stays on VPC endpoints.
+
   Resources:
     Canvas:
       Type: AWS::Diagram::Canvas
@@ -36,16 +41,27 @@ Diagram:
       Title: "VPC 10.0.0.0/16"
       Direction: vertical
       Children:
+        - IGW
         - PublicSubnet
         - PrivateSubnet
         - Endpoints
 
+    IGW:
+      Type: AWS::EC2::InternetGateway
+      Title: "Internet Gateway"
+
     PublicSubnet:
       Type: AWS::EC2::Subnet
       Preset: PublicSubnet
-      Title: "Subnet public"
+      Title: "Subnet public 10.0.1.x"
+      Direction: horizontal
       Children:
+        - ENI
         - NAT
+
+    ENI:
+      Type: AWS::EC2::NetworkInterface
+      Title: "2e ENI + EIP (flux GS)"
 
     NAT:
       Type: AWS::EC2::NatGateway
@@ -55,18 +71,12 @@ Diagram:
       Type: AWS::EC2::Subnet
       Preset: PrivateSubnet
       Title: "Subnet prive 10.0.2.x"
-      Direction: horizontal
       Children:
-        - ENI
         - EC2
-
-    ENI:
-      Type: AWS::EC2::NetworkInterface
-      Title: "ENI publique + EIP"
 
     EC2:
       Type: AWS::EC2::Instance
-      Title: "EC2 SDR + agent GS"
+      Title: "EC2 SDR + agent GS (sans IP publique)"
 
     Endpoints:
       Type: AWS::EC2::VPCEndpoint
@@ -75,7 +85,7 @@ Diagram:
   Links:
     - Source: GroundStation
       SourcePosition: E
-      Target: ENI
+      Target: IGW
       TargetPosition: W
       TargetArrowHead:
         Type: Open
@@ -83,29 +93,40 @@ Diagram:
         AutoLeft:
           Title: "UDP 55888-56000"
 
+    - Source: IGW
+      SourcePosition: S
+      Target: ENI
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+
     - Source: ENI
-      SourcePosition: E
+      SourcePosition: S
       Target: EC2
-      TargetPosition: W
+      TargetPosition: NW
       TargetArrowHead:
         Type: Open
 
     - Source: EC2
-      SourcePosition: N
+      SourcePosition: NE
       Target: NAT
       TargetPosition: S
       TargetArrowHead:
         Type: Open
 
     - Source: NAT
-      SourcePosition: E
+      SourcePosition: N
+      Target: IGW
+      TargetPosition: E
+      TargetArrowHead:
+        Type: Open
+
+    - Source: IGW
+      SourcePosition: NE
       Target: Internet
       TargetPosition: W
       TargetArrowHead:
         Type: Open
-      Labels:
-        AutoRight:
-          Title: "via Internet Gateway"
 
     - Source: EC2
       SourcePosition: S

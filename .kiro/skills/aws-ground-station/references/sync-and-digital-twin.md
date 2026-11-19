@@ -153,6 +153,15 @@ Fix (Terraform, `infra/modules/sync_pipeline/groundstation.tf`): set the endpoin
 dataflow-endpoint config, and pass the AWS sample JSON strings verbatim (heredoc / file), not `jsonencode`.
 Verify after apply with `scripts/gs_list_sync_contacts.ps1` (expect contacts on the 5 onboarded stations).
 
+**Fixed 2026-11-19** (commits `e387c63`, `e6bd60c`; targeted apply of the two configs only, both updated
+in place, no ARN change). `get-config` shows the region stored and the JSON strings stored as written
+(key order kept; the `awscc` provider does not normalise them). The real sync profile `2e719f99-...` now
+gets **21 / 17 / 23 / 28 / 34** contacts (Cape Town / Hawaii / Ohio / Oregon / Stockholm) over 7 days.
+Fewer than the template's because our profile keeps pre-pass 600 s / min viable 300 s.
+
+Next for the sync path: one real contact to clear the packet-format gate (`docs/SYNC_PIPELINE.md`);
+the digital twin still only covers the control plane.
+
 Cleanup note: a trial interrupted mid-run leaves the template stack and the `trial-aqua-key` key pair;
 check `list-stacks`, `describe-key-pairs`, profiles, groups and `trial*` configs/ENIs before re-running.
 
@@ -182,8 +191,19 @@ Source: https://docs.aws.amazon.com/ground-station/latest/ug/digital-twin.html
   (same capabilities, site mask and coordinates). Find them with `ListGroundStations`.
 - It emits the **same EventBridge events and API responses** as production.
 - **No data delivery** (dataflows) and **no telemetry** on twin ground stations.
-- `[unverified]` here: whether NOAA-20 can be onboarded to the twin, its pricing, and its
-  quotas/limits. Check before relying on it.
+- GA since August 2024, in every region where Ground Station is available, with a twin of every
+  location ([What's New](https://aws.amazon.com/about-aws/whats-new/2024/08/digital-twin-available-aws-ground-station/)).
+- From the [AWS Public Sector blog (2025-03)](https://aws.amazon.com/blogs/publicsector/test-and-integrate-ground-segment-with-aws-ground-station-digital-twin/):
+  you can onboard **public broadcast satellites** if you have no satellite of your own, but onboarding
+  must be done **in a non-production AWS account**. Contention with other contacts is emulated as in
+  production. No payload is delivered, but the contact lifecycle against the dataflow endpoints and the
+  EventBridge events are exercised. Cost is described only as "significantly lower" than production.
+- Account check (2026-11-18, read-only): `list-ground-stations` in eu-central-1, us-east-2, us-west-2,
+  eu-west-1 and eu-north-1 shows **no "Digital Twin" station**. `list-contacts` on
+  `Digital Twin Stockholm 1` (NOAA-20, async profile) returns **0, with no error**. So this account is
+  **not onboarded** to the twin.
+- `[unverified]` Exact twin pricing and quotas, the onboarding lead time, and whether the non-production
+  account rule is enforced (this account already carries the production contacts).
 
 ## What it can and cannot test for the sync path
 

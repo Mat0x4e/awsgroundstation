@@ -1,8 +1,15 @@
 # Synchronous pipeline — live demod/decode reception
 
 A second, independent reception path for NOAA-20, alongside the DigIF pipeline described
-in [`ARCHITECTURE.md`](ARCHITECTURE.md). Not yet flown — this documents the design as
-built, consolidated from the header comments across
+in [`ARCHITECTURE.md`](ARCHITECTURE.md). Not yet flown.
+
+> **2026-11-19: the sync mission profile now gets contacts offered** (21-34 per onboarded station over
+> 7 days). Until then it got 0 on every station because of two config defects: the
+> `DataflowEndpointConfig` lacked `dataflowEndpointRegion`, and the demod/decode `unvalidatedJSON`
+> strings were re-serialised by `jsonencode` (keys sorted). Both fixed in `groundstation.tf` (JSON now in
+> `files/`). Investigation and trials: `.kiro/skills/aws-ground-station/references/sync-and-digital-twin.md`.
+
+This documents the design as built, consolidated from the header comments across
 [`infra/modules/sync_pipeline/`](../infra/modules/sync_pipeline/),
 [`lambdas/receiver_arm/`](../lambdas/receiver_arm/) and `scripts/sync_receiver_*`.
 

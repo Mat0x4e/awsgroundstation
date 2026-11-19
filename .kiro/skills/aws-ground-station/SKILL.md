@@ -58,7 +58,7 @@ Anything not verified is marked `[unverified]`. Do not turn an `[unverified]` it
 | Delivery | `.pcap` chunks in S3 after the contact | live UDP to a receiver EC2 during the contact |
 | Safety net | S3 holds the data; replayable | none: receiver must be listening before AOS |
 | RT-STPS PN | `PnEncoded="false"` (SatDump derandomizes upstream) | `PnEncoded="true"` (no PN, no Reed-Solomon in the egress) |
-| Status | flown on several contacts (`docs/CONTACTS.md`) | **0 contacts offered so far**; root cause found 2026-11-18 (missing `dataflowEndpointRegion` + `jsonencode`d `unvalidatedJSON`), Terraform fix pending - see `references/sync-and-digital-twin.md` |
+| Status | flown on several contacts (`docs/CONTACTS.md`) | **contacts offered since 2026-11-19** (fix: `dataflowEndpointRegion` + verbatim `unvalidatedJSON`); never flown, packet format unverified - see `references/sync-and-digital-twin.md` |
 
 Details: `docs/ARCHITECTURE.md` (async), `docs/SYNC_PIPELINE.md` (sync).
 

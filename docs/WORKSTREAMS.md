@@ -8,7 +8,8 @@ Status as of 2026-11-19.
 
 | Workstream | Goal | Main outputs | Status |
 |---|---|---|---|
-| **Sync reception + digital twin** | Get the synchronous (demod/decode, live UDP) path to receive contacts, then test it with the AWS Ground Station digital twin | `.kiro/skills/aws-ground-station/` (SKILL + `references/sync-and-digital-twin.md`), `scripts/gs_*.ps1`, `infra/modules/sync_pipeline/`, `docs/SYNC_PIPELINE.md` | Root cause of "0 contacts" found 2026-11-18 (missing `dataflowEndpointRegion`; `jsonencode`d `unvalidatedJSON`). Terraform fix in progress, not applied |
+| **Sync reception + digital twin** | Get the synchronous (demod/decode, live UDP) path to receive contacts, then test it with the AWS Ground Station digital twin | `.kiro/skills/aws-ground-station/` (SKILL + `references/sync-and-digital-twin.md`), `scripts/gs_*.ps1`, `infra/modules/sync_pipeline/`, `docs/SYNC_PIPELINE.md` | Fixed and applied 2026-11-19: the sync profile now gets contacts. Next: Terraform drift investigation (below), then a first real sync contact |
+| **Terraform clean reference** | Explain the 13 unrelated changes a full `terraform plan` shows (6 Batch render destroys, 7 updates) and bring code and AWS back in line | report under `.agents/tasks/` | Investigation started 2026-11-19, read-only |
 | **Public satellites allowing uplink** | Inventory the AWS public broadcast satellites and find public/European satellites that accept an uplink | `docs/SATELLITES_PBS_AND_UPLINK.md` | In progress (separate session) |
 | **AWS Ground Station vs KSAT** | Compare how AWS Ground Station and KSAT are used (access, pricing, coverage, partnership) | not yet in the repo | In progress (separate session) |
 

@@ -9,7 +9,7 @@ Status as of 2026-11-19.
 | Workstream | Goal | Main outputs | Status |
 |---|---|---|---|
 | **Sync reception + digital twin** | Get the synchronous (demod/decode, live UDP) path to receive contacts, then test it with the AWS Ground Station digital twin | `.kiro/skills/aws-ground-station/` (SKILL + `references/sync-and-digital-twin.md`), `scripts/gs_*.ps1`, `infra/modules/sync_pipeline/`, `docs/SYNC_PIPELINE.md` | Fixed and applied 2026-11-19: the sync profile now gets contacts. Next: Terraform drift investigation (below), then a first real sync contact |
-| **Terraform clean reference** | Explain the 13 unrelated changes a full `terraform plan` shows and bring code and AWS back in line | `.agents/tasks/terraform-clean-reference-2026-11-19/report.md` | **Done 2026-11-19**: `origin/main` merged, plan noise removed, last 2 Lambda hash updates applied. `terraform plan` = **No changes**. Orphans deleted (below) |
+| **Terraform clean reference** | Explain the 13 unrelated changes a full `terraform plan` shows and bring code and AWS back in line | [`docs/reviews/TERRAFORM_CLEAN_REFERENCE_2026-11-19.md`](reviews/TERRAFORM_CLEAN_REFERENCE_2026-11-19.md) | **Done 2026-11-19**: `origin/main` merged, plan noise removed, last 2 Lambda hash updates applied. `terraform plan` = **No changes**. Orphans deleted (below) |
 
 ### AWS objects outside Terraform (checked 2026-11-19)
 

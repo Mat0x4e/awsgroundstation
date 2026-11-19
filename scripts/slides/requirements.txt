@@ -1,0 +1,13 @@
+# Dependencies of scripts/slides/world_map.py, pinned to the versions it was built and run with
+# (Python 3.14, 2026-11). Install into a dedicated venv:
+#   python -m venv .venv-maps
+#   .venv-maps/Scripts/python.exe -m pip install -r scripts/slides/requirements.txt
+#   .venv-maps/Scripts/python.exe scripts/slides/world_map.py --font-size 10
+# Cartopy downloads Natural Earth data on first run (needs internet once).
+Cartopy==0.26.0
+adjustText==1.4.0
+matplotlib==3.11.2
+numpy==2.5.4
+pyproj==3.8.0
+pyshp==3.1.8
+shapely==2.2.0

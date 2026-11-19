@@ -48,7 +48,7 @@ try {
   "profiles created; waiting 150 s for propagation"; Start-Sleep -Seconds 150
   foreach ($t in $tests) {
     "== $($t.n) -> $($ids[$t.n])"
-    powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\gs_list_sync_contacts.ps1" -ProfileId $ids[$t.n] | Select-String -NotMatch "^   " | Select-String "contacts|ERROR"
+    powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\..\gs_list_sync_contacts.ps1" -ProfileId $ids[$t.n] | Select-String -NotMatch "^   " | Select-String "contacts|ERROR"
   }
 } catch { "ERROR: $_" }
 finally {

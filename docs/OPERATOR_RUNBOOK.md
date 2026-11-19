@@ -1,147 +1,43 @@
-# Operator Runbook — Post-Refinement Follow-ups
+# Operator Runbook
 
-Operator-owned actions remaining after the Well-Architected refinement
-([`ARCHITECTURE_REFINEMENT.md`](ARCHITECTURE_REFINEMENT.md),
-spec [`.kiro/specs/architecture-refinement/`](../.kiro/specs/architecture-refinement/)).
+Standing rules and checks for whoever operates the pipeline. How to book and process a pass is in
+the [README](../README.md) ("Booking a pass", "Processing a pass"); how to fly a first sync contact
+is the checklist in [`SYNC_PIPELINE.md`](SYNC_PIPELINE.md#first-sync-contact---checklist).
 
-None are blocked. Each needs real spend, protected config, or a `terraform apply` that the
-refinement workflow deliberately left to a human (it ran plan-only throughout). Ordered by
-suggested sequence.
-
----
-
-## 1. Apply the MCP TLS fix (2 min — unblocks AWS doc/knowledge MCP tools)
-
-**Why:** the MCP servers run under Python/`uvx`, which uses `certifi`'s CA store and does not
-trust the corporate TLS-interception root CA — so outbound HTTPS fails with
-`CERTIFICATE_VERIFY_FAILED: self-signed certificate in certificate chain`. PowerShell works
-because it uses the Windows cert store, which has the root. The CA bundle has been exported
-and the config already edited; the file is a protected path for agents, so a human reloads it.
-
-```
-File:   C:\Users\mbonnet\.kiro\settings\mcp.json   (backup: mcp.json.bak-<timestamp>)
-Bundle: C:\Users\mbonnet\.kiro\certs\corporate-ca-bundle.pem   (102 CAs incl. corporate root)
-```
-
-The three TLS-making servers (`fetch`, `aws-docs`, `aws-mcp`) already carry:
-```jsonc
-"env": {
-  "SSL_CERT_FILE":      "C:/Users/mbonnet/.kiro/certs/corporate-ca-bundle.pem",
-  "REQUESTS_CA_BUNDLE": "C:/Users/mbonnet/.kiro/certs/corporate-ca-bundle.pem"
-}
-```
-
-- **Action:** reload MCP (servers reconnect on config change).
-- **Verify:** run an `aws-docs` search — no `CERTIFICATE_VERIFY_FAILED`.
-- **If it still fails:** some `httpx`-based servers need the bundle via a different var; revert
-  with the `.bak` file and investigate.
-- **Maintenance:** regenerate the PEM if the corporate CA rotates. (Export: Windows cert store
-  `Cert:\LocalMachine\Root` + `CA` → one PEM.)
-- **Tool-name note:** `search_documentation` lives on the `aws-docs` server (`mcp_aws_docs_*`),
-  NOT the `aws-mcp` proxy (`mcp_aws_mcp_aws___*`) — they are different servers.
-
----
-
-## 2. Apply the refinement Terraform (pipeline or manual)
-
-All waves are `terraform validate`-clean with **0 net-new HIGH/CRITICAL** (Checkov:
-492 passed / 81 failed / 14 skipped; all 81 failures pre-existing on unchanged resources).
-
-```bash
-aws sso login --profile AWSAdminAccess-471112743408
-export AWS_PROFILE=AWSAdminAccess-471112743408 AWS_REGION=eu-central-1
-cd infra && terraform plan        # review the diff first
-```
-
-### ~~One-time: adopt-then-rename the SDR-image CodeBuild project (Task 1.1 / OE-1)~~ - obsolete
-
-No longer applicable. The out-of-band project `satdump-noaa20-processing` and its role
-`codebuild-satdump-role` were **deleted on 2026-10-22** instead of being imported (confirmed absent
-2026-11-19: `batch-get-projects` returns it in `projectsNotFound`, `get-role` returns `NoSuchEntity`).
-The SDR image is built by the IaC project `groundstation-noaa20-sdr-docker-build`
-(`infra/modules/sdr_pipeline/codebuild_image.tf`). Do not run the old import steps.
-
-### New standing cost (minor)
-
-The PERF-1 LUT-cache refresh (`sdr_pipeline/lut_cache.tf`) runs a CodeBuild job weekly
-(`rate(7 days)`) — one internet LUT fetch per week instead of one per contact. First
-aggregation after a cold cache falls back to `sdr_luts.sh` automatically (self-healing).
-
----
-
-## 3. Run the compute bake-off, then close ADR-001 (the measured gate)
-
-**Why:** ADR-001 (in `ARCHITECTURE_REFINEMENT.md`) recommends AWS Batch on EC2 Spot for the
-chunk fan-out, but on **list-price estimates**. Replace them with one real measurement before
-any migration. The `compute-bakeoff-batch-spot` module is built and gated **off**. Scope:
-**fan-out only** (aggregation/CSPP deferred — now unblocked by PERF-1's cache, but out of this
-bake-off's scope).
-
-```bash
-# Enable the throwaway module (bake-off spec Task 4):
-#   infra/terraform.tfvars →  enable_compute_bakeoff = true   (requires enable_sdr_pipeline = true)
-terraform -chdir=infra apply
-
-# Run one already-received contact's chunks on Batch-on-Spot + the CodeBuild baseline:
-./scripts/bakeoff/run_bakeoff.sh ba2c5446    # e.g. contact #5 — 22 chunks, already in S3
-```
-
-Records actual $/contact, wall-clock, queue delay, and Spot-interruption count for both
-platforms. Cost of the experiment: ~$1–2 Spot + one CodeBuild baseline (~$7–9).
-
-**Then record the result (Task 5):**
-- Paste the measured results table into ADR-001 in `ARCHITECTURE_REFINEMENT.md`.
-- Flip ADR-001 status to Accepted or Rejected (migrate / do-not-migrate) with the measured
-  justification.
-- If it recommends migrating, open a **new** migration spec — do not migrate from the bake-off
-  spec.
-
-**Mandatory teardown (Task 6):**
-```bash
-#   infra/terraform.tfvars →  enable_compute_bakeoff = false
-terraform -chdir=infra apply
-# Verify: no `bakeoff-` Batch resources, no running Spot instances tagged
-# Objective=compute-bakeoff.
-```
-
----
+> Rewritten 2026-11-19. The earlier "post-refinement follow-ups" (apply the refinement Terraform,
+> run the compute bake-off, adopt the out-of-band CodeBuild project) are all done or superseded:
+> the refinement is applied, ADR-001 is accepted and the Batch migration replaced the bake-off,
+> and `satdump-noaa20-processing` was deleted. Their history is in git and in
+> [`ARCHITECTURE_REFINEMENT.md`](ARCHITECTURE_REFINEMENT.md).
 
 ## Standing operational reminders
 
-- **Post-pass verification:** `python scripts/verify_pass.py <contact_id> --date YYYY/MM/DD --save-report output/contact-NN_<station>_<date>` — checks products, metrics, and alarms in one go; exits non-zero if the pass produced no imagery. Report files (`verify_pass_report.txt`, `verify_pass_report.json`) are saved into the contact output folder (see `output/README.md`). Contact #7 example: `python scripts/verify_pass.py dcef1518-c454-401f-bdcd-dc2e73fe89a5 --date 2026/10/17 --save-report output/contact-07_oregon-1_2026-10-17`
-- **Verify products, not execution status.** A `SUCCEEDED` run still does not prove imagery —
-  but the refinement now surfaces failures via SNS: `ProductsWritten==0`, `VisualizationFailed`,
-  `ChunksFailed` / all-chunks-failed, async `ExecutionsFailed`, and the sync `ReceiverReadyFailure`
-  and `OptDriftDetected` alarms. **Subscribe an endpoint** (email/Slack/etc.) to the shared SNS
-  topic if one is not already attached, or the alarms fire into the void.
-- **Scheduler cron stays DISABLED.** Booking is a deliberate manual act. The new monthly budget
-  (`security/budget.tf`, default $500, account-wide → SNS at 80%/100%/forecast) is the backstop
-  against an accidental re-enable. Narrow its `cost_filter` to `"AWS Ground Station"` once the
-  exact Cost Explorer service string is confirmed (committed, commented, ready to enable).
-- **Sync path is not flight-ready** until the packet-format gate in
-  [`SYNC_PIPELINE.md`](SYNC_PIPELINE.md) is cleared: capture a raw sample via the new `--raw-tee`
-  (uploaded to `s3://<bucket>/contacts/<date>/<contact>/raw/`), inspect against the onboarding
-  spec, confirm RT-STPS `frame_sync` locks, record the verified layout.
-- **`/opt/*` drift is now detected, not reconstructed.** If the `OptDriftDetected` alarm fires,
-  `/opt/rt-stps` or `/opt/SDR_4_1` is missing/empty on an instance — restore it by hand before
-  the next pass (full automated reconstruction was deliberately deferred — see
-  `ssm_drift_check.tf` and OE-2 in the refinement doc).
-- **NOAA-20 HRD horizon.** The S-NPP data cessation (2026-11-02) does NOT affect NOAA-20, but it
-  is a precedent arriving on the same `cspp_registrants` channel. Find NOAA-20's own HRD Direct
-  Broadcast sunset date (JPSS program / NOAA OSPO) and record it in [`CONTACTS.md`](CONTACTS.md)
-  as a hard horizon — it bounds the useful life of the whole async DigIF pipeline.
+- **Post-pass verification:** `python scripts/verify_pass.py <contact_id> --date YYYY/MM/DD --save-report output/contact-NN_<station>_<date>` checks products, metrics and alarms in one go and exits non-zero if the pass produced no imagery. Reports land in the contact output folder (see `output/README.md`). Example (contact #7): `python scripts/verify_pass.py dcef1518-c454-401f-bdcd-dc2e73fe89a5 --date 2026/10/17 --save-report output/contact-07_oregon-1_2026-10-17`. It covers the async path only; a sync pass is verified by hand for now.
+- **Verify products, not execution status.** A `SUCCEEDED` run does not prove imagery. Failures surface via SNS: `ProductsWritten==0`, `VisualizationFailed`, `ChunksFailed` / all-chunks-failed, async `ExecutionsFailed`, and the sync `ReceiverReadyFailure` and `OptDriftDetected` alarms. Make sure the SNS topic has a **confirmed** subscription, or the alarms fire into the void.
+- **Scheduler cron stays DISABLED.** Booking is a deliberate manual act (~$105-130 per contact). The monthly budget (`security/budget.tf`, default $500, account-wide, SNS at 80%/100%/forecast) is the backstop against an accidental re-enable.
+- **Book new async contacts on the Terraform-managed profile** (`terraform -chdir=infra output mission_profile_arn`, `32a1fdbb-...`). The older unmanaged `2655b0f6-...` profile still exists (contacts #1-#6); see [`WORKSTREAMS.md`](WORKSTREAMS.md).
+- **Terraform apply** is run by the orchestrating session only after the user agrees to the plan; subagents are plan-only ([`.kiro/steering/delegation-and-safety.md`](../.kiro/steering/delegation-and-safety.md)). `terraform plan` should show "No changes" between deliberate changes.
+- **Sync path is not flight-ready** until the packet-format gate is cleared - follow the [first sync contact checklist](SYNC_PIPELINE.md#first-sync-contact---checklist).
+- **`/opt/*` drift is detected, not reconstructed.** If `OptDriftDetected` fires, `/opt/rt-stps` or `/opt/SDR_4_1` is missing or empty on an instance: restore it by hand before the next pass (`ssm_drift_check.tf`, OE-2 in the refinement doc).
+- **Images bake the code.** Batch jobs run code built into the ECR images: after changing `scripts/`, rebuild the image from the right branch before validating (`.kiro/skills/rebuild-image-from-branch`).
+- **LUT cache.** A weekly CodeBuild job (`sdr_pipeline/lut_cache.tf`) refreshes the CSPP LUTs in S3; a cold cache falls back to `sdr_luts.sh` automatically.
+- **NOAA-20 HRD horizon.** The S-NPP data cessation (2026-11-02) does not affect NOAA-20, but it is a precedent. Find NOAA-20's own HRD Direct Broadcast sunset date (JPSS / NOAA OSPO) and record it in [`CONTACTS.md`](CONTACTS.md): it bounds the useful life of the DigIF pipeline.
 
----
+## Operator workstation: MCP TLS behind the corporate proxy
 
-## Where the refinement artifacts live
+The MCP servers run under Python/`uvx`, which uses `certifi`'s CA store and does not trust the
+corporate TLS-interception root CA (`CERTIFICATE_VERIFY_FAILED`). The fix is in
+`C:\Users\mbonnet\.kiro\settings\mcp.json`: the `fetch`, `aws-docs` and `aws-mcp` servers set
+`SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` to `C:/Users/mbonnet/.kiro/certs/corporate-ca-bundle.pem`.
+Regenerate the PEM if the corporate CA rotates (export `Cert:\LocalMachine\Root` + `CA` to one PEM).
+`search_documentation` lives on the `aws-docs` server, not the `aws-mcp` proxy.
+
+## Where the design decisions live
 
 | Artifact | Path |
 |---|---|
-| Target design + delta backlog | [`ARCHITECTURE_REFINEMENT.md`](ARCHITECTURE_REFINEMENT.md) |
-| Compute decision (ADR-001) | `ARCHITECTURE_REFINEMENT.md` → ADR-001 |
-| Accepted tradeoffs table | [`ARCHITECTURE.md`](ARCHITECTURE.md) → "Accepted architectural tradeoffs" |
-| Refinement spec | [`.kiro/specs/architecture-refinement/`](../.kiro/specs/architecture-refinement/) |
-| Bake-off spec | [`.kiro/specs/compute-bakeoff-batch-spot/`](../.kiro/specs/compute-bakeoff-batch-spot/) |
-| Reusable quality-gate workflow | [`.kiro/steering/wa-delta-workflow.md`](../.kiro/steering/wa-delta-workflow.md) |
-| Checkov-on-save hook | `.kiro/hooks/wa-checkov-on-tf-save.json` |
-| Target-state diagram | `diagrams/out/architecture-refinement.png` |
+| Target design, delta backlog, ADR-001/002 | [`ARCHITECTURE_REFINEMENT.md`](ARCHITECTURE_REFINEMENT.md) |
+| Accepted trade-offs | [`ARCHITECTURE.md`](ARCHITECTURE.md) -> "Accepted architectural tradeoffs" |
+| Batch migration | [`CLEAN_COMPUTE_PIPELINE_MIGRATION.md`](CLEAN_COMPUTE_PIPELINE_MIGRATION.md), [`CLEAN_COMPUTE_PIPELINE_HANDOFF.md`](CLEAN_COMPUTE_PIPELINE_HANDOFF.md) |
+| Reviews and investigations | [`reviews/`](reviews/) |
+| Quality-gate workflow | [`.kiro/steering/wa-delta-workflow.md`](../.kiro/steering/wa-delta-workflow.md) |

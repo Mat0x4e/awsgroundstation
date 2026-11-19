@@ -29,7 +29,7 @@ try {
     --contact-pre-pass-duration-seconds 120 --contact-post-pass-duration-seconds 60 --minimum-viable-contact-duration-seconds 180 `
     --tracking-config-arn $p.trackingConfigArn --dataflow-edges "file://$edgeFile" --tags Purpose=trial-delete-me --output json | ConvertFrom-Json
   $mpId = $m.missionProfileId; "created mission profile $mpId"
-  powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\gs_list_sync_contacts.ps1" -ProfileId $mpId
+  powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\..\gs_list_sync_contacts.ps1" -ProfileId $mpId
 } catch { "ERROR: $_" }
 finally {
   if ($mpId)  { aws groundstation delete-mission-profile --mission-profile-id $mpId | Out-Null; "deleted profile $mpId" }

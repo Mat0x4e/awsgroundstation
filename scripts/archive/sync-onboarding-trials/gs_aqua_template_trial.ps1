@@ -26,7 +26,7 @@ try {
   $mps = aws groundstation list-mission-profiles --output json | ConvertFrom-Json
   foreach ($mp in $mps.missionProfileList | ? { $_.name -match "SNPP|Aqua" }) {
     "== profile '$($mp.name)' $($mp.missionProfileId)"
-    powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\gs_list_sync_contacts.ps1" -ProfileId $mp.missionProfileId
+    powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\..\gs_list_sync_contacts.ps1" -ProfileId $mp.missionProfileId
   }
 } catch { "ERROR: $_" }
 finally {

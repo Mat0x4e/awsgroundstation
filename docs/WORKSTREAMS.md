@@ -17,7 +17,7 @@ Status as of 2026-11-19.
 
 | Object | State | Proposed |
 |---|---|---|
-| Mission profile `2655b0f6-...` `groundstation-noaa20-demo-noaa20-hrd` + configs `265ceaff`, `091b9cb2`, `1bdacbdb` | Not in state; duplicate name of the managed `32a1fdbb-...`. It is the async profile every booking so far used (`docs/CONTACTS.md`) | **Keep**, documented as manual. Switching bookings to `32a1fdbb` first is a separate decision |
+| Mission profile `2655b0f6-...` `groundstation-noaa20-demo-noaa20-hrd` + configs `265ceaff`, `091b9cb2`, `1bdacbdb` | Not in state; duplicate name of the managed `32a1fdbb-...`. Contacts #1-#6 were booked on it; contact #7 was booked on the managed `32a1fdbb` (checked with `describe-contact`, 2026-11-19) | **Keep** (history), documented as manual. Book new async contacts on `32a1fdbb` (`terraform output mission_profile_arn`); deleting `2655b0f6` is a separate decision |
 | IAM role `groundstation-processing-role` + instance profile `groundstation-processing-profile` | Created 2026-06-19, never used, no instance or launch template using the profile, no reference in code | **Deleted 2026-11-19** (with its inline policy `s3-and-ec2-access`) |
 | ECR repo `groundstation-satdump` | Created 2026-06-19, empty, no reference in code | **Deleted 2026-11-19** |
 | Log group `/aws/codebuild/satdump-noaa20-processing` | 448 KB; its project was deleted 2026-10-22 | **Deleted 2026-11-19** |

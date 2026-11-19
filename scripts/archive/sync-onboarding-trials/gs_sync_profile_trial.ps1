@@ -31,7 +31,7 @@ try {
     --tags Purpose=trial-delete-me --output json 2>&1 | Out-String
   $id = ($r | ConvertFrom-Json).missionProfileId
   "created $name -> $id"
-  powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\gs_list_sync_contacts.ps1" -ProfileId $id
+  powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\..\..\gs_list_sync_contacts.ps1" -ProfileId $id
 } catch { "ERROR: $_ ; raw: $r" }
 finally {
   if ($id) { aws groundstation delete-mission-profile --mission-profile-id $id | Out-Null; "deleted $id" }

@@ -39,6 +39,8 @@ end-to-end sequence with real timings, and the constraints that shaped the desig
 
 ## Documentation
 
+Everything in `docs/` is grouped in [`docs/README.md`](docs/README.md) (run it / decisions and history / side topics / spec status). The main entry points:
+
 | Document | Read it when |
 |---|---|
 | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | You hit an acronym (DigIF, CADU, RDR, SDR, VIIRS, demod/decode, granule...) - the single domain glossary |
@@ -47,8 +49,9 @@ end-to-end sequence with real timings, and the constraints that shaped the desig
 | [`docs/MEDITERRANEAN_PASS.md`](docs/MEDITERRANEAN_PASS.md) | Planning a targeted acquisition: reachability, the ~10° Stockholm mask, the 7-day booking wall |
 | [`docs/CONTACTS.md`](docs/CONTACTS.md) | Which passes exist, what they contain, what they cost |
 | [`docs/SATDUMP.md`](docs/SATDUMP.md) | **Before touching geolocation.** What SatDump already does — it georeferences its own composites, publishes the VIIRS scan model, stores per-scan timestamps, and needs a TLE — with the upstream file paths to check |
-| [`docs/SYNC_PIPELINE.md`](docs/SYNC_PIPELINE.md) | The second, live demod/decode reception path (not yet flown) - architecture, how it differs from the DigIF pipeline, and how to pick which one runs for a given contact. Since 2026-11-19 the sync profile gets contacts offered |
+| [`docs/SYNC_PIPELINE.md`](docs/SYNC_PIPELINE.md) | The second, live demod/decode reception path: deployed, gets contacts offered, **not flown yet**. Architecture, how it differs from DigIF, how to pick the pipeline per contact, and the [first sync contact checklist](docs/SYNC_PIPELINE.md#first-sync-contact---checklist) |
 | [`docs/SYNC_ONBOARDING_INVESTIGATION.md`](docs/SYNC_ONBOARDING_INVESTIGATION.md) | Earlier investigation of the zero sync windows. **Its conclusion (not onboarded) was superseded on 2026-11-19**: the cause was two config defects, see the note at its top |
+| [`docs/OPERATOR_RUNBOOK.md`](docs/OPERATOR_RUNBOOK.md) | Standing operator rules: verify a pass, alarms, scheduler, apply rule, `/opt` drift |
 | [`docs/WORKSTREAMS.md`](docs/WORKSTREAMS.md) | **Before starting work.** The sessions running in parallel on this repo and AWS account, and the rules that keep them apart |
 
 ## Quick start

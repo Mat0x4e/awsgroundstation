@@ -456,7 +456,7 @@ Still to do:
 
 ---
 
-## Contact #7 — Oregon granule-yield pass (scheduled)
+## Contact #7 — Oregon granule-yield pass
 
 First pass flown against the **refined pipeline** (post Well-Architected refinement,
 applied 2026-10-13 — see [`ARCHITECTURE_REFINEMENT.md`](ARCHITECTURE_REFINEMENT.md)). Chosen
@@ -467,7 +467,7 @@ warm (STANDARD) data.
 | Property | Value |
 |----------|-------|
 | **Contact ID** | `dcef1518-c454-401f-bdcd-dc2e73fe89a5` |
-| **Status** | 📅 SCHEDULED (reserved 2026-10-13) |
+| **Status** | ✅ FLOWN 2026-10-17 (reserved 2026-10-13) — `verify_pass.py` OVERALL PASS, see Outcome below |
 | **Satellite** | NOAA-20 (NORAD 43013) |
 | **Ground Station** | Oregon 1 (`us-west-2`) |
 | **Max Elevation** | 83.06° (near-overhead — highest of all 99 offered windows) |

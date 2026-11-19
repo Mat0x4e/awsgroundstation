@@ -26,9 +26,9 @@ satellite's **X-band** direct-broadcast downlink as raw digitized radio (**DigIF
 **VITA-49** packets), delivered to S3. Software then demodulates and decodes that radio into
 clean data frames (**CADU**), assembles them into Level-0 **RDR** files (**RT-STPS**),
 calibrates and geolocates them into Level-1 **SDR + GEO** files (**CSPP**), and renders
-georeferenced **VIIRS** imagery (GeoTIFF/PNG). An alternative "synchronous" path would let the
-antenna do the demod/decode itself (**demod/decode** delivery) - built, offered contacts since
-2026-11-19, not flown yet (see `docs/SYNC_PIPELINE.md`).
+georeferenced **VIIRS** imagery (GeoTIFF/PNG). A second, "synchronous" path lets the antenna do
+the demod/decode itself (**demod/decode** delivery); it is built and gets contacts offered since
+2026-11-19, but has not been flown yet (see `docs/SYNC_PIPELINE.md`).
 
 ---
 

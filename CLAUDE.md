@@ -13,8 +13,12 @@ read that before changing anything in the processing chain.
 
 ```
 plan_pass.py → reserve-contact → X-band → S3 → EventBridge → Step Functions
-             → CodeBuild ×22 (SatDump) → CodeBuild (RT-STPS + CSPP) → SDR/GEO → GeoTIFF
+             → AWS Batch ×N chunks (Spot, SatDump) → AWS Batch aggregation (RT-STPS + CSPP)
+             → SDR/GEO → AWS Batch render → GeoTIFF
 ```
+Runtime compute moved from CodeBuild to AWS Batch on 2026-10-22 (ADR-002); CodeBuild now only
+builds the images (and is kept as a fallback for the sync aggregation). A second, synchronous
+(demod/decode) path is deployed but not flown yet - see [`docs/SYNC_PIPELINE.md`](docs/SYNC_PIPELINE.md).
 
 ## Commands
 
@@ -69,9 +73,9 @@ georeferencing) — that's the cheap/fast branch; CSPP is the accurate/slow bran
 (calibrated radiances, terrain-corrected per-pixel lat/lon).
 
 **Step Functions state machine** (`groundstation-noaa20-sdr-pipeline`, defined in
-`infra/modules/sdr_pipeline/step_functions.tf`) fans out 22 chunks to CodeBuild (19
-concurrent, tolerates 100% failure), then runs an aggregation build (CSPP), then calls
-the VIIRS visualization Lambda directly. **A `SUCCEEDED` execution proves neither good
+`infra/modules/sdr_pipeline/step_functions.tf`) fans out the chunks as AWS Batch jobs
+(`batch:submitJob.sync`, Spot, tolerates 100% failure), then runs the aggregation Batch job
+(RT-STPS + CSPP), then calls the VIIRS visualization Lambda, which submits the render Batch job. **A `SUCCEEDED` execution proves neither good
 chunks nor imagery** — `StartVisualization` catches all errors to success so a rendering
 failure doesn't fail the run. Always verify against the `products/` S3 prefix, not
 execution status.
@@ -79,12 +83,12 @@ execution status.
 **Non-obvious operational facts** (see `docs/ARCHITECTURE.md` for the full list with
 detail — these are the ones most likely to cause confusion during development):
 - The contact scheduler cron is **disabled on purpose**; contacts are booked manually.
-- The visualization buildspec is **not** `buildspecs/viirs_*.yml` — those are manual-run
-  copies. The real spec is passed as `buildspecOverride` from `lambdas/viirs_visualizer/handler.py`.
-- The SDR CodeBuild project (`satdump-noaa20-processing`) exists **outside Terraform**
-  entirely — a `terraform apply` won't create or repair it.
-- CSPP requires internet access (`sdr_luts.sh`) and therefore must run in CodeBuild, not
-  on the EC2 aggregation instance (which is SSM-outbound-only and no longer in the pipeline path).
+- Rendering runs `scripts/viirs/render_entrypoint.sh` in a Batch job (`RENDER_COMPUTE=batch`
+  on the orchestrator Lambda). `buildspecs/viirs_*.yml` are legacy manual-run copies.
+- Code run by Batch is **baked into the images**: after changing `scripts/`, rebuild the image
+  (see the `rebuild-image-from-branch` skill) before validating a job.
+- CSPP requires internet access (`sdr_luts.sh`, cached in S3 by PERF-1), which the Batch
+  compute environment has; the old EC2 aggregation instance is no longer in the pipeline path.
 - Reprocessing a contact requires deleting its `.processing` marker in S3 first, or the
   execution short-circuits.
 - SatDump's own composite georeferencing is **parked** (segfaults at 1.2.2 — see

@@ -202,8 +202,24 @@ Source: https://docs.aws.amazon.com/ground-station/latest/ug/digital-twin.html
   eu-west-1 and eu-north-1 shows **no "Digital Twin" station**. `list-contacts` on
   `Digital Twin Stockholm 1` (NOAA-20, async profile) returns **0, with no error**. So this account is
   **not onboarded** to the twin.
-- `[unverified]` Exact twin pricing and quotas, the onboarding lead time, and whether the non-production
-  account rule is enforced (this account already carries the production contacts).
+- **Pricing** (AWS Price List API, `aws pricing get-products --service-code AWSGroundStation
+  --region us-east-1`, effective 2026-09-01, read 2026-11-19). Billed **per contact**, not per minute
+  (the usage types are named `...-Contact-Narrowband-Minute` but the unit is `Contact`). The tiers are
+  the same at every twin station, narrowband and wideband:
+
+  | Contacts | USD per contact |
+  |---|---|
+  | `Global-DigitalTwin-Contact`, range 0-50 | **0.00** (free) |
+  | 0-1,000 | 0.50 |
+  | 1,000-5,000 | 0.30 |
+  | 5,000+ | 0.15 |
+
+  For comparison, one real contact at Stockholm 1 costs ~$105 (10.5 min x $10/min).
+  `[unverified]`: the API does not say whether the 50 free contacts are per month or one-off, nor how
+  the global free range combines with the per-station tiers. Cost Explorer after the first twin
+  contacts will settle it.
+- `[unverified]` Twin quotas, the onboarding lead time, and whether the non-production account rule
+  is enforced (this account already carries the production contacts).
 
 ## What it can and cannot test for the sync path
 

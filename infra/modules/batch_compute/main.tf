@@ -61,10 +61,14 @@ locals {
   # The real env var values (OUTPUT_BUCKET, CONTACT_ID, etc.) are injected at
   # submit time via SFN ContainerOverrides.Environment (canary blocker #6 --
   # Ref:: substitution does NOT work in environment[], only in command[]).
-  # Using $OUTPUT_BUCKET (no braces) -- Terraform only interpolates ${...}.
+  # The entrypoint is fetched from ASSETS_BUCKET when set (sync pipeline: the
+  # shared assets live in the SDR bucket, OUTPUT_BUCKET is the sync bucket), and
+  # falls back to OUTPUT_BUCKET otherwise (async passes no ASSETS_BUCKET).
+  # The default expansion is safe under `set -u`. In HCL a literal `${` must be
+  # written `$${`; plain $OUTPUT_BUCKET (no braces) needs no escaping.
   aggregation_fetch_cmd = join("\n", [
     "set -euo pipefail",
-    "aws s3 cp \"s3://$OUTPUT_BUCKET/software/aggregation_entrypoint.sh\" /tmp/aggregation_entrypoint.sh",
+    "aws s3 cp \"s3://$${ASSETS_BUCKET:-$OUTPUT_BUCKET}/software/aggregation_entrypoint.sh\" /tmp/aggregation_entrypoint.sh",
     "chmod +x /tmp/aggregation_entrypoint.sh",
     "exec /tmp/aggregation_entrypoint.sh",
   ])

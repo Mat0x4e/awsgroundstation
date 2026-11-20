@@ -206,3 +206,48 @@ resource "aws_cloudwatch_metric_alarm" "receiver_ready_failure" {
     Service = "sync-pipeline"
   })
 }
+
+###############################################################################
+# Swallowed visualization failure (sync mirror of sdr_pipeline)
+#
+# StartVisualization is best effort (products are already in S3), so its Catch
+# routes to NotifyVisualizationFailed, which publishes SNS and continues to
+# PipelineSucceeded. This metric filter counts entries into that state in the
+# SFN execution log (level=ALL) so a systematic render defect raises an alarm
+# instead of hiding behind a green execution.
+###############################################################################
+
+resource "aws_cloudwatch_log_metric_filter" "visualization_failed" {
+  name           = "${var.project_name}-sync-visualization-failed"
+  log_group_name = aws_cloudwatch_log_group.sfn.name
+
+  pattern = "{ $.details.name = \"NotifyVisualizationFailed\" }"
+
+  metric_transformation {
+    name          = "VisualizationFailed"
+    namespace     = "SyncPipeline"
+    value         = "1"
+    default_value = 0
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "visualization_failed" {
+  alarm_name          = "${var.project_name}-sync-visualization-failed"
+  alarm_description   = "Sync pipeline visualization step took its catch path -- no imagery rendered (products are in S3)"
+  namespace           = "SyncPipeline"
+  metric_name         = "VisualizationFailed"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [var.sns_topic_arn]
+
+  tags = merge(var.tags, {
+    Name    = "${var.project_name}-sync-visualization-failed"
+    Service = "sync-pipeline"
+  })
+}

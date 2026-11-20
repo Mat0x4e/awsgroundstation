@@ -314,7 +314,10 @@ resource "aws_sfn_state_machine" "sync_pipeline" {
       # lesson as modules/sdr_pipeline (see that module's step_functions.tf).
       #
       # Best effort: the science products are already in S3 by this point, so a
-      # visualization failure must not mark the pipeline failed.
+      # visualization failure must not mark the pipeline failed. It is NOT silent
+      # though: the Catch routes to NotifyVisualizationFailed (SNS + metric), as in
+      # the async machine. The event carries the sync bucket as "bucket"; the
+      # orchestrator uses it for the listing and the render job INPUT_BUCKET.
       StartVisualization = {
         Type     = "Task"
         Comment  = "Invoke the VIIRS visualization orchestrator for this contact"
@@ -338,11 +341,33 @@ resource "aws_sfn_state_machine" "sync_pipeline" {
         Catch = [
           {
             ErrorEquals = ["States.ALL"]
-            Next        = "PipelineSucceeded"
+            Next        = "NotifyVisualizationFailed"
             ResultPath  = "$.visualization_error"
           }
         ]
         Next = "PipelineSucceeded"
+      }
+
+      # ── 6a. NotifyVisualizationFailed ──────────────────────────────────────
+      # Catch target for StartVisualization. Mirrors the async machine: publish
+      # an SNS notification, then proceed to PipelineSucceeded (products are
+      # already in S3). The metric filter in monitoring.tf counts entries into
+      # this state and drives the visualization-failed alarm.
+      NotifyVisualizationFailed = {
+        Type     = "Task"
+        Comment  = "Publish viz-failure SNS notification - products preserved, pipeline still SUCCEEDS"
+        Resource = "arn:aws:states:::aws-sdk:sns:publish"
+        Parameters = {
+          TopicArn = var.sns_topic_arn
+          Message = {
+            "input.$"               = "$$.Execution.Input"
+            "visualization_error.$" = "$.visualization_error"
+            "stage"                 = "StartVisualization"
+          }
+          Subject = "Sync Pipeline - Visualization failed (products preserved, pipeline still succeeded)"
+        }
+        ResultPath = null
+        Next       = "PipelineSucceeded"
       }
 
       # ── 7. Terminal states ─────────────────────────────────────────────────

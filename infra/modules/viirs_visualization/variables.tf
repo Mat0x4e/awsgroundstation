@@ -18,6 +18,12 @@ variable "sdr_output_bucket_arn" {
   type        = string
 }
 
+variable "sync_output_bucket_arn" {
+  description = "ARN of the sync pipeline output bucket. When set, the orchestrator Lambda may list and read contacts/* there (the sync state machine passes the sync bucket in the StartVisualization event). Empty string when the sync pipeline is disabled."
+  type        = string
+  default     = ""
+}
+
 variable "kms_key_arn" {
   description = "ARN of the KMS key used for encrypting outputs at rest"
   type        = string

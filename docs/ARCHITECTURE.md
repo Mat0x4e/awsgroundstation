@@ -29,6 +29,116 @@ The open gate is the packet-format check on a first real sync contact.
 
 ---
 
+## Architecture principle: converge early, mutualize the rest
+
+**The two downlink paths converge at the first artifact they have in common, and share
+everything after it.** Anything that can be one component is one component: one code path,
+one container image, one job definition, one set of assets, one operating procedure. A
+path-specific component is acceptable only where the data genuinely differs.
+
+Applied (2026-11-20):
+
+| Stage | Async (DigIF) | Sync (demod/decode) | Shared? |
+|---|---|---|---|
+| Reception | DigIF `.pcap` in S3 | live UDP to the receiver EC2 | no - different by nature |
+| Demodulation + Viterbi | SatDump (Batch fan-out) | AWS antenna | no - different by nature |
+| **First common artifact** | CCSDS frames in S3 (`satdump/*.cadu`, PN removed) | CCSDS frames in S3 (`cadu/combined.cadu`, PN still applied) | **yes, from here on** |
+| RT-STPS -> RDR, CSPP -> SDR/GEO | aggregation Batch job | **same job**, same image, `CADU_PREFIX=cadu PN_ENCODED=true` | yes |
+| CSPP assets (J01 LUTs, LUT cache) | SDR output bucket | **same** (`ASSETS_BUCKET`) | yes |
+| Visualization + render | `viirs-orchestrator` + render Batch job | **same** | yes |
+
+The two data pipelines (state 2026-11-20). The sync side of the shared part has not run on real
+data yet: no sync contact flown.
+
+```
+ ASYNC (DigIF)                                   SYNC (demod/decode)
+ ─────────────                                   ───────────────────
+        NOAA-20  X-band HRD 7812 MHz (QPSK, Viterbi 1/2, PN, Reed-Solomon)
+              │                                              │
+              ▼                                              ▼
+ ┌──────────────────────────┐                ┌──────────────────────────────┐
+ │ AWS Ground Station       │                │ AWS Ground Station           │
+ │ AntennaDownlinkConfig    │                │ AntennaDownlinkDemodDecode   │
+ │ (raw DigIF, no demod)    │                │ QPSK + Viterbi + NRZ-M       │
+ │ profile 32a1fdbb         │                │ UncodedFramesEgress          │
+ └────────────┬─────────────┘                │ (PN kept, no Reed-Solomon)   │
+              │ S3RecordingConfig            │ profile 2e719f99             │
+              ▼                              └──────────────┬───────────────┘
+ ┌──────────────────────────┐                               │ live UDP :55888
+ │ S3 reception bucket      │                               │ (VITA-49 Ext., format unverified)
+ │ ~22-50 x 2.18 GB .pcap   │                               ▼
+ └────────────┬─────────────┘                ┌──────────────────────────────┐
+              │                              │ Receiver EC2 (public subnet, │
+  EventBridge │ COMPLETED                    │ default VPC, Elastic IP)     │
+  (filter: 32a1fdbb)                         │  PREPASS -600s: receiver_arm │
+              ▼                              │  Lambda starts EC2 + SSM arm │
+ ┌──────────────────────────┐                │  sync_receiver_listen.py     │
+ │ Step Functions           │                │  -> combined.cadu + raw tee  │
+ │ groundstation-noaa20-    │                └──────────────┬───────────────┘
+ │ sdr-pipeline             │                               │
+ └────────────┬─────────────┘                   EventBridge │ COMPLETED
+              │ Map fan-out                     (filter: 2e719f99)
+              ▼                                             ▼
+ ┌──────────────────────────┐                ┌──────────────────────────────┐
+ │ AWS Batch fan-out (Spot) │                │ Step Functions               │
+ │ chunk jobs, SatDump:     │                │ groundstation-noaa20-        │
+ │ .pcap -> I/Q -> QPSK     │                │ sync-pipeline                │
+ │ Viterbi, PN, RS -> .cadu │                │ FinishReceiver (SSM):        │
+ └────────────┬─────────────┘                │ stop listener, upload, stop  │
+              │                              └──────────────┬───────────────┘
+              ▼                                             ▼
+   s3://sdr-output/contacts/                 s3://sync-output/contacts/
+     <date>/<id>/satdump/*.cadu                <date>/<id>/cadu/combined.cadu
+     (frames, PN removed)                      (frames, PN still applied)
+                                               <date>/<id>/raw/raw_capture.bin
+              │                                             │
+              └──────────────────┬──────────────────────────┘
+          ═══════════════════════╪══════════════════  FIRST COMMON ARTIFACT
+                                 │                     (shared from here on)
+                                 ▼
+          ┌─────────────────────────────────────────────────────┐
+          │ AWS Batch aggregation job  groundstation-noaa20-    │
+          │ aggregation (on-demand), SDR image, one entrypoint  │
+          │ scripts/aggregation_entrypoint.sh                   │
+          │                                                     │
+          │   async: CADU_PREFIX=satdump  PN_ENCODED=false      │
+          │   sync : CADU_PREFIX=cadu     PN_ENCODED=true       │
+          │          ASSETS_BUCKET=sdr-output                   │
+          │                                                     │
+          │  1. CSPP J01 LUTs + LUT cache  <- sdr-output        │
+          │     software/, lut-cache/  (shared assets)          │
+          │  2. RT-STPS  frames -> RDR (Level 0)                │
+          │     jpss1.xml (patched)  |  jpss1.pn-encoded.xml    │
+          │  3. CSPP viirs_sdr.sh  RDR -> SDR + GEO (Level 1)   │
+          │  4. upload rdr/ sdr/ logs/ to OUTPUT_BUCKET         │
+          └──────────────────────────┬──────────────────────────┘
+                                     ▼
+          ┌─────────────────────────────────────────────────────┐
+          │ viirs-orchestrator Lambda  (StartVisualization)     │
+          │   -> AWS Batch render job (viirs image)             │
+          │      satdump + NASA branches -> PNG / GeoTIFF       │
+          └──────────────────────────┬──────────────────────────┘
+                                     ▼
+                 products/<date>/<id>/  + ProductsWritten metric
+                 verify: scripts/verify_pass.py (async only, today)
+
+ Alarms -> SNS: ChunksFailed, ExecutionsFailed, VisualizationFailed,
+                ProductsWritten==0, ReceiverReadyFailure, OptDriftDetected (/opt/scripts)
+```
+
+Consequences:
+- The sync receiver only captures and uploads (`/opt/scripts`); it no longer runs RT-STPS,
+  so there is no hand-installed `/opt/rt-stps` to drift.
+- Every sync capture is replayable from S3 through the same job, like an async contact.
+- A fix to the shared chain (RT-STPS, CSPP, rendering) lands once and is validated by both paths.
+
+The remaining differences are deliberate: the PN setting (the antenna's
+`UncodedFramesEgress` keeps PN and skips Reed-Solomon; SatDump removes both) and the output
+bucket per pipeline (contact data stays where each pipeline's IAM scopes it). Merging the two
+output buckets is the next mutualization candidate, not done yet.
+
+---
+
 ## The cinematic — one contact, end to end
 
 Times are relative to AOS, measured on contact `ba2c5446` (2026-08-31, Stockholm 1,

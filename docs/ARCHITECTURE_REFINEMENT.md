@@ -33,6 +33,11 @@ The current system gets the hard things right, and the refinement keeps them:
    artifact. Every delta here must leave the runbook truer, not just the code.
 6. **Published Terraform modules over hand-rolled** wherever one fits (per `CLAUDE.md`),
    hand-rolling only Ground Station-specific or project-least-privilege resources.
+7. **Converge early, mutualize the rest** (added 2026-11-20) - the sync and async downlink
+   paths converge at the first common artifact (CCSDS frames in S3) and share everything after
+   it: one aggregation job, one image, one set of CSPP assets, one visualization. A
+   path-specific component needs a reason in the data. See
+   [`ARCHITECTURE.md`](ARCHITECTURE.md#architecture-principle-converge-early-mutualize-the-rest).
 
 ---
 
@@ -407,9 +412,10 @@ the same class of bug as filtering on a field that is merely missing.
 **Status:** Accepted and IMPLEMENTED (2026-10-22) — delivered via spec `clean-compute-pipeline`
 (Stages 1-3), merged to `main` and deployed. Fan-out, aggregation, and render all run on AWS
 Batch (`enable_batch_compute = true`); the runtime CodeBuild projects are retired or retained
-only as flag-gated fallbacks. The one exception is the SYNC aggregation branch (`RTSTPS=off`):
-coded and deployed but not yet run on real data (blocked by demod/decode onboarding, see
-`SYNC_ONBOARDING_INVESTIGATION.md`).
+only as flag-gated fallbacks. Since 2026-11-20 the sync path uses the **same** aggregation
+job (RT-STPS + CSPP, `CADU_PREFIX=cadu PN_ENCODED=true`) under principle 7; the former
+`RTSTPS=off` branch, RT-STPS on the sync EC2 and the sync CodeBuild fallback are retired. The
+sync use of the job is not yet run on real data (no sync contact flown).
 **Date:** 2026-10-09 (accepted direction); 2026-10-22 (implemented / deployed)
 **Extends:** ADR-001 (which decided fan-out only). This ADR widens the decision to **every**
 runtime compute stage, both branches, end-to-end to `.png` + `.geotiff` + `.json`.
@@ -430,8 +436,9 @@ deciding the compute platform for the whole pipeline, not one stage.
 
 > The "Was (pre-migration)" column below is the RETIRED CodeBuild baseline that motivated this
 > ADR. As of 2026-10-22 it has been replaced: fan-out -> Batch Spot; aggregation -> Batch
-> on-demand; render -> Batch on-demand (dedicated viirs image); sync RT-STPS stays on EC2;
-> sync aggregation -> shared Batch on-demand job (RTSTPS=off, not yet validated on real data).
+> on-demand; render -> Batch on-demand (dedicated viirs image); sync RT-STPS stayed on EC2 with
+> an `RTSTPS=off` CSPP-only job until 2026-11-20, when the sync path moved onto the same
+> aggregation job as async (RT-STPS + CSPP, principle 7). Not yet validated on real sync data.
 
 | Stage | Was (pre-migration) | Fit problem |
 |---|---|---|

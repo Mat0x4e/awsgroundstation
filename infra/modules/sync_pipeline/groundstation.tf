@@ -13,8 +13,8 @@
 # demod + CCSDS Viterbi 1/2 decode + NRZ-M decode, but NEITHER Reed-Solomon
 # correction NOR PN derandomization -- RT-STPS performs both internally
 # (confirmed from .build/rt-stps/config/jpss1.xml: frame_sync -> pn ->
-# reed_solomon), which is why the receiver's RT-STPS config must run with
-# PnEncoded="true" (see scripts/sync_receiver_finish.sh), the opposite of the
+# reed_solomon), which is why the shared aggregation job runs RT-STPS with
+# PN_ENCODED=true for sync (see the sync state machine overrides), the opposite of the
 # existing SatDump-fed pipeline where SatDump already derandomizes upstream.
 
 resource "awscc_groundstation_config" "tracking" {

@@ -50,17 +50,6 @@ variable "sns_topic_arn" {
   type        = string
 }
 
-variable "sdr_pipeline_ecr_repository_url" {
-  description = <<-EOT
-    URL of the existing sdr_pipeline ECR repository (modules/sdr_pipeline output
-    ecr_repository_url). Reused rather than building a second image: it already
-    carries CSPP 4.1.1, the J01 straylight LUTs, and RT-STPS -- everything the
-    CSPP-only aggregation step here needs, and nothing about CSPP depends on
-    which upstream pipeline produced its RDR input.
-  EOT
-  type        = string
-}
-
 # ---------------------------------------------------------------------------
 # Demod/Decode antenna configuration
 # ---------------------------------------------------------------------------
@@ -138,25 +127,50 @@ variable "tags" {
   default     = {}
 }
 
-# -- clean-compute-pipeline Stage 2 strangler variables ----------------------
-# These three variables wire the sync SFN aggregation step to the shared Batch
-# on-demand aggregation job (RTSTPS=off -- RT-STPS already ran on the receiver
-# EC2 in FinishReceiver). Pattern mirrors modules/sdr_pipeline.
+# -- Shared Batch aggregation chain -------------------------------------------
+# Architecture principle: sync and async converge at the first common artifact
+# (the frame capture in S3) and share everything after it. The aggregation is
+# therefore ALWAYS the shared Batch job (modules/batch_compute); there is no
+# CodeBuild fallback. use_batch_aggregation is kept as an explicit guard so a
+# misconfigured root module fails at plan time with a clear message instead of
+# silently producing a state machine with empty queue/job-definition ARNs.
 
 variable "use_batch_aggregation" {
-  description = "When true the aggregation step routes to Batch (RTSTPS=off) instead of CodeBuild (clean-compute-pipeline Stage 2 strangler cutover); default false keeps the CodeBuild poll-loop path"
+  description = "Must be true: the sync pipeline's aggregation is the shared Batch job (no CodeBuild fallback). The root module wires this from enable_batch_compute, so enable_sync_pipeline requires enable_batch_compute = true."
   type        = bool
-  default     = false
+
+  validation {
+    condition     = var.use_batch_aggregation
+    error_message = "The sync pipeline requires the shared Batch aggregation chain: set enable_batch_compute = true when enable_sync_pipeline = true (the sync CodeBuild fallback was retired)."
+  }
 }
 
 variable "batch_aggregation_job_queue_arn" {
-  description = "ARN of the Batch aggregation job queue (groundstation-noaa20-agg-queue). Leave empty string when use_batch_aggregation is false."
+  description = "ARN of the shared Batch aggregation job queue (groundstation-noaa20-agg-queue). Required."
   type        = string
-  default     = ""
+
+  validation {
+    condition     = length(var.batch_aggregation_job_queue_arn) > 0
+    error_message = "batch_aggregation_job_queue_arn must be set: the sync pipeline requires the shared Batch aggregation chain (enable_batch_compute = true)."
+  }
 }
 
 variable "batch_aggregation_job_definition_arn" {
-  description = "ARN of the Batch aggregation job definition (groundstation-noaa20-aggregation, unversioned). Leave empty string when use_batch_aggregation is false."
+  description = "ARN of the shared Batch aggregation job definition (groundstation-noaa20-aggregation, unversioned). Required."
   type        = string
-  default     = ""
+
+  validation {
+    condition     = length(var.batch_aggregation_job_definition_arn) > 0
+    error_message = "batch_aggregation_job_definition_arn must be set: the sync pipeline requires the shared Batch aggregation chain (enable_batch_compute = true)."
+  }
+}
+
+variable "assets_bucket_name" {
+  description = "Name of the SDR output bucket, which holds software/ (CSPP J01 LUT tarball) and lut-cache/. Passed to the shared aggregation job as ASSETS_BUCKET; the sync bucket has neither prefix."
+  type        = string
+
+  validation {
+    condition     = length(var.assets_bucket_name) > 0
+    error_message = "assets_bucket_name must be set: the shared aggregation job reads the CSPP LUT assets from the SDR output bucket, so enable_sync_pipeline requires enable_sdr_pipeline = true."
+  }
 }

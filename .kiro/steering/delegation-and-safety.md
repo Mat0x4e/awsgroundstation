@@ -43,6 +43,14 @@ without needing to invoke a workflow file. Keep this file short so the always-on
   "Provider produced inconsistent final plan" (see aws-knowledge.md). Then apply FRESH (no plan
   file), which the hook blocks: ask the user to run that apply themselves.
 
+## Architecture principle: converge early, mutualize the rest
+
+- The sync and async downlink paths converge at the first common artifact (CCSDS frames in S3)
+  and share everything after it: one aggregation job, one image, one set of CSPP assets, one
+  visualization. Before adding a path-specific component, check whether the shared one can take
+  a parameter instead; a separate component needs a reason in the data. Details:
+  `docs/ARCHITECTURE.md` "Architecture principle".
+
 ## Verify by evidence, not by exit code
 
 - A green Step Functions execution or a Batch job that exits 0 is NOT proof the work happened.

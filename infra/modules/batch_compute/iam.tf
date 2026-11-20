@@ -364,12 +364,46 @@ resource "aws_iam_role_policy" "batch_execution" {
 #   - S3 read on output_bucket/software/* (entrypoint + J01 LUT tarball)
 #   - S3 read on output_bucket/lut-cache/* (PERF-1 SDR_4_1_DB cache fast-path)
 #   - S3 ListBucket on output bucket conditioned to those three prefixes
+#   - SYNC bucket (when enabled): read+write contacts/* and ListBucket on contacts/*
+#     (frames from cadu/, rdr/sdr/logs out); software/ + lut-cache/ stay in the
+#     SDR output bucket (ASSETS_BUCKET)
 #   - S3 GetObject + ListBucket on reception bucket (RECEPTION_BUCKET parity)
 #   - KMS Encrypt/Decrypt/GenerateDataKey on the pipeline key
 #   - ECR pull on the sdr-pipeline repository + GetAuthorizationToken on *
 #   - logs:Create*/PutLogEvents on the aggregation log group only
 # No PutMetricData: the aggregation entrypoint does not emit custom metrics.
 
+# Sync pipeline bucket access for the SHARED aggregation job (architecture
+# principle: sync and async share the chain after the frame capture). The job
+# reads frames from contacts/*/cadu/ and writes rdr/, sdr/ and logs/ under
+# contacts/* of the sync bucket. software/ and lut-cache/ stay in the SDR
+# output bucket (ASSETS_BUCKET), already covered above. Empty when the sync
+# pipeline is disabled. No DeleteObject: the entrypoint only lists, reads and
+# writes (no aws s3 rm, no sync --delete), and raw/ must not be erasable.
+locals {
+  sync_agg_statements = [for s in [
+    {
+      Sid    = "S3ReadWriteSyncContactsPrefix"
+      Effect = "Allow"
+      Action = [
+        "s3:GetObject",
+        "s3:PutObject",
+      ]
+      Resource = "${var.sync_output_bucket_arn}/contacts/*"
+    },
+    {
+      Sid      = "S3ListSyncBucketContactsPrefix"
+      Effect   = "Allow"
+      Action   = ["s3:ListBucket"]
+      Resource = var.sync_output_bucket_arn
+      Condition = {
+        StringLike = {
+          "s3:prefix" = ["contacts/*"]
+        }
+      }
+    },
+  ] : s if var.sync_output_bucket_arn != ""]
+}
 resource "aws_iam_role" "batch_aggregation_job" {
   name        = "${var.project_name}-batch-agg-job"
   description = "Task role for aggregation Batch jobs - S3 rw contacts/*, ro software/*, ro lut-cache/*, ECR pull, KMS, logs"
@@ -401,7 +435,7 @@ resource "aws_iam_role_policy" "batch_aggregation_job" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       # S3 - read+write on contacts/* (download cadu, upload rdr/sdr/logs)
       # GetObject    - download .cadu files (async) or .h5 RDR (sync)
       # PutObject    - upload rdr/sdr/logs
@@ -501,7 +535,7 @@ resource "aws_iam_role_policy" "batch_aggregation_job" {
         ]
         Resource = "${aws_cloudwatch_log_group.aggregation.arn}:*"
       },
-    ]
+    ], local.sync_agg_statements)
   })
 }
 
@@ -546,13 +580,51 @@ resource "aws_iam_role" "batch_render_job" {
   })
 }
 
+# Sync bucket access for the render job. The viirs orchestrator passes the
+# event bucket to the job as INPUT_BUCKET, so a sync contact is rendered from
+# the sync bucket: read contacts/*, write products/* there. Prefix-scoped, no
+# DeleteObject, no whole-bucket grant. Empty when the sync pipeline is disabled.
+locals {
+  sync_render_statements = [for s in [
+    {
+      Sid      = "S3ReadSyncContactsPrefix"
+      Effect   = "Allow"
+      Action   = ["s3:GetObject"]
+      Resource = "${var.sync_output_bucket_arn}/contacts/*"
+    },
+    {
+      Sid    = "S3WriteSyncProductsPrefix"
+      Effect = "Allow"
+      Action = [
+        "s3:PutObject",
+        "s3:GetObject",
+      ]
+      Resource = "${var.sync_output_bucket_arn}/products/*"
+    },
+    {
+      Sid      = "S3ListSyncBucketPermittedPrefixes"
+      Effect   = "Allow"
+      Action   = ["s3:ListBucket"]
+      Resource = var.sync_output_bucket_arn
+      Condition = {
+        StringLike = {
+          "s3:prefix" = [
+            "contacts/*",
+            "products/*",
+          ]
+        }
+      }
+    },
+  ] : s if var.sync_output_bucket_arn != ""]
+}
+
 resource "aws_iam_role_policy" "batch_render_job" {
   name = "${var.project_name}-batch-render-job-policy"
   role = aws_iam_role.batch_render_job.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       # S3 - read the render inputs under contacts/*. The entrypoint aws s3 sync
       # reads from contacts/{date}/{id}/satdump/, /coordinates/, and /sdr/.
       # coordinates/ is nested under contacts/, so contacts/* covers it - no
@@ -654,7 +726,9 @@ resource "aws_iam_role_policy" "batch_render_job" {
           }
         }
       },
-    ]
+      ],
+      local.sync_render_statements,
+    )
   })
 }
 

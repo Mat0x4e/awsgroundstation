@@ -28,11 +28,6 @@ output "state_machine_arn" {
   value       = aws_sfn_state_machine.sync_pipeline.arn
 }
 
-output "codebuild_project_name" {
-  description = "Name of the CSPP-only aggregation CodeBuild project"
-  value       = aws_codebuild_project.sync_aggregation.name
-}
-
 output "receiver_arm_lambda_arn" {
   description = "ARN of the Receiver Arm Lambda function"
   value       = aws_lambda_function.receiver_arm.arn
@@ -41,4 +36,9 @@ output "receiver_arm_lambda_arn" {
 output "receiver_arm_lambda_function_name" {
   description = "Function name of the Receiver Arm Lambda"
   value       = aws_lambda_function.receiver_arm.function_name
+}
+
+output "receiver_public_ip" {
+  description = "Elastic IP on the sync receiver primary ENI (SSM and S3 egress)"
+  value       = aws_eip.receiver.public_ip
 }

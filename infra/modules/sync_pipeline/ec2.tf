@@ -136,7 +136,7 @@ resource "aws_iam_role_policy" "receiver_ec2" {
       },
       # CloudWatch Metrics — emit OptDriftDetected from the SSM drift-check script
       # (ssm_drift_check.tf). Namespace-conditioned to SyncPipeline, matching the
-      # PutMetricData pattern on aws_iam_role.codebuild in iam.tf.
+      # PutMetricData pattern used across the pipeline modules.
       # Resource must be "*" — cloudwatch:PutMetricData does not support resource ARNs.
       {
         Sid      = "PutMetricDataDriftCheck"
@@ -173,9 +173,9 @@ resource "aws_iam_instance_profile" "receiver_ec2" {
 ###############################################################################
 
 # checkov:skip=CKV_AWS_8: No user data required -- the live-UDP receiver,
-# RT-STPS, and this instance's jpss1.xml (PnEncoded="true" variant, patched at
-# runtime by scripts/sync_receiver_finish.sh, same pattern as
-# scripts/aggregation.sh) are installed manually on the EBS volume, same as
+# and the /opt/scripts/sync_receiver_*.sh helpers are installed manually on the
+# EBS volume (RT-STPS is NOT installed here: it runs in the shared Batch
+# aggregation job), same as
 # modules/sdr_pipeline's aggregation instance.
 resource "aws_instance" "receiver" {
   ami           = data.aws_ami.amazon_linux_2023.id
@@ -212,8 +212,8 @@ resource "aws_instance" "receiver" {
   })
 
   lifecycle {
-    # Same rationale as modules/sdr_pipeline/ec2.tf: RT-STPS and the live-UDP
-    # receiver are installed by hand on the EBS volume, outside Terraform.
+    # Same rationale as modules/sdr_pipeline/ec2.tf: the live-UDP
+    # receiver and its scripts are installed by hand on the EBS volume, outside Terraform.
     ignore_changes = [ami, root_block_device]
   }
 }
@@ -258,6 +258,27 @@ resource "aws_network_interface_attachment" "receiver" {
   instance_id          = aws_instance.receiver.id
   network_interface_id = aws_network_interface.receiver.id
   device_index         = 1
+}
+
+###############################################################################
+# Elastic IP on the PRIMARY ENI (eth0) for SSM + S3 egress
+#
+# The instance has a secondary ENI (device_index 1), so AWS does not
+# auto-assign a public IP. With no NAT and no VPC endpoint, the instance could
+# not reach SSM (Run Command) or S3 (upload). An EIP on the primary ENI gives
+# it an egress path via the IGW (~3.6 USD/month). The dataflow ENI and the
+# endpoint group binding are untouched.
+###############################################################################
+
+resource "aws_eip" "receiver" {
+  domain                    = "vpc"
+  network_interface         = aws_instance.receiver.primary_network_interface_id
+  associate_with_private_ip = aws_instance.receiver.private_ip
+
+  tags = merge(var.tags, {
+    Name    = "${var.project_name}-sync-receiver-eip"
+    Service = "sync-pipeline"
+  })
 }
 
 ###############################################################################

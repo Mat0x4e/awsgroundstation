@@ -251,7 +251,11 @@ class VisualizationOrchestrator:
         Receives: { "bucket": str, "key": str }
         Returns:  { "build_id": str, "path": "satdump"|"nasa", "contact_id": str }
         """
-        bucket: str = event["bucket"]
+        # The event bucket is authoritative end to end (listing AND render job
+        # INPUT_BUCKET): sync contacts live in the sync bucket, not in the
+        # Terraform-fixed async SDR bucket. Fall back to the async default only
+        # when the event carries no bucket.
+        bucket: str = event.get("bucket") or self._input_bucket
         key: str = event["key"]
 
         logger.info("Received event: bucket=%s key=%s", bucket, key)
@@ -304,6 +308,7 @@ class VisualizationOrchestrator:
                     input_prefix=input_prefix,
                     contact_time=contact_time,
                     chunk_duration=chunk_duration,
+                    bucket=bucket,
                 )
             else:
                 build_id = self._submit_codebuild(
@@ -313,6 +318,7 @@ class VisualizationOrchestrator:
                     input_prefix=input_prefix,
                     contact_time=contact_time,
                     chunk_duration=chunk_duration,
+                    bucket=bucket,
                 )
         except ClientError as exc:
             logger.error(
@@ -560,6 +566,7 @@ class VisualizationOrchestrator:
         input_prefix: str,
         contact_time: Optional[str] = None,
         chunk_duration: Optional[float] = None,
+        bucket: Optional[str] = None,
     ) -> str:
         """Start a CodeBuild build for the detected path.
 
@@ -584,6 +591,7 @@ class VisualizationOrchestrator:
         )
 
         env_overrides = [
+            {"name": "INPUT_BUCKET", "value": bucket or self._input_bucket, "type": "PLAINTEXT"},
             {"name": "INPUT_PREFIX", "value": input_prefix, "type": "PLAINTEXT"},
             {"name": "CONTACT_ID", "value": contact_id, "type": "PLAINTEXT"},
             {"name": "CONTACT_DATE", "value": contact_date, "type": "PLAINTEXT"},
@@ -632,6 +640,7 @@ class VisualizationOrchestrator:
         input_prefix: str,
         contact_time: Optional[str] = None,
         chunk_duration: Optional[float] = None,
+        bucket: Optional[str] = None,
     ) -> str:
         """Submit an AWS Batch job running render_entrypoint.sh.
 
@@ -646,7 +655,7 @@ class VisualizationOrchestrator:
         """
         environment = [
             {"name": "RENDER_BRANCH", "value": path},
-            {"name": "INPUT_BUCKET", "value": self._input_bucket},
+            {"name": "INPUT_BUCKET", "value": bucket or self._input_bucket},
             {"name": "INPUT_PREFIX", "value": input_prefix},
             {"name": "CONTACT_ID", "value": contact_id},
             {"name": "CONTACT_DATE", "value": contact_date},

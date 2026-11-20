@@ -457,12 +457,14 @@ actually contains the change.
 **Fix (validate-from-the-branch, without mutating `main` or the project config)**:
 1. Commit AND push the feature branch to the remote the CodeBuild project reads
    (CodeBuild pulls from the remote, not your local clone).
-2. Trigger the rebuild pinned to that branch with a one-off source override:
-   `aws codebuild start-build --project-name <image-build-project> --source-version <branch>`.
-   This overrides `sourceVersion` for a single build without editing the project / Terraform.
+2. Trigger the rebuild pinned to that branch with a one-off variable override:
+   `aws codebuild start-build --project-name <image-build-project> --environment-variables-override name=REPO_BRANCH,value=<branch>,type=PLAINTEXT --timeout-in-minutes-override 120`.
+   The inline buildspec does its own `git clone` of `$REPO_BRANCH`, so `--source-version` is
+   ignored. The override applies to a single build without editing the project / Terraform.
 3. Confirm the new image actually contains the change before re-validating: check the ECR push
-   time advanced (`aws ecr describe-images ... --query 'imageDetails[0].imagePushedAt'`), then
-   re-run the Batch job.
+   time advanced (`aws ecr describe-images ... --query 'imageDetails[0].imagePushedAt'`) and the
+   image content is right (SDR image: `config/jpss1.pn-encoded.xml` present), then re-run the
+   Batch job.
 
 **Interaction with the strangler cutover (important ordering hazard)**: if the orchestrator has
 already been flipped to the Batch path (e.g. `RENDER_COMPUTE=batch`) and applied, the PRODUCTION
@@ -482,6 +484,65 @@ count=14) were confirmed this way before Stage 3 was called done.
 
 **Rule**: for any container-based compute (Batch/ECS/Fargate) whose code is image-baked via
 `COPY`, treat the image-build source ref as part of the deploy. When the code is on a feature
-branch, rebuild the image with `--source-version <branch>` and verify the ECR push time advanced,
+branch, rebuild the image with `--environment-variables-override name=REPO_BRANCH,value=<branch>,type=PLAINTEXT` and verify the ECR push time advanced,
 BEFORE running any validation -- and prefer verifying the job's product/metric evidence over its
 exit status.
+
+---
+
+## EC2 with a Secondary ENI Gets No Public IP -- SSM Silently Never Registers
+
+**Symptom**: instance `running`, status checks `ok`, role has `AmazonSSMManagedInstanceCore`,
+yet `aws ssm describe-instance-information` never lists it and `list-commands` shows no
+command was ever run. Every SSM Run Command step (PREPASS arm, post-contact finish) would fail.
+
+**Root cause**: the sync receiver has a second ENI (the Ground Station dataflow ENI, device 1).
+AWS does not auto-assign a public IPv4 to an instance with more than one network interface,
+even in a subnet with `MapPublicIpOnLaunch = true`. The default VPC has an IGW but no NAT and
+no VPC endpoints, so the SSM agent (and `aws s3 cp`) has no egress path.
+
+**❌ INCORRECT**: assume "public subnet + IGW + SSM role" is enough for a multi-ENI instance.
+
+**✅ CORRECT**: give the primary ENI an egress path -- an `aws_eip` on
+`aws_instance.X.primary_network_interface_id` (cheap), or VPC endpoints for ssm, ssmmessages,
+ec2messages, kms, monitoring + an S3 gateway endpoint (no public IP, ~40 USD/month).
+
+**Rule**: after creating any instance driven by SSM, start it once and confirm it shows
+`PingStatus = Online`. "Healthy" EC2 status checks say nothing about SSM reachability.
+
+---
+
+## Amazon Linux 2023 Ships Python 3.9 -- PEP 604 Annotations Crash at Import
+
+**Symptom**: `TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'` at a
+`def f(...) -> bytes | None:` line; a nohup'd listener dies before binding. Local tests pass
+because the dev box runs Python 3.12.
+
+**❌ INCORRECT**: `def extract(packet: bytes) -> bytes | None:` in a script that runs on the
+instance's system python3 (3.9).
+
+**✅ CORRECT**: `from __future__ import annotations` at the top (or `Optional[bytes]`), and a test
+that parses the file with `ast.parse(src, feature_version=(3, 9))`.
+
+**Rule**: scripts executed by the instance's system interpreter must target that interpreter's
+version, not the dev venv's. Dry-run them on the real instance before a paid contact.
+
+---
+
+## `aws_eip` on a Multi-ENI Instance -- Keep `associate_with_private_ip`
+
+**Symptom**: dropping `associate_with_private_ip` from an `aws_eip` that targets
+`network_interface = aws_instance.X.primary_network_interface_id` makes the in-place update
+DISASSOCIATE the EIP, then fail to re-associate with
+`InvalidInstanceID: There are multiple interfaces attached to instance ... Please specify an
+interface ID`. The instance is left with no egress (live 2026-11-20, sync receiver).
+
+**❌ INCORRECT**: `network_interface = ...primary_network_interface_id` alone ("the private IP is
+unstable, and the default is the primary address anyway").
+
+**✅ CORRECT**: keep both `network_interface` and `associate_with_private_ip =
+aws_instance.X.private_ip`. The primary ENI's private IP does not change across stop/start in a
+VPC, so pinning it is safe.
+
+**Rule**: treat an EIP change on a multi-ENI instance as a possible egress outage: check
+`aws ec2 describe-addresses` shows the association right after the apply.

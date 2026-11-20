@@ -172,6 +172,10 @@ module "viirs_visualization" {
   sns_topic_arn          = module.security.sns_topic_arn
   tags                   = local.common_tags
 
+  # Sync bucket read access for the orchestrator (list/get contacts/* only).
+  # sync_pipeline does not read viirs_visualization outputs, so this is acyclic.
+  sync_output_bucket_arn = var.enable_sync_pipeline ? module.sync_pipeline[0].output_bucket_arn : ""
+
   # Stage 3b strangler - flips the orchestrator Lambda to AWS Batch render when
   # enable_batch_compute is set; CodeBuild remains the fallback. Deterministic
   # ARNs (not module.batch_compute outputs) avoid a module cycle (batch_compute
@@ -195,15 +199,15 @@ module "sync_pipeline" {
   kms_key_arn            = module.security.kms_key_arn
   kms_key_id             = module.security.kms_key_id
   sns_topic_arn          = module.security.sns_topic_arn
-  # var.enable_sdr_pipeline must be true when enable_sync_pipeline is true (see
-  # variables.tf) -- this reuses the SDR pipeline's ECR image rather than
-  # building a second one, so there is nothing to fall back to if it's absent.
-  sdr_pipeline_ecr_repository_url = var.enable_sdr_pipeline ? module.sdr_pipeline[0].ecr_repository_url : ""
-  tags                            = local.common_tags
+  tags                   = local.common_tags
 
-  # clean-compute-pipeline Stage 2 strangler wiring (sync aggregation -> Batch on-demand).
-  # Same aggregation queue+jobdef as sdr_pipeline; RTSTPS=off selects the
-  # CSPP-only branch in aggregation_entrypoint.sh.
+  # Shared aggregation chain (sync converges with async at the frame capture in S3).
+  # Same aggregation queue+jobdef as sdr_pipeline; the sync-specific behaviour is
+  # carried by env overrides in the sync state machine (CADU_PREFIX=cadu,
+  # PN_ENCODED=true). Batch is MANDATORY for sync: the module validates that
+  # enable_batch_compute = true (no CodeBuild fallback).
+  # ASSETS_BUCKET = SDR output bucket (holds software/ CSPP LUTs and lut-cache/).
+  assets_bucket_name                   = var.enable_sdr_pipeline ? module.sdr_pipeline[0].output_bucket_name : ""
   use_batch_aggregation                = var.enable_batch_compute
   batch_aggregation_job_queue_arn      = var.enable_batch_compute ? local.batch_aggregation_job_queue_arn : ""
   batch_aggregation_job_definition_arn = var.enable_batch_compute ? local.batch_aggregation_job_definition_arn : ""
@@ -269,6 +273,10 @@ module "batch_compute" {
 
   reception_bucket_name = module.s3_delivery.bucket_name
   reception_bucket_arn  = module.s3_delivery.bucket_arn
+
+  # Sync bucket access for the shared aggregation job. sync_pipeline reads batch
+  # ARNs from locals (not module outputs), so this is acyclic.
+  sync_output_bucket_arn = var.enable_sync_pipeline ? module.sync_pipeline[0].output_bucket_arn : ""
 
   tags = local.common_tags
 }

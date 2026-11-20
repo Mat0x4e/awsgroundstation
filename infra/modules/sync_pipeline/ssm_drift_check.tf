@@ -1,32 +1,34 @@
-# ssm_drift_check.tf — SSM State Manager association for /opt/* drift detection on the
+# ssm_drift_check.tf - SSM State Manager association for /opt/* drift detection on the
 # synchronous receiver EC2 instance (Requirement 5, OE-2, acceptance criterion 5.2).
 # Mirror of infra/modules/sdr_pipeline/ssm_drift_check.tf scoped to the receiver's
-# critical paths (/opt/rt-stps + the patched jpss1.xml) and the SyncPipeline namespace.
+# critical paths (the hand-installed helper scripts) and the SyncPipeline namespace.
 #
-# SCOPING DECISION: drift-DETECTION only. Full reconstruction is DEFERRED — same
-# rationale as the sdr_pipeline module: the RT-STPS install is complex and hard-won;
-# re-encoding it blind risks silent wrongness. See sdr_pipeline/ssm_drift_check.tf.
-
-###############################################################################
-# SSM Command Document — /opt/* presence check (sync receiver)
-###############################################################################
-# Checks that the two critical receiver paths exist and are non-empty:
-#   /opt/rt-stps                      — RT-STPS installation directory
-#   /opt/rt-stps/config/jpss1.xml     — patched config (PnEncoded="true" variant,
-#                                        applied by scripts/sync_receiver_finish.sh)
+# The receiver no longer carries RT-STPS: RT-STPS runs in the shared Batch aggregation
+# job (architecture principle: sync and async converge at the frame capture in S3).
+# The receiver only listens, assembles the CADU capture and uploads it, so the only
+# hand-installed artefacts that matter are its three helper scripts.
 #
-# On any missing/empty path: emits OptDriftDetected=1 to CloudWatch (namespace
+# SCOPING DECISION: drift-DETECTION only. Full reconstruction is DEFERRED - same
+# rationale as the sdr_pipeline module. See sdr_pipeline/ssm_drift_check.tf.
+###############################################################################
+# SSM Command Document - /opt/* presence check (sync receiver)
+###############################################################################
+# Checks that the receiver helper scripts exist (and are executable where run
+# directly):
+#   /opt/scripts/sync_receiver_arm.sh       - executable (PREPASS arm, via SSM)
+#   /opt/scripts/sync_receiver_finish.sh    - executable (post-contact finish, via SSM)
+#   /opt/scripts/sync_receiver_listen.py    - present (live-UDP listener)
+#
+# On any missing path: emits OptDriftDetected=1 to CloudWatch (namespace
 # SyncPipeline, dimension InstanceId), prints the missing paths, exits 1.
 # On all-present: emits OptDriftDetected=0 and exits 0.
-
 resource "aws_ssm_document" "opt_drift_check" {
   name            = "${var.project_name}-sync-opt-drift-check"
   document_type   = "Command"
   document_format = "JSON"
-
   content = jsonencode({
     schemaVersion = "2.2"
-    description   = "Drift detection for the sync receiver EC2 instance: asserts /opt/rt-stps and /opt/rt-stps/config/jpss1.xml are present and non-empty. Emits OptDriftDetected=1 to CloudWatch (SyncPipeline) on drift; 0 on OK."
+    description   = "Drift detection for the sync receiver EC2 instance: asserts /opt/scripts/sync_receiver_arm.sh and sync_receiver_finish.sh exist and are executable, and /opt/scripts/sync_receiver_listen.py exists. Emits OptDriftDetected=1 to CloudWatch (SyncPipeline) on drift; 0 on OK."
     mainSteps = [
       {
         action = "aws:runShellScript"
@@ -40,26 +42,27 @@ resource "aws_ssm_document" "opt_drift_check" {
             "NAMESPACE=\"SyncPipeline\"",
             "MISSING=\"\"",
             "",
-            "# /opt/rt-stps must exist and be non-empty",
-            "if [ ! -d /opt/rt-stps ] || [ -z \"$(ls -A /opt/rt-stps)\" ]; then MISSING=\"$MISSING /opt/rt-stps\"; fi",
+            "# Helper scripts invoked directly via SSM must exist and be executable",
+            "for f in /opt/scripts/sync_receiver_arm.sh /opt/scripts/sync_receiver_finish.sh; do",
+            "  if [ ! -x \"$f\" ]; then MISSING=\"$MISSING $f\"; fi",
+            "done",
             "",
-            "# Patched jpss1.xml (PnEncoded=true variant) must be present",
-            "if [ ! -f /opt/rt-stps/config/jpss1.xml ]; then MISSING=\"$MISSING /opt/rt-stps/config/jpss1.xml\"; fi",
+            "# Live-UDP listener (launched by sync_receiver_arm.sh) must be present",
+            "if [ ! -f /opt/scripts/sync_receiver_listen.py ]; then MISSING=\"$MISSING /opt/scripts/sync_receiver_listen.py\"; fi",
             "",
             "if [ -n \"$MISSING\" ]; then",
-            "  echo \"DRIFT DETECTED -- missing or empty:$MISSING\"",
+            "  echo \"DRIFT DETECTED -- missing or not executable:$MISSING\"",
             "  aws cloudwatch put-metric-data --namespace \"$NAMESPACE\" --metric-name OptDriftDetected --value 1 --unit Count --dimensions \"Name=InstanceId,Value=$INSTANCE_ID\" --region \"$REGION\"",
             "  exit 1",
             "fi",
             "",
-            "echo \"All /opt paths intact -- no drift\"",
+            "echo \"All receiver helper scripts intact -- no drift\"",
             "aws cloudwatch put-metric-data --namespace \"$NAMESPACE\" --metric-name OptDriftDetected --value 0 --unit Count --dimensions \"Name=InstanceId,Value=$INSTANCE_ID\" --region \"$REGION\""
           ]
         }
       }
     ]
   })
-
   tags = merge(var.tags, {
     Name    = "${var.project_name}-sync-opt-drift-check"
     Service = "sync-pipeline"

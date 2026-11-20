@@ -546,3 +546,39 @@ the `clean-compute-pipeline` spec). The pipeline stages were validated on it in 
 Verified by completion evidence (ProductsWritten emitted post-upload, `render_entrypoint.sh
 complete`, fresh `products/2026/10/17/dcef1518-.../` timestamps), not just exit code. Full
 record in [`CLEAN_COMPUTE_PIPELINE_HANDOFF.md`](CLEAN_COMPUTE_PIPELINE_HANDOFF.md).
+
+---
+
+## Contact #8 — first SYNC (demod/decode) contact: packet-format experiment
+
+First contact on the synchronous path. Its purpose is the packet-format gate
+([`SYNC_PIPELINE.md`](SYNC_PIPELINE.md), "Packet-format validation gate"): capture what the antenna
+actually sends over UDP and check it against the parser. Expect RT-STPS frame sync to fail on this
+first try; the raw capture in S3 is the deliverable. Flown through the shared aggregation chain
+(`CADU_PREFIX=cadu`, `PN_ENCODED=true`) introduced 2026-11-20.
+
+| Property | Value |
+|----------|-------|
+| **Contact ID** | `c5e93aa1-4c0e-42b6-b7bf-20669d7ef53d` |
+| **Status** | 📅 SCHEDULED (reserved 2026-11-20) |
+| **Satellite** | NOAA-20 (NORAD 43013) |
+| **Ground Station** | Stockholm 1 (`eu-north-1`) |
+| **Mission Profile** | **sync** demod/decode (`2e719f99-35f5-4720-b974-ba177036c1ee`) |
+| **Pre-pass Start** | 2026-11-22 10:54:34 UTC (receiver_arm PREPASS, T-600 s) |
+| **Visibility** | 2026-11-22 11:04:34 → 11:15:33 UTC (10m59s) |
+| **Post-pass End** | 2026-11-22 11:17:33 UTC |
+| **Max Elevation** | 74.01° (AWS) |
+| **Local solar time** | ~12:20 (daytime) |
+| **Data Format** | `UncodedFramesEgress` over UDP :55888 (VITA-49 Extension, layout unverified) |
+| **Estimated Cost** | ~$110-130 (on-demand narrowband, $10/min at Stockholm 1) |
+| **Scheduled By** | Manual `reserve-contact`, user go-ahead 2026-11-20 (scheduler cron remains DISABLED) |
+| **Selected From** | sync offer set 2026-11-20 (125 windows, 5 stations): earliest daytime Stockholm window ≥ 70° |
+
+Readiness:
+- ✅ 2026-11-20: wiring test of the shared aggregation job exactly as the sync state machine runs it
+  (`CADU_PREFIX=cadu`, `PN_ENCODED=true`, sync output bucket, assets from the SDR bucket), on a copy
+  of contact #7's SatDump frames: script fetch, assets, IAM, pristine RT-STPS config all OK; RT-STPS
+  0 RDR, as expected for already-derandomized frames (the same frames give 5 RDR with
+  `PN_ENCODED=false`: the PN switch reaches RT-STPS).
+- ✅ 2026-11-20: async regression on contact #7 with the shared chain: 5 RDR, 6 SDR/GEO.
+- ⏳ Receiver `/opt/scripts` install + dry arm (checklist steps 2-3) - before Sunday 10:54 UTC.

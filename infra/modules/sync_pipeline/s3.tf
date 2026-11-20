@@ -105,8 +105,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "sync_output_logs" {
 # ─────────────────────────────────────────────────────────────
 # Sync pipeline output bucket
 #
-# Written to by the receiver EC2 (raw CADU + RT-STPS RDR HDF5) and by
-# codebuild.tf's aggregation project (SDR/GEO HDF5, then products/ from the
+# Written to by the receiver EC2 (combined CADU + raw capture) and by
+# the shared Batch aggregation job (rdr/ then SDR/GEO HDF5, then products/ from the
 # reused viirs-orchestrator Lambda). Same layout convention as
 # modules/sdr_pipeline's bucket: contacts/{date}/{contact_id}/{cadu,rdr,sdr}/
 # and products/{date}/{contact_id}/.
@@ -219,6 +219,6 @@ resource "aws_s3_bucket_policy" "sync_output" {
 # as modules/sdr_pipeline/s3.tf (see that file's comment for the incident this
 # avoids). This pipeline's orchestration is contact-level, not object-level:
 # eventbridge.tf triggers off aws.groundstation Contact State Change, and
-# step_functions.tf invokes the aggregation CodeBuild project and the reused
+# step_functions.tf submits the shared Batch aggregation job and the reused
 # viirs-orchestrator Lambda directly.
 # ---------------------------------------------------------------------------

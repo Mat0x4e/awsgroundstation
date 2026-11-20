@@ -22,15 +22,23 @@ FEC-decode on the antenna side and deliver the much smaller decoded-frame stream
 during the contact — `AntennaDownlinkDemodDecodeConfig`. This pipeline exercises that
 path: a dedicated mission profile, a receiver EC2 that the decoded stream is delivered
 to over UDP in real time, and a much shorter post-contact chain (no S3 chunk fan-out,
-because there's nothing to fan out — RT-STPS runs once, on the receiver, right after LOS).
+because there's nothing to fan out). From the frames in S3 onwards it shares the async
+pipeline's chain (see "Shared chain" below).
 
-**Fully separate from the async pipeline at every layer** — its own mission profile,
-dataflow endpoint, EventBridge rules, Step Functions state machine, IAM roles, S3 bucket,
-and CloudWatch alarms. Nothing in `modules/sdr_pipeline` or `modules/mission_profile` was
-touched. The only thing it reuses is the SDR pipeline's ECR image, for the CSPP-only
-aggregation build (`sdr_pipeline_ecr_repository_url` output).
+**Separate up to the frames, shared after them.** The reception side is its own: mission
+profile, dataflow endpoint, receiver EC2, EventBridge rules (filtered on its profile), Step
+Functions state machine, IAM roles, output bucket and alarms. From the frames in S3 onwards it
+uses the async pipeline's components: the Batch aggregation job and SDR image, the CSPP assets in
+the SDR bucket, and the visualization Lambda and render job (architecture principle "converge
+early, mutualize the rest", [`ARCHITECTURE.md`](ARCHITECTURE.md#architecture-principle-converge-early-mutualize-the-rest)).
 
 ## Architecture
+
+Data flow during a sync contact (source: [`diagrams/sync-contact-dataflow.yaml`](diagrams/sync-contact-dataflow.yaml)):
+
+![Sync contact data flow](diagrams/out/sync-contact-dataflow.png)
+
+Step-by-step sequence:
 
 ```mermaid
 sequenceDiagram
@@ -41,8 +49,8 @@ sequenceDiagram
     participant ARM as receiver_arm Lambda
     participant EC2 as Receiver EC2
     participant SFN as Step Functions
-    participant AGG as AWS Batch (CSPP only, RTSTPS=off)
-    participant VIZ as VIIRS visualization
+    participant AGG as AWS Batch aggregation<br/>(shared with async)
+    participant VIZ as VIIRS visualization<br/>(shared with async)
 
     Note over GS: T-600s PREPASS
     GS->>EB: contactStatus = PREPASS
@@ -55,21 +63,21 @@ sequenceDiagram
     Note over SAT,GS: T+~10m LOS
     GS->>EB: contactStatus = COMPLETED
     EB->>SFN: StartExecution
-    SFN->>EC2: SSM: sync_receiver_finish.sh (stop listener, RT-STPS, upload)
-    EC2->>EC2: RT-STPS jpss1.xml, PnEncoded=true (unlike the async path)
-    EC2-->>SFN: RDR HDF5 + raw CADU in S3
+    SFN->>EC2: SSM: sync_receiver_finish.sh (stop listener, upload)
+    EC2-->>SFN: cadu/combined.cadu + raw/raw_capture.bin in S3
     SFN->>EC2: stop instance (cost)
-    SFN->>AGG: SubmitBatchAggregation (RTSTPS=off, CSPP only -- RT-STPS already done)
-    AGG->>AGG: sdr_luts.sh (needs internet, same reason as async pipeline)
-    AGG->>AGG: viirs_sdr.sh -> SDR + GEO HDF5
-    SFN->>VIZ: StartVisualization (same orchestrator Lambda, unmodified)
+    SFN->>AGG: SubmitBatchAggregation (RTSTPS=on, CADU_PREFIX=cadu, PN_ENCODED=true)
+    AGG->>AGG: RT-STPS (pristine jpss1, pn node kept) -> RDR
+    AGG->>AGG: CSPP viirs_sdr.sh -> SDR + GEO HDF5 (assets from the SDR bucket)
+    SFN->>VIZ: StartVisualization (same orchestrator Lambda)
 ```
 
-> NOTE: the sync aggregation now routes to the shared on-demand **AWS Batch** job
-> (`RTSTPS=off`, `...-agg-queue`, `...-aggregation` job def) when `enable_batch_compute=true`;
-> the CodeBuild `aggregation_sync.yml` path is the retained fallback. This Batch sync path is
-> coded and deployed but **never run on real data** (no sync contact flown yet -- see the
-> former blocker below, resolved 2026-11-19).
+> **Shared chain (2026-11-20).** Following the architecture principle "converge early,
+> mutualize the rest" ([`ARCHITECTURE.md`](ARCHITECTURE.md#architecture-principle-converge-early-mutualize-the-rest)),
+> the sync path joins the async one at the frames in S3: the receiver only captures and
+> uploads, and the **same** aggregation Batch job, image, CSPP assets and visualization run
+> both paths. The former split (RT-STPS on the receiver, `RTSTPS=off` CSPP-only job, CodeBuild
+> fallback) is retired. Never run on real data yet (no sync contact flown).
 
 ## Component reference
 
@@ -78,31 +86,30 @@ sequenceDiagram
 | Ground Station config | `AntennaDownlinkDemodDecodeConfig` (QPSK, Viterbi 1/2, NRZ-M, `UncodedFramesEgress`), tracking config, dataflow endpoint config, mission profile `noaa20_sync` | [`groundstation.tf`](../infra/modules/sync_pipeline/groundstation.tf) |
 | Receiver network | Dedicated EC2 + SG (UDP ingress from Ground Station's managed prefix list only, HTTPS egress for SSM/S3), dataflow endpoint group bound to its ENI | [`ec2.tf`](../infra/modules/sync_pipeline/ec2.tf) |
 | Pre-AOS arm | `receiver_arm` Lambda: start EC2, poll running + SSM Online, `SendCommand` to arm the listener | [`lambda.tf`](../infra/modules/sync_pipeline/lambda.tf), [`lambdas/receiver_arm/handler.py`](../lambdas/receiver_arm/handler.py) |
-| Live listener | UDP socket bound before AOS, strips a VITA-49-style header per packet, writes the decoded CCSDS frame stream to disk | [`scripts/sync_receiver_listen.py`](../scripts/sync_receiver_listen.py) |
-| Post-LOS handoff | Stop listener, run RT-STPS locally, upload CADU + RDR to S3 | [`scripts/sync_receiver_finish.sh`](../scripts/sync_receiver_finish.sh) |
-| Orchestration | Step Functions: wait, `FinishReceiver` (SSM), poll, stop EC2, `ChooseAggregationCompute` -> `SubmitBatchAggregation` (RTSTPS=off) OR CodeBuild fallback, `StartVisualization` | [`step_functions.tf`](../infra/modules/sync_pipeline/step_functions.tf) |
-| Aggregation (live) | On-demand **AWS Batch** aggregation job, `RTSTPS=off` (CSPP only), shared with the async pipeline (`...-agg-queue`, `...-aggregation`), reuses `sdr_pipeline`'s ECR image | [`infra/modules/batch_compute/`](../infra/modules/batch_compute/), [`scripts/aggregation_entrypoint.sh`](../scripts/aggregation_entrypoint.sh) |
-| Aggregation (fallback) | CSPP-only CodeBuild project (retained until the Batch sync path is validated + task 8) | [`codebuild.tf`](../infra/modules/sync_pipeline/codebuild.tf), [`buildspecs/aggregation_sync.yml`](../buildspecs/aggregation_sync.yml) |
+| Live listener | UDP socket bound before AOS, strips a VITA-49-style header per packet, writes the decoded CCSDS frame stream to disk, plus a raw tee of every payload | [`scripts/sync_receiver_listen.py`](../scripts/sync_receiver_listen.py) |
+| Post-LOS handoff | Stop listener, upload the raw tee then the frame capture to S3 (no RT-STPS on the receiver) | [`scripts/sync_receiver_finish.sh`](../scripts/sync_receiver_finish.sh) |
+| Orchestration | Step Functions: wait, `FinishReceiver` (SSM), poll, stop EC2, `SubmitBatchAggregation`, `StartVisualization` | [`step_functions.tf`](../infra/modules/sync_pipeline/step_functions.tf) |
+| Aggregation (**shared**) | The async pipeline's on-demand Batch aggregation job (`...-agg-queue`, `...-aggregation`, SDR image): `RTSTPS=on CADU_PREFIX=cadu PN_ENCODED=true`, `OUTPUT_BUCKET` = sync bucket, `ASSETS_BUCKET` = SDR bucket | [`infra/modules/batch_compute/`](../infra/modules/batch_compute/), [`scripts/aggregation_entrypoint.sh`](../scripts/aggregation_entrypoint.sh) |
 | Triggers | PREPASS → Lambda direct invoke; COMPLETED → state machine. Both filtered on this module's `missionProfileArn` | [`eventbridge.tf`](../infra/modules/sync_pipeline/eventbridge.tf) |
-| Alarms | EC2 status checks (with auto-recovery), Lambda errors, Step Functions failures → shared SNS topic | [`monitoring.tf`](../infra/modules/sync_pipeline/monitoring.tf) |
+| Alarms | EC2 status checks (with auto-recovery), Lambda errors, Step Functions failures, receiver readiness, `/opt/scripts` drift → shared SNS topic | [`monitoring.tf`](../infra/modules/sync_pipeline/monitoring.tf) |
 
 ## What is materially different from the async pipeline
 
-- **No S3 buffer.** The async pipeline can recover from a late Lambda because chunks sit
-  in S3 regardless. Here the receiver must be running and its listener bound *before*
-  AOS or the pass is lost outright — hence the 600 s `contact_pre_pass_duration_seconds`
-  budget (up to 240 s for EC2 running, 120 s for SSM agent registration, plus margin) and
-  the dedicated alarms in `monitoring.tf`.
-- **`PnEncoded="true"`, not `"false"`.** The async pipeline's SatDump step already
-  derandomizes PN before RT-STPS ever runs. `UncodedFramesEgress` does not — no
-  Reed-Solomon, no PN — so RT-STPS here must do both, the opposite configuration from
-  `scripts/aggregation.sh`. Get this backwards and RT-STPS silently discards every frame
-  (XORing already-clean data back into noise), the same failure mode documented in
-  `ARCHITECTURE.md`'s PN note.
-- **RT-STPS runs once, on the receiver, not fanned out in CodeBuild.** There is one
-  combined capture file per contact, not 22 chunks — nothing to parallelize.
-- **CSPP is the only CodeBuild stage.** RT-STPS is done by the time the state machine's
-  aggregation step starts.
+Only what the data forces; everything from the frames in S3 onwards is shared.
+
+- **No S3 buffer before the capture.** The async pipeline can recover from a late Lambda
+  because chunks sit in S3 regardless. Here the receiver must be running and its listener
+  bound *before* AOS or the pass is lost outright — hence the 600 s
+  `contact_pre_pass_duration_seconds` budget (up to 240 s for EC2 running, 120 s for SSM agent
+  registration, plus margin) and the dedicated alarms in `monitoring.tf`. Once the capture is
+  in S3 it is replayable through the shared job like any async contact.
+- **`PN_ENCODED=true`, not `false`.** The async pipeline's SatDump step already
+  derandomizes PN before RT-STPS runs. `UncodedFramesEgress` does not — no Reed-Solomon, no
+  PN — so the shared job runs RT-STPS with the pristine `config/jpss1.pn-encoded.xml`
+  (`PnEncoded="true"`, `frame_sync -> pn -> reed_solomon`) instead of the patched config. Get
+  this backwards and RT-STPS silently discards every frame (XORing already-clean data back into
+  noise), the same failure mode documented in `ARCHITECTURE.md`'s PN note.
+- **One combined capture**, not 22 chunks: there is no fan-out stage on this path.
 - **Packet format is not fully verified.** See the open risk below.
 
 ## Former blocker -- zero sync windows (resolved 2026-11-19)
@@ -160,7 +167,11 @@ validation experiment.
    `frame_sync` logs successful lock and produces RDR HDF5 output. Zero RDR output with
    frame-sync errors means the header parsing is stripping too many or too few bytes.
    Zero RDR output with no frame-sync errors means the frames are malformed before
-   reaching RT-STPS.
+   reaching RT-STPS. Since the shared chain, the aggregation job itself FAILS in the sync
+   configuration (`PN_ENCODED=true`) when there is no `RNSCA-RVIRS*.h5` RDR or CSPP yields zero
+   SDR/GEO (RDR files are uploaded first as evidence), so the state machine reaches Catch and SNS
+   instead of a silent success. A visualization failure notifies via SNS and a metric alarm
+   (`SyncPipeline` namespace) before the execution ends.
 
 4. **Record the result.** Once all three steps pass, update this section with the contact
    ID, date, and verified header layout. Until then, treat the `ReceiverReadyFailure`
@@ -182,7 +193,20 @@ needs, copied to the paths the scripts expect:
 |---|---|
 | `/opt/scripts/sync_receiver_arm.sh`, `sync_receiver_finish.sh` (executable) | this repo's `scripts/` |
 | `/opt/scripts/sync_receiver_listen.py` | this repo's `scripts/` |
-| `/opt/rt-stps/` | RT-STPS 7.0 + Patch 1, `config/jpss1.xml` with `PnEncoded="true"` (the **default**, unmodified template — do not apply the async pipeline's PN patch here) |
+
+That is all: no `/opt/rt-stps` on the receiver since 2026-11-20 (RT-STPS runs in the shared
+aggregation job, from the SDR image). The `OptDriftDetected` alarm checks these three files.
+
+Two receiver constraints found by the 2026-11-20 dry run:
+
+- **Egress path.** The receiver has two ENIs (primary + the dataflow ENI), so AWS gives it no
+  automatic public IP, and the default VPC has no NAT or VPC endpoint. Without the Elastic IP
+  on the primary ENI (`aws_eip.receiver`, about 3.6 USD/month), SSM Run Command (arm/finish)
+  and the S3 upload cannot work. Check `aws ssm describe-instance-information` shows it Online
+  a minute after start.
+- **Python 3.9.** The AMI ships Python 3.9: `sync_receiver_listen.py` must stay
+  3.9-compatible (`from __future__ import annotations`, no `match`). A regression test in
+  `tests/test_sync_receiver_listen.py` guards it.
 
 ## Enabling it
 
@@ -249,9 +273,12 @@ order; each one is cheap except step 6 (paid, ~$105 at Stockholm 1, explicit use
    state machine.
 2. **Install the receiver prerequisites.** Start `groundstation-noaa20-sync-receiver`
    (`i-06a51f5b29e26aeaa`, stopped between contacts), then via SSM install the files listed in
-   "Manual prerequisites" above: the three `/opt/scripts/sync_receiver_*` scripts from this repo
-   and `/opt/rt-stps/` with the **default** `jpss1.xml` (`PnEncoded="true"`). Check
+   "Manual prerequisites" above: the three `/opt/scripts/sync_receiver_*` scripts from this
+   repo (staged in `s3://<sync bucket>/software/`). No RT-STPS on the receiver. Check
    `python3 --version` and that `/opt/scripts/*.sh` are executable.
+   Also check the **shared chain is ready**: the SDR image in ECR contains
+   `/opt/rt-stps/config/jpss1.pn-encoded.xml` (rebuilt after 2026-11-20), and the deployed
+   `software/aggregation_entrypoint.sh` in the SDR bucket accepts `PN_ENCODED`.
 3. **Dry arm, no contact.** Run the same command the `receiver_arm` Lambda sends
    (`lambdas/receiver_arm/handler.py`), with a fake contact id:
    `/opt/scripts/sync_receiver_arm.sh <bucket> dryrun-0000 <yyyy/mm/dd> 55888`
@@ -268,9 +295,11 @@ order; each one is cheap except step 6 (paid, ~$105 at Stockholm 1, explicit use
    `docs/CONTACTS.md` immediately (contact id, window, profile, "sync, format experiment").
 7. **During PREPASS** (T-600 s): watch `/aws/lambda/...receiver-arm` logs - EC2 running, SSM
    Online, arm command sent. If `ReceiverReadyFailure` fires, the pass is lost (no S3 buffer).
-8. **After LOS**: the sync state machine runs `sync_receiver_finish.sh`, stops the instance, then
-   aggregation. Whatever the outcome, fetch
-   `s3://<bucket>/contacts/<date>/<contact>/raw/raw_capture.bin`.
+8. **After LOS**: the sync state machine runs `sync_receiver_finish.sh` (uploads `raw/` then
+   `cadu/`), stops the instance, then the shared aggregation job (`PN_ENCODED=true`). Whatever
+   the outcome, fetch `s3://<bucket>/contacts/<date>/<contact>/raw/raw_capture.bin`. If RT-STPS
+   finds no frames, the capture stays in S3: fix the parser or the PN setting and **replay**
+   the aggregation job on it, without a new contact.
 9. **Inspect the capture** against the onboarding-provided VITA-49 Extension layout
    ("Clearing the gate" above): header word count, packet type and size fields, payload offset.
 10. **Record the result** in this file (verified header layout or what differed) and in

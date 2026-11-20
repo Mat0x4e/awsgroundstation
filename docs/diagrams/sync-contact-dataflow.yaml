@@ -1,0 +1,319 @@
+Diagram:
+  DefinitionFiles:
+    - Type: URL
+      Url: "https://raw.githubusercontent.com/awslabs/diagram-as-code/main/definitions/definition-for-aws-icons-light.yaml"
+
+  # Data flow of ONE synchronous (demod/decode) contact, numbered in time order.
+  # Steps 1-5 are sync-specific (capture); from step 6 the contact runs on the chain shared with
+  # the async pipeline (architecture principle "converge early, mutualize the rest",
+  # docs/ARCHITECTURE.md). Render:
+  #   awsdac docs/diagrams/sync-contact-dataflow.yaml -o docs/diagrams/out/sync-contact-dataflow.png -f
+
+  Resources:
+    Canvas:
+      Type: AWS::Diagram::Canvas
+      Direction: vertical
+      Children:
+        - Title
+        - Body
+
+    Title:
+      Type: AWS::Diagram::Resource
+      Title: "Sync contact data flow - steps 1-8 in time order; shared with async from step 6"
+      Align: center
+
+    Body:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - Satellite
+        - AWSCloud
+
+    Satellite:
+      Type: AWS::Diagram::Resource
+      Preset: "Satellite"
+      Title: "NOAA-20"
+      Align: center
+
+    AWSCloud:
+      Type: AWS::Diagram::Cloud
+      Preset: AWSCloudNoLogo
+      Direction: horizontal
+      Align: center
+      Children:
+        - RegionAntenna
+        - RegionMain
+
+    RegionAntenna:
+      Type: AWS::Region
+      Title: "eu-north-1"
+      Children:
+        - GroundStation
+
+    GroundStation:
+      Type: AWS::Diagram::Resource
+      Preset: "AWS Ground Station"
+      Title: "Stockholm 1 (demod/decode)"
+      Align: center
+
+    RegionMain:
+      Type: AWS::Region
+      Title: "eu-central-1"
+      Children:
+        - ColCapture
+        - ColProcess
+        - ColShared
+
+    # --- column 1: sync-specific capture -----------------------------------------
+    ColCapture:
+      Type: AWS::Diagram::VerticalStack
+      Children:
+        - EventBridge
+        - ArmLambda
+        - VPC
+
+    EventBridge:
+      Type: AWS::Events::Rule
+      Title: "EventBridge (sync profile)"
+      Align: center
+
+    ArmLambda:
+      Type: AWS::Lambda::Function
+      Title: "receiver_arm"
+      Align: center
+
+    VPC:
+      Type: AWS::EC2::VPC
+      Title: "VPC"
+      Children:
+        - ReceiverSubnet
+        - IGW
+
+    ReceiverSubnet:
+      Type: AWS::EC2::Subnet
+      Preset: PublicSubnet
+      Title: "default-VPC public subnet"
+      Children:
+        - Receiver
+        - EIP
+
+    EIP:
+      Type: AWS::EC2::EIP
+      Title: "Elastic IP (eth0)"
+
+    IGW:
+      Type: AWS::EC2::InternetGateway
+      Title: "Internet gateway"
+
+    Receiver:
+      Type: AWS::EC2::Instance
+      Title: "Receiver EC2 (UDP listener)"
+
+    # --- column 2: orchestration and contact data ---------------------------------
+    ColProcess:
+      Type: AWS::Diagram::VerticalStack
+      Children:
+        - SyncSFN
+        - SyncBucket
+        - AggJob
+        - VizLambda
+
+    SyncSFN:
+      Type: AWS::StepFunctions
+      Title: "Step Functions (sync)"
+      Align: center
+
+    SyncBucket:
+      Type: AWS::S3::Bucket
+      Title: "sync output bucket"
+      Align: center
+
+    AggJob:
+      Type: AWS::Batch
+      Title: "Batch aggregation (shared)"
+      Align: center
+
+    VizLambda:
+      Type: AWS::Lambda::Function
+      Title: "viirs-orchestrator (shared)"
+      Align: center
+
+    # --- column 3: shared assets and render ---------------------------------------
+    ColShared:
+      Type: AWS::Diagram::VerticalStack
+      Children:
+        - SNS
+        - AssetsBucket
+        - ECR
+        - RenderJob
+
+    SNS:
+      Type: AWS::SNS::Topic
+      Title: "SNS alarms"
+      Align: center
+
+    AssetsBucket:
+      Type: AWS::S3::Bucket
+      Title: "SDR bucket: entrypoint, LUTs (shared)"
+      Align: center
+
+    ECR:
+      Type: AWS::ECR
+      Title: "ECR SDR image (shared)"
+      Align: center
+
+    RenderJob:
+      Type: AWS::Batch
+      Title: "Batch render (shared)"
+      Align: center
+
+  Links:
+    - Source: Satellite
+      SourcePosition: E
+      Target: GroundStation
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "X-band 7812 MHz"
+
+    - Source: GroundStation
+      SourcePosition: E
+      Target: EventBridge
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetLeft:
+          Title: "1 PREPASS / COMPLETED"
+
+    - Source: EventBridge
+      SourcePosition: S
+      Target: ArmLambda
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+
+    - Source: ArmLambda
+      SourcePosition: S
+      Target: Receiver
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "2 start + arm"
+
+    - Source: GroundStation
+      SourcePosition: S
+      Target: Receiver
+      TargetPosition: W
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceLeft:
+          Title: "3 live UDP frames"
+
+    - Source: EventBridge
+      SourcePosition: E
+      Target: SyncSFN
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "4"
+
+    - Source: SyncSFN
+      SourcePosition: SW
+      Target: Receiver
+      TargetPosition: NE
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetRight:
+          Title: "5 finish (SSM)"
+
+    - Source: Receiver
+      SourcePosition: E
+      Target: EIP
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: EIP
+      SourcePosition: S
+      Target: IGW
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+
+    - Source: IGW
+      SourcePosition: E
+      Target: SyncBucket
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "5 egress: cadu/ raw/"
+
+    - Source: SyncBucket
+      SourcePosition: S
+      Target: AggJob
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+      SourceArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "6 cadu in, rdr sdr out"
+
+    - Source: AssetsBucket
+      SourcePosition: S
+      Target: ECR
+      TargetPosition: N
+      Type: orthogonal
+
+    - Source: ECR
+      SourcePosition: W
+      Target: AggJob
+      TargetPosition: E
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        TargetRight:
+          Title: "6 image, assets"
+
+    - Source: AggJob
+      SourcePosition: S
+      Target: VizLambda
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "7"
+
+    - Source: VizLambda
+      SourcePosition: E
+      Target: RenderJob
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "8 products/"
+
+    - Source: SyncSFN
+      SourcePosition: E
+      Target: SNS
+      TargetPosition: W
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "on failure"

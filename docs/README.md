@@ -7,7 +7,7 @@ find the right file without opening them all.
 
 | Doc | Read it when |
 |---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | You want the system in one picture, the state machine, and the accepted trade-offs |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | You want the system in one picture, the two data pipelines (ASCII, sync and async), the state machine, and the accepted trade-offs |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Before touching CSPP or the images: the exact conditions CSPP needs and what is deployed |
 | [SYNC_PIPELINE.md](SYNC_PIPELINE.md) | The synchronous (demod/decode) path, and the **first sync contact checklist** |
 | [OPERATOR_RUNBOOK.md](OPERATOR_RUNBOOK.md) | Standing rules: verify a pass, alarms, scheduler, apply rule, drift |
@@ -26,8 +26,8 @@ find the right file without opening them all.
 | [MEDITERRANEAN_PASS.md](MEDITERRANEAN_PASS.md) | Planning a targeted acquisition (contacts #5, #6) and why the basin stayed out of reach |
 | [SYNC_ONBOARDING_INVESTIGATION.md](SYNC_ONBOARDING_INVESTIGATION.md) | **Superseded** (2026-11-19): the "not onboarded" reading of the zero sync windows |
 | [reviews/](reviews/) | Expert reviews, the Terraform clean-reference investigation, PR reviews, the 2026-11-19 repo review |
-| [Asciiart-archi.txt](Asciiart-archi.txt) | Component-level ASCII diagram (current and target) |
-| [diagrams/](diagrams/) | awsdac sources (`*.yaml`) and rendered PNGs (`out/`) |
+| [Asciiart-archi.txt](Asciiart-archi.txt) | Historical component-level ASCII diagrams (pre- and post-Batch migration); the current two-pipeline diagram is in [ARCHITECTURE.md](ARCHITECTURE.md#architecture-principle-converge-early-mutualize-the-rest) |
+| [diagrams/](diagrams/) | awsdac sources (`*.yaml`) and rendered PNGs (`out/`), including the sync-contact data flow ([`sync-contact-dataflow.png`](diagrams/out/sync-contact-dataflow.png)) |
 
 ## Side topics (not the pipeline)
 

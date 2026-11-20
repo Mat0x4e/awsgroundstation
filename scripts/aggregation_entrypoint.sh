@@ -1,24 +1,43 @@
 #!/bin/bash
-# aggregation_entrypoint.sh -- converged aggregation entrypoint for AWS Batch.
+# aggregation_entrypoint.sh -- the shared aggregation chain for AWS Batch.
 #
-# Replaces BOTH buildspecs/aggregation.yml (async: CADU -> RT-STPS -> RDR -> SDR)
-# and buildspecs/aggregation_sync.yml (sync: RDR -> SDR/GEO) via a single
-# RTSTPS=on|off environment variable. Stage 2 of the Clean Compute Pipeline
-# Migration (ADR-002).
+# ONE chain for both downlink paths (architecture principle "converge at the
+# first common artifact", docs/ARCHITECTURE.md): frames in S3 -> RT-STPS -> RDR
+# -> CSPP -> SDR/GEO. The two paths differ only by where their frames are and
+# whether they are still PN-randomized:
+#   async (DigIF):         SatDump .cadu under satdump/, PN already removed
+#                          -> CADU_PREFIX=satdump, PN_ENCODED=false (defaults)
+#   sync (demod/decode):   receiver capture under cadu/, UncodedFramesEgress
+#                          (no PN, no Reed-Solomon) -> CADU_PREFIX=cadu,
+#                          PN_ENCODED=true (RT-STPS default jpss1 chain)
+# Replaces buildspecs/aggregation.yml and aggregation_sync.yml. The former
+# RTSTPS=off branch (RDR made on the sync receiver) was retired 2026-11-20:
+# RT-STPS now runs only here, from the image.
 #
 # The Batch job downloads this script from S3 at startup so a redeploy takes
 # effect without rebuilding the SDR ECR image -- same no-image-rebuild property
 # as the CodeBuild buildspec approach. Deploy via scripts/deploy_aggregation_entrypoint.sh.
 #
 # Required env vars (set by Step Functions via ContainerOverrides.Environment):
-#   RTSTPS          "on" (async: CADU->RT-STPS->RDR->CSPP->SDR) or
-#                   "off" (sync: RDR already in S3->CSPP->SDR)
+#   RTSTPS          "on" (kept for compatibility with the job definition; the
+#                   only accepted value since the RTSTPS=off retirement)
 #   OUTPUT_BUCKET   S3 bucket; all artifacts under contacts/CONTACT_DATE/CONTACT_ID/
 #   CONTACT_ID      Ground Station contact UUID
 #   CONTACT_DATE    YYYY/MM/DD
 #   KMS_KEY_ID      CMK ARN or key ID for SSE-KMS uploads
 #
 # Optional:
+#   CADU_PREFIX     sub-prefix of the contact holding the *.cadu frames
+#                   (default "satdump"; sync passes "cadu")
+#   PN_ENCODED      "false" (default: frames already PN-derandomized, RT-STPS
+#                   jpss1.xml patched to skip the pn node) or "true" (frames
+#                   still PN-randomized: the image's pristine
+#                   config/jpss1.pn-encoded.xml is used unmodified)
+#   ASSETS_BUCKET   bucket holding the shared assets software/ (CSPP J01 LUTs)
+#                   and lut-cache/ (PERF-1); default OUTPUT_BUCKET for async, REQUIRED
+#                   when PN_ENCODED=true (fails if empty). The sync
+#                   pipeline passes the SDR output bucket so both paths share
+#                   one set of assets.
 #   RECEPTION_BUCKET  passed by the async SFN for parity; not used (all I/O
 #                     via OUTPUT_BUCKET -- see comments in scripts/aggregation.sh)
 #   CSPP_HOME / CSPP_SDR_HOME / CSPP_RT_HOME / RTSTPS_HOME  -- defaulted below
@@ -42,13 +61,27 @@ RTSTPS_HOME="${RTSTPS_HOME:-/opt/rt-stps}"
 # Validate required env vars -- before the EXIT trap so failures are fatal/noisy
 # ---------------------------------------------------------------------------
 case "${RTSTPS:-}" in
-    on|off) ;;
-    *) printf '[ERROR] RTSTPS must be "on" or "off" (got: "%s")\n' \
-           "${RTSTPS:-}" >&2
+    on) ;;
+    off) printf '[ERROR] RTSTPS=off was retired 2026-11-20: sync frames now go through RT-STPS here (CADU_PREFIX=cadu, PN_ENCODED=true)\n' >&2
+         exit 1 ;;
+    *) printf '[ERROR] RTSTPS must be "on" (got: "%s")\n' "${RTSTPS:-}" >&2
        exit 1 ;;
 esac
-
+case "${PN_ENCODED:=false}" in
+    true|false) ;;
+    *) printf '[ERROR] PN_ENCODED must be "true" or "false" (got: "%s")\n' "$PN_ENCODED" >&2
+       exit 1 ;;
+esac
+CADU_PREFIX="${CADU_PREFIX:-satdump}"
 : "${OUTPUT_BUCKET:?OUTPUT_BUCKET is required}"
+# ASSETS_BUCKET: async keeps the fallback (assets and output share a bucket).
+# Sync (PN_ENCODED=true) must name it: the sync bucket holds neither software/
+# nor lut-cache/, so a silent fallback only fails later on a missing LUT archive.
+if [ "$PN_ENCODED" = "true" ] && [ -z "${ASSETS_BUCKET:-}" ]; then
+    printf '[ERROR] ASSETS_BUCKET is required when PN_ENCODED=true (sync): the sync output bucket does not hold software/ or lut-cache/; refusing to fall back to OUTPUT_BUCKET\n' >&2
+    exit 1
+fi
+ASSETS_BUCKET="${ASSETS_BUCKET:-$OUTPUT_BUCKET}"
 : "${CONTACT_ID:?CONTACT_ID is required}"
 : "${CONTACT_DATE:?CONTACT_DATE is required}"
 : "${KMS_KEY_ID:?KMS_KEY_ID is required}"
@@ -120,8 +153,8 @@ fi
 # Without j01 LUTs, check_installation() aborts: "SDR_4_1_DB/package needs to
 # exist". Do NOT also extract straylight/static_tiles here -- they are already
 # in the image and the redundant ~10 GB fill the Batch root volume (DEPLOYMENT.md req 1).
-ts_log "INFO" "Step 1: extracting J01 shipped LUTs from s3://${OUTPUT_BUCKET}/software/"
-aws s3 cp "s3://${OUTPUT_BUCKET}/software/CSPP_SDR_V4.1_static_luts_j01.tar.gz" \
+ts_log "INFO" "Step 1: extracting J01 shipped LUTs from s3://${ASSETS_BUCKET}/software/"
+aws s3 cp "s3://${ASSETS_BUCKET}/software/CSPP_SDR_V4.1_static_luts_j01.tar.gz" \
     /tmp/j01luts.tgz
 tar xzf /tmp/j01luts.tgz -C /opt/
 rm -f /tmp/j01luts.tgz
@@ -141,8 +174,8 @@ ts_log "INFO" "Step 1: J01 shipped LUTs extracted OK"
 # CONVERGENCE FIX: aggregation_sync.yml always ran sdr_luts.sh unconditionally
 # (no PERF-1 cache). The converged entrypoint gives the sync branch the same
 # fast-path for the first time.
-ts_log "INFO" "Step 2: PERF-1 -- staging LUT DB from s3://${OUTPUT_BUCKET}/lut-cache/SDR_4_1_DB/"
-aws s3 sync "s3://${OUTPUT_BUCKET}/lut-cache/SDR_4_1_DB/" \
+ts_log "INFO" "Step 2: PERF-1 -- staging LUT DB from s3://${ASSETS_BUCKET}/lut-cache/SDR_4_1_DB/"
+aws s3 sync "s3://${ASSETS_BUCKET}/lut-cache/SDR_4_1_DB/" \
     "${CSPP_HOME}/anc/static/SDR_4_1_DB/" || true
 
 if test -e "${CSPP_HOME}/anc/static/SDR_4_1_DB/package"; then
@@ -160,24 +193,23 @@ else
 fi
 
 # ===========================================================================
-# Branch: RTSTPS=on  (async -- CADU -> RT-STPS -> RDR -> CSPP -> SDR/GEO)
+# The shared chain: frames in S3 -> RT-STPS -> RDR -> CSPP -> SDR/GEO
 #   Ports scripts/aggregation.sh, minus EC2/self-stop/watchdog logic.
 # ===========================================================================
-if [ "$RTSTPS" = "on" ]; then
 
-    ts_log "INFO" "=== async branch: CADU -> RT-STPS -> CSPP ==="
+    ts_log "INFO" "=== shared chain: frames (${CADU_PREFIX}/, PN_ENCODED=${PN_ENCODED}) -> RT-STPS -> CSPP ==="
 
     # -----------------------------------------------------------------------
     # Step 3a: Download .cadu files from S3
     # -----------------------------------------------------------------------
-    ts_log "INFO" "Step 3a: downloading .cadu from ${S3_PREFIX}/satdump/"
-    aws s3 sync "${S3_PREFIX}/satdump/" "${WORK_DIR}/cadu/" \
+    ts_log "INFO" "Step 3a: downloading .cadu from ${S3_PREFIX}/${CADU_PREFIX}/"
+    aws s3 sync "${S3_PREFIX}/${CADU_PREFIX}/" "${WORK_DIR}/cadu/" \
         --exclude '*' --include '*.cadu'
 
     CADU_COUNT=$(find "${WORK_DIR}/cadu" -name '*.cadu' | wc -l)
     ts_log "INFO" "Step 3a: downloaded ${CADU_COUNT} .cadu file(s)"
     if [ "$CADU_COUNT" -eq 0 ]; then
-        ts_log "ERROR" "No .cadu files in ${S3_PREFIX}/satdump/ -- aborting"
+        ts_log "ERROR" "No .cadu files in ${S3_PREFIX}/${CADU_PREFIX}/ -- aborting"
         exit 1
     fi
 
@@ -194,18 +226,30 @@ if [ "$RTSTPS" = "on" ]; then
 
     # -----------------------------------------------------------------------
     # Step 5a: Configure RT-STPS jpss1.xml
-    # Three munges (same as scripts/aggregation.sh):
-    #   1. PnEncoded="true" -> "false"  (data arrives PN-decoded from SatDump)
+    # PN_ENCODED=false (async, SatDump frames already PN-derandomized): three
+    # munges, same as scripts/aggregation.sh:
+    #   1. PnEncoded="true" -> "false"
     #   2. Delete the from="pn" to="reed_solomon" link node (bypass pn stage)
     #   3. from="frame_sync" to="pn" -> to="reed_solomon" (direct link)
+    # PN_ENCODED=true (sync, UncodedFramesEgress: no PN removal, no
+    # Reed-Solomon): use the pristine RT-STPS config the image keeps as
+    # config/jpss1.pn-encoded.xml, unmodified (frame_sync -> pn -> reed_solomon).
     # -----------------------------------------------------------------------
-    ts_log "INFO" "Step 5a: configuring RT-STPS jpss1.xml (PnEncoded=false, bypass pn)"
-    cp "${RTSTPS_HOME}/config/jpss1.xml" "${WORK_DIR}/jpss1.xml"
+    if [ "$PN_ENCODED" = "true" ]; then
+        PN_CONFIG="${RTSTPS_HOME}/config/jpss1.pn-encoded.xml"
+        test -s "$PN_CONFIG" \
+            || { ts_log "ERROR" "pristine RT-STPS config missing from image: ${PN_CONFIG} (rebuild the SDR image)"; exit 1; }
+        ts_log "INFO" "Step 5a: using pristine RT-STPS config (PnEncoded=true, pn node kept)"
+        cp "$PN_CONFIG" "${WORK_DIR}/jpss1.xml"
+    else
+        ts_log "INFO" "Step 5a: configuring RT-STPS jpss1.xml (PnEncoded=false, bypass pn)"
+        cp "${RTSTPS_HOME}/config/jpss1.xml" "${WORK_DIR}/jpss1.xml"
 
-    sed -i 's/PnEncoded="true"/PnEncoded="false"/' "${WORK_DIR}/jpss1.xml"
-    sed -i '/from="pn" to="reed_solomon"/d' "${WORK_DIR}/jpss1.xml"
-    sed -i 's|from="frame_sync" to="pn"|from="frame_sync" to="reed_solomon"|' \
-        "${WORK_DIR}/jpss1.xml"
+        sed -i 's/PnEncoded="true"/PnEncoded="false"/' "${WORK_DIR}/jpss1.xml"
+        sed -i '/from="pn" to="reed_solomon"/d' "${WORK_DIR}/jpss1.xml"
+        sed -i 's|from="frame_sync" to="pn"|from="frame_sync" to="reed_solomon"|' \
+            "${WORK_DIR}/jpss1.xml"
+    fi
 
     # -----------------------------------------------------------------------
     # Step 6a: Clear /opt/data stale files, then run RT-STPS
@@ -270,61 +314,28 @@ if [ "$RTSTPS" = "on" ]; then
         ts_log "INFO" "Step 8a: no RDR files to upload"
     fi
 
-# ===========================================================================
-# Branch: RTSTPS=off  (sync -- RDR already uploaded -> CSPP -> SDR/GEO)
-#   Ports buildspecs/aggregation_sync.yml.
-# ===========================================================================
-else
-
-    ts_log "INFO" "=== sync branch: RDR -> CSPP -> SDR/GEO ==="
-
     # -----------------------------------------------------------------------
-    # Step 3b: Download pre-made RDR from S3
-    # The sync receiver (scripts/sync_receiver_finish.sh) ran RT-STPS right
-    # after LOS and uploaded the RDR; it is already in S3 when we start.
+    # Step 9a: output contract for the sync configuration (PN_ENCODED=true).
+    # A sync contact exists to produce imagery: zero VIIRS RDR or zero SDR/GEO
+    # means the capture was not parsed (bad framing / PN), so the job must FAIL
+    # rather than report a green pass with an empty sdr/ prefix. Runs after the
+    # uploads so any RDR evidence is preserved. Async (PN_ENCODED=false) keeps
+    # warn-and-continue for non-VIIRS passes.
     # -----------------------------------------------------------------------
-    ts_log "INFO" "Step 3b: downloading RDR from ${S3_PREFIX}/rdr/"
-    aws s3 sync "${S3_PREFIX}/rdr/" "${WORK_DIR}/rdr/" \
-        --exclude '*' --include '*.h5'
-
-    VIIRS_RDR=$(find "${WORK_DIR}/rdr" -name 'RNSCA-RVIRS*.h5' | sort | head -1)
-    if [ -z "$VIIRS_RDR" ]; then
-        ts_log "ERROR" "No VIIRS RDR (RNSCA-RVIRS*.h5) in ${S3_PREFIX}/rdr/ -- aborting (did sync_receiver_finish.sh run successfully?)"
-        exit 1
-    fi
-    ts_log "INFO" "Step 3b: VIIRS RDR: ${VIIRS_RDR}"
-
-    # -----------------------------------------------------------------------
-    # Step 4b: Run CSPP SDR
-    # -----------------------------------------------------------------------
-    ts_log "INFO" "Step 4b: running CSPP viirs_sdr.sh"
-    export CSPP_SDR_HOME
-    export CSPP_RT_HOME
-    "${CSPP_HOME}/bin/viirs_sdr.sh" --work-dir "${WORK_DIR}/sdr" -p 4 \
-        "$VIIRS_RDR" >> "$CSPP_LOG" 2>&1
-
-    SDR_COUNT=$(find "${WORK_DIR}/sdr" \( -name 'SV*.h5' -o -name 'G*.h5' \) | wc -l)
-    ts_log "INFO" "Step 4b: CSPP SDR produced ${SDR_COUNT} SDR/GEO HDF5 file(s)"
-
-    if [ "$SDR_COUNT" -eq 0 ]; then
-        ts_log "ERROR" "CSPP SDR produced no output -- aborting"
-        exit 1
+    if [ "$PN_ENCODED" = "true" ]; then
+        if [ -z "$VIIRS_RDR" ]; then
+            ts_log "ERROR" "Step 9a: sync contact produced no VIIRS RDR (RNSCA-RVIRS*.h5; ${RDR_COUNT} other RDR file(s)) -- failing the job"
+            exit 1
+        fi
+        if [ "$SDR_COUNT" -eq 0 ]; then
+            ts_log "ERROR" "Step 9a: sync contact: CSPP produced zero SDR/GEO files from ${VIIRS_RDR} -- failing the job"
+            exit 1
+        fi
     fi
 
-    # -----------------------------------------------------------------------
-    # Step 5b: Upload SDR/GEO to S3
-    # RDR is already in S3 (uploaded by sync_receiver_finish.sh) -- no re-upload.
-    # -----------------------------------------------------------------------
-    ts_log "INFO" "Step 5b: uploading ${SDR_COUNT} SDR/GEO files to ${S3_PREFIX}/sdr/"
-    aws s3 sync "${WORK_DIR}/sdr/" "${S3_PREFIX}/sdr/" \
-        --exclude '*' --include '*.h5' \
-        --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID"
-    ts_log "INFO" "Step 5b: SDR/GEO upload complete"
-
-fi
 
 # ===========================================================================
 # Done
 # ===========================================================================
-ts_log "INFO" "aggregation_entrypoint.sh complete: RTSTPS=${RTSTPS} contact=${CONTACT_ID} SDR_COUNT=${SDR_COUNT}"
+ts_log "INFO" "aggregation_entrypoint.sh complete: CADU_PREFIX=${CADU_PREFIX} PN_ENCODED=${PN_ENCODED} contact=${CONTACT_ID} SDR_COUNT=${SDR_COUNT}"
 # EXIT trap uploads aggregation.log (and cspp_sdr.log if present) to S3.

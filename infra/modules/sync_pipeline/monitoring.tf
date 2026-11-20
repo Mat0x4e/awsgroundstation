@@ -131,11 +131,43 @@ resource "aws_cloudwatch_metric_alarm" "sync_pipeline_execution_failures" {
 }
 
 ###############################################################################
+# Step Functions -- execution timeouts. A budget overrun is reported as
+# ExecutionsTimedOut and bypasses every Catch block, so the SNS notification
+# from AggregationFailure/ReceiverFailure never fires; this alarm is the only
+# signal for it.
+###############################################################################
+
+resource "aws_cloudwatch_metric_alarm" "sync_pipeline_execution_timeouts" {
+  alarm_name          = "${var.project_name}-sync-pipeline-execution-timeouts"
+  alarm_description   = "Sync pipeline Step Functions execution timed out (Catch/SNS paths are skipped on timeout)"
+  namespace           = "AWS/States"
+  metric_name         = "ExecutionsTimedOut"
+  statistic           = "Sum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+
+  dimensions = {
+    StateMachineArn = aws_sfn_state_machine.sync_pipeline.arn
+  }
+
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [var.sns_topic_arn]
+
+  tags = merge(var.tags, {
+    Name    = "${var.project_name}-sync-pipeline-execution-timeouts"
+    Service = "sync-pipeline"
+  })
+}
+
+###############################################################################
 # Task 6.1 (mirror) — /opt/* drift detected on sync receiver EC2 (R5-AC2, OE-2)
 #
 # Mirror of sdr_pipeline/monitoring.tf's opt_drift alarm. The SSM association in
 # ssm_drift_check.tf emits OptDriftDetected=1 (namespace SyncPipeline) when
-# /opt/rt-stps or /opt/rt-stps/config/jpss1.xml is missing or empty on the receiver.
+# a receiver helper script (/opt/scripts/sync_receiver_*.sh) is missing or not executable.
 #
 # The receiver is normally stopped between passes. treat_missing_data=notBreaching
 # means no data during stopped periods is not treated as drift.
@@ -143,7 +175,7 @@ resource "aws_cloudwatch_metric_alarm" "sync_pipeline_execution_failures" {
 
 resource "aws_cloudwatch_metric_alarm" "opt_drift" {
   alarm_name          = "${var.project_name}-sync-receiver-opt-drift"
-  alarm_description   = "Hand-installed /opt/rt-stps or jpss1.xml absent or empty on sync receiver EC2 -- manual restoration required before next pass (OE-2)"
+  alarm_description   = "Hand-installed /opt/scripts/sync_receiver_* helper missing or not executable on sync receiver EC2 -- manual restoration required before next pass (OE-2)"
   namespace           = "SyncPipeline"
   metric_name         = "OptDriftDetected"
   statistic           = "Maximum"
@@ -203,6 +235,51 @@ resource "aws_cloudwatch_metric_alarm" "receiver_ready_failure" {
 
   tags = merge(var.tags, {
     Name    = "${var.project_name}-sync-receiver-ready-failure"
+    Service = "sync-pipeline"
+  })
+}
+
+###############################################################################
+# Swallowed visualization failure (sync mirror of sdr_pipeline)
+#
+# StartVisualization is best effort (products are already in S3), so its Catch
+# routes to NotifyVisualizationFailed, which publishes SNS and continues to
+# PipelineSucceeded. This metric filter counts entries into that state in the
+# SFN execution log (level=ALL) so a systematic render defect raises an alarm
+# instead of hiding behind a green execution.
+###############################################################################
+
+resource "aws_cloudwatch_log_metric_filter" "visualization_failed" {
+  name           = "${var.project_name}-sync-visualization-failed"
+  log_group_name = aws_cloudwatch_log_group.sfn.name
+
+  pattern = "{ $.details.name = \"NotifyVisualizationFailed\" }"
+
+  metric_transformation {
+    name          = "VisualizationFailed"
+    namespace     = "SyncPipeline"
+    value         = "1"
+    default_value = 0
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "visualization_failed" {
+  alarm_name          = "${var.project_name}-sync-visualization-failed"
+  alarm_description   = "Sync pipeline visualization step took its catch path -- no imagery rendered (products are in S3)"
+  namespace           = "SyncPipeline"
+  metric_name         = "VisualizationFailed"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [var.sns_topic_arn]
+
+  tags = merge(var.tags, {
+    Name    = "${var.project_name}-sync-visualization-failed"
     Service = "sync-pipeline"
   })
 }

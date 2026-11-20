@@ -1,3 +1,8 @@
+NOTE (2026-11-20): both diagrams below are HISTORICAL. Since the sync path joined the shared
+aggregation chain (RT-STPS no longer on the receiver, RTSTPS=off and the sync CodeBuild fallback
+retired), the current two-pipeline diagram is in docs/ARCHITECTURE.md, section
+'Architecture principle: converge early, mutualize the rest'.
+
 • Here is the full pipeline — current (CodeBuild) and target (all-Batch) — both branches, end to end.
 
   ═══════════════════════════════════════════════════════════════════════════════════════════════

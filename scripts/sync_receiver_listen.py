@@ -50,6 +50,8 @@ Stops on SIGTERM (sent by sync_receiver_finish.sh) or SIGINT, flushing and
 closing the output file cleanly first.
 """
 
+from __future__ import annotations
+
 import argparse
 import contextlib
 import json
@@ -59,6 +61,7 @@ import socket
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 logging.basicConfig(
     level=logging.INFO,
@@ -92,7 +95,7 @@ def _handle_signal(signum, _frame):
     _shutdown = True
 
 
-def extract_frame_payload(packet: bytes) -> bytes | None:
+def extract_frame_payload(packet: bytes) -> Optional[bytes]:
     """Strip the VITA-49-style header from one UDP payload, returning the
     decoded-frame bytes, or None if the packet is not a Signal Data packet
     (e.g. a Context packet, which carries link metadata, not frame data).

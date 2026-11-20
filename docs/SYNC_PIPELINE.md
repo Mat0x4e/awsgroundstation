@@ -198,14 +198,13 @@ against the same satellite.
 
 ## Choosing which pipeline runs for a given contact
 
-**The mission profile ARN you reserve the contact against decides which pipeline runs** - with
-one known gap. The **sync** rules (`infra/modules/sync_pipeline/eventbridge.tf`) filter on
-`detail.missionProfileArn`, so an async contact never triggers the sync pipeline. The **async**
-rule `contact-completed-sdr` (`infra/modules/sdr_pipeline/eventbridge.tf`) filters only on
-`contactStatus = COMPLETED`, **not** on the mission profile (checked in code 2026-11-19). A sync
-contact therefore also starts the async SDR state machine, which finds no `.pcap` chunks in S3.
-Its exact behaviour on zero chunks has not been observed. Fix it (add the async profile ARN to
-that rule's pattern) before the first sync contact - see the checklist below.
+**The mission profile ARN you reserve the contact against decides which pipeline runs.** Both
+pipelines' EventBridge rules filter on `detail.missionProfileArn` (`eventbridge.tf` in
+`sync_pipeline` and `sdr_pipeline`), so a contact reserved on one profile never triggers the other
+state machine. The async rule only matches the Terraform-managed profile (`mission_profile_arn`
+output); a contact booked on the legacy unmanaged `2655b0f6-...` profile triggers nothing.
+(Until 2026-11-19 the async rule matched any COMPLETED contact, so a sync contact would also have
+started the async state machine.)
 
 ```bash
 # Async (DigIF) — existing pipeline
@@ -244,9 +243,10 @@ A first sync contact is a **packet-format experiment**, not a production pass: e
 frame sync to fail on the first try. The goal is a raw capture you can inspect. Do the steps in
 order; each one is cheap except step 6 (paid, ~$105 at Stockholm 1, explicit user go-ahead).
 
-1. **Fix the async rule overlap** (Terraform, plan then apply with agreement): add the async
-   profile ARN to `contact-completed-sdr`'s event pattern, so a sync contact does not also start
-   the async state machine (see "Choosing which pipeline runs" above).
+1. **Check the async rule is scoped**: `contact-completed-sdr`'s event pattern must contain
+   `missionProfileArn` (done 2026-11-19; `aws events describe-rule --name
+   groundstation-noaa20-contact-completed-sdr`). Otherwise a sync contact also starts the async
+   state machine.
 2. **Install the receiver prerequisites.** Start `groundstation-noaa20-sync-receiver`
    (`i-06a51f5b29e26aeaa`, stopped between contacts), then via SSM install the files listed in
    "Manual prerequisites" above: the three `/opt/scripts/sync_receiver_*` scripts from this repo

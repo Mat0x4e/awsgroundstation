@@ -71,9 +71,12 @@ cd docker/sdr-pipeline && bash build.sh
 
 The scheduler cron is **DISABLED on purpose** — enabling it previously booked two
 unintended paid contacts. Reserve manually, and rank against the real offer set rather
-than a propagator alone:
+than a propagator alone. **Use the Terraform-managed profile**: each pipeline only triggers on its
+own mission profile (async: `mission_profile_arn`; sync: `sync_pipeline_mission_profile_arn`).
 
 ```bash
+MP=$(terraform -chdir=infra output -raw mission_profile_arn)      # async DigIF
+SAT=arn:aws:groundstation::471112743408:satellite/33f035e1-73f7-47a5-9df8-fbc48636dca8
 aws groundstation list-contacts --status-list AVAILABLE \
   --ground-station "Stockholm 1" --mission-profile-arn "$MP" --satellite-arn "$SAT" \
   --start-time <now> --end-time <now+7d> > contacts.json

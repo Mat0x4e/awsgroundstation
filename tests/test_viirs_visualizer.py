@@ -593,3 +593,79 @@ class TestBatchDispatchMetricContract:
         assert len(batch.calls) == 1, "Batch must be dispatched"
         # Regression gate — Lambda must NOT publish at dispatch time.
         mock_cw.put_metric_data.assert_not_called()
+
+
+class TestEventBucketCarriedToRender:
+    """The event bucket (sync bucket for sync contacts) must reach both the
+    ListObjectsV2 call and the render job's INPUT_BUCKET; the Terraform-fixed
+    async bucket is only the default when the event has no bucket."""
+
+    ASYNC_BUCKET = "async-sdr-bucket"
+    SYNC_BUCKET = "sync-contacts-bucket"
+    KEY = "contacts/2026/11/22/c0ffee/manifest.json"
+
+    def _seed(self, s3, bucket: str) -> None:
+        s3.create_bucket(Bucket=bucket)
+        s3.put_object(
+            Bucket=bucket,
+            Key="contacts/2026/11/22/c0ffee/sdr/SVM15_j01_d20261122.h5",
+            Body=b"x",
+        )
+
+    def _orch(self, s3, batch):
+        return handler.VisualizationOrchestrator(
+            s3_client=s3,
+            codebuild_client=FakeCodeBuild(),
+            batch_client=batch,
+            input_bucket=self.ASYNC_BUCKET,
+            render_compute="batch",
+            batch_job_queue="q",
+            batch_job_definition="d",
+            kms_key_id="arn:kms:...",
+            enable_geotiff="false",
+            enable_destripe="true",
+        )
+
+    @mock_aws
+    def test_sync_event_bucket_used_for_listing_and_render_job(self):
+        s3 = boto3.client("s3", region_name="us-east-1")
+        # Objects exist ONLY in the sync bucket: listing the async bucket would
+        # find nothing and the job would never be dispatched.
+        s3.create_bucket(Bucket=self.ASYNC_BUCKET)
+        self._seed(s3, self.SYNC_BUCKET)
+        batch = FakeBatch()
+
+        result = self._orch(s3, batch).handle({"bucket": self.SYNC_BUCKET, "key": self.KEY})
+
+        assert result["path"] == "nasa"
+        assert len(batch.calls) == 1
+        assert _env_map(batch.calls[0])["INPUT_BUCKET"] == self.SYNC_BUCKET
+
+    @mock_aws
+    def test_async_default_bucket_used_when_event_has_no_bucket(self):
+        s3 = boto3.client("s3", region_name="us-east-1")
+        self._seed(s3, self.ASYNC_BUCKET)
+        batch = FakeBatch()
+
+        result = self._orch(s3, batch).handle({"key": self.KEY})
+
+        assert result["path"] == "nasa"
+        assert _env_map(batch.calls[0])["INPUT_BUCKET"] == self.ASYNC_BUCKET
+
+    @mock_aws
+    def test_event_bucket_reaches_codebuild_env(self):
+        s3 = boto3.client("s3", region_name="us-east-1")
+        self._seed(s3, self.SYNC_BUCKET)
+        cb = FakeCodeBuild()
+        orch = handler.VisualizationOrchestrator(
+            s3_client=s3,
+            codebuild_client=cb,
+            input_bucket=self.ASYNC_BUCKET,
+            codebuild_project="project",
+            enable_geotiff="false",
+        )
+
+        orch.handle({"bucket": self.SYNC_BUCKET, "key": self.KEY})
+
+        env = {e["name"]: e["value"] for e in cb.calls[0]["environmentVariablesOverride"]}
+        assert env["INPUT_BUCKET"] == self.SYNC_BUCKET

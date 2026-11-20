@@ -485,3 +485,42 @@ count=14) were confirmed this way before Stage 3 was called done.
 branch, rebuild the image with `--source-version <branch>` and verify the ECR push time advanced,
 BEFORE running any validation -- and prefer verifying the job's product/metric evidence over its
 exit status.
+
+---
+
+## EC2 with a Secondary ENI Gets No Public IP -- SSM Silently Never Registers
+
+**Symptom**: instance `running`, status checks `ok`, role has `AmazonSSMManagedInstanceCore`,
+yet `aws ssm describe-instance-information` never lists it and `list-commands` shows no
+command was ever run. Every SSM Run Command step (PREPASS arm, post-contact finish) would fail.
+
+**Root cause**: the sync receiver has a second ENI (the Ground Station dataflow ENI, device 1).
+AWS does not auto-assign a public IPv4 to an instance with more than one network interface,
+even in a subnet with `MapPublicIpOnLaunch = true`. The default VPC has an IGW but no NAT and
+no VPC endpoints, so the SSM agent (and `aws s3 cp`) has no egress path.
+
+**❌ INCORRECT**: assume "public subnet + IGW + SSM role" is enough for a multi-ENI instance.
+
+**✅ CORRECT**: give the primary ENI an egress path -- an `aws_eip` on
+`aws_instance.X.primary_network_interface_id` (cheap), or VPC endpoints for ssm, ssmmessages,
+ec2messages, kms, monitoring + an S3 gateway endpoint (no public IP, ~40 USD/month).
+
+**Rule**: after creating any instance driven by SSM, start it once and confirm it shows
+`PingStatus = Online`. "Healthy" EC2 status checks say nothing about SSM reachability.
+
+---
+
+## Amazon Linux 2023 Ships Python 3.9 -- PEP 604 Annotations Crash at Import
+
+**Symptom**: `TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'` at a
+`def f(...) -> bytes | None:` line; a nohup'd listener dies before binding. Local tests pass
+because the dev box runs Python 3.12.
+
+**❌ INCORRECT**: `def extract(packet: bytes) -> bytes | None:` in a script that runs on the
+instance's system python3 (3.9).
+
+**✅ CORRECT**: `from __future__ import annotations` at the top (or `Optional[bytes]`), and a test
+that parses the file with `ast.parse(src, feature_version=(3, 9))`.
+
+**Rule**: scripts executed by the instance's system interpreter must target that interpreter's
+version, not the dev venv's. Dry-run them on the real instance before a paid contact.

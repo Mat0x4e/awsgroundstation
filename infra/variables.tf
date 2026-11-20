@@ -67,8 +67,10 @@ variable "enable_sync_pipeline" {
     Fully separate from enable_sdr_pipeline's async DigIF pipeline -- both can
     be enabled simultaneously against the same satellite, each with its own
     mission profile. Requires ground_station_enabled = true and
-    enable_sdr_pipeline = true (the sync pipeline reuses the SDR pipeline's
-    ECR image for its CSPP-only CodeBuild step).
+    enable_sdr_pipeline = true and enable_batch_compute = true: post-contact
+    aggregation is the SAME shared Batch job definition as the async pipeline
+    (sdr-pipeline ECR image), and its ASSETS_BUCKET (CSPP J01 LUTs under
+    software/ and lut-cache/) is the SDR output bucket.
   EOT
   type        = bool
   default     = false

@@ -43,8 +43,20 @@ resource "aws_sfn_state_machine" "sync_pipeline" {
   type     = "STANDARD"
 
   definition = jsonencode({
-    Comment        = "NOAA-20 synchronous demod/decode pipeline — receiver handoff + shared Batch aggregation + visualization"
-    TimeoutSeconds = 5400
+    Comment = "NOAA-20 synchronous demod/decode pipeline — receiver handoff + shared Batch aggregation + visualization"
+    # Budget (worst case, single aggregation attempt):
+    #   WaitForDelivery                     30 s
+    #   FinishReceiver (SSM executionTimeout) 1800 s
+    #   WaitForFinish/CheckFinishStatus poll   ~60 s (30 s cadence + last poll)
+    #   StopReceiver                          ~10 s
+    #   SubmitBatchAggregation (Batch attempt_duration_seconds) 3600 s
+    #   StartVisualization (+ 2 retries 5 s/10 s)  ~60 s
+    #   NotifyVisualizationFailed / SNS             ~5 s
+    #   total                               ~5565 s
+    # 7200 s leaves ~27 percent headroom, so Batch's own 3600 s timeout always
+    # fires first and the Catch/SNS path runs (the previous 5400 s was below the
+    # worst case, and Step Functions timeouts skip Catch blocks).
+    TimeoutSeconds = 7200
     StartAt        = "DeriveDateOnly"
 
     States = {
@@ -289,14 +301,11 @@ resource "aws_sfn_state_machine" "sync_pipeline" {
           }
         }
         ResultPath = "$.aggregation_batch"
-        Retry = [
-          {
-            ErrorEquals     = ["States.TaskFailed", "Batch.AWSBatchException"]
-            IntervalSeconds = 30
-            MaxAttempts     = 2
-            BackoffRate     = 2.0
-          }
-        ]
+        # Deliberately NO Retry: a single attempt, so a failed or timed-out Batch
+        # job (attempt_duration_seconds = 3600, enforced by Batch itself) always
+        # lands on the Catch -> AggregationFailure -> SNS path. A retry cannot
+        # finish inside the execution budget (see TimeoutSeconds) and a Step
+        # Functions timeout skips Catch blocks (silent loss of the pass).
         Catch = [
           {
             ErrorEquals = ["States.ALL"]

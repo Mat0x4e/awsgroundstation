@@ -29,6 +29,37 @@ The open gate is the packet-format check on a first real sync contact.
 
 ---
 
+## Architecture principle: converge early, mutualize the rest
+
+**The two downlink paths converge at the first artifact they have in common, and share
+everything after it.** Anything that can be one component is one component: one code path,
+one container image, one job definition, one set of assets, one operating procedure. A
+path-specific component is acceptable only where the data genuinely differs.
+
+Applied (2026-11-20):
+
+| Stage | Async (DigIF) | Sync (demod/decode) | Shared? |
+|---|---|---|---|
+| Reception | DigIF `.pcap` in S3 | live UDP to the receiver EC2 | no - different by nature |
+| Demodulation + Viterbi | SatDump (Batch fan-out) | AWS antenna | no - different by nature |
+| **First common artifact** | CCSDS frames in S3 (`satdump/*.cadu`, PN removed) | CCSDS frames in S3 (`cadu/combined.cadu`, PN still applied) | **yes, from here on** |
+| RT-STPS -> RDR, CSPP -> SDR/GEO | aggregation Batch job | **same job**, same image, `CADU_PREFIX=cadu PN_ENCODED=true` | yes |
+| CSPP assets (J01 LUTs, LUT cache) | SDR output bucket | **same** (`ASSETS_BUCKET`) | yes |
+| Visualization + render | `viirs-orchestrator` + render Batch job | **same** | yes |
+
+Consequences:
+- The sync receiver only captures and uploads (`/opt/scripts`); it no longer runs RT-STPS,
+  so there is no hand-installed `/opt/rt-stps` to drift.
+- Every sync capture is replayable from S3 through the same job, like an async contact.
+- A fix to the shared chain (RT-STPS, CSPP, rendering) lands once and is validated by both paths.
+
+The remaining differences are deliberate: the PN setting (the antenna's
+`UncodedFramesEgress` keeps PN and skips Reed-Solomon; SatDump removes both) and the output
+bucket per pipeline (contact data stays where each pipeline's IAM scopes it). Merging the two
+output buckets is the next mutualization candidate, not done yet.
+
+---
+
 ## The cinematic — one contact, end to end
 
 Times are relative to AOS, measured on contact `ba2c5446` (2026-08-31, Stockholm 1,

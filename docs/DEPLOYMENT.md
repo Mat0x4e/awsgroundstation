@@ -78,9 +78,9 @@ deployed to `s3://.../software/aggregation_entrypoint.sh` by
 [`../scripts/deploy_aggregation_entrypoint.sh`](../scripts/deploy_aggregation_entrypoint.sh);
 the AWS Batch aggregation job downloads and execs it at container start (so a script update
 takes effect without rebuilding the ECR image). The former
-`buildspecs/aggregation.yml` is no longer read by Terraform and is effectively retired
-(`aggregation_sync.yml` is still `file()`-read, but only on the CodeBuild **sync fallback**
-branch). Reference/diagnostic buildspec: `../scripts/cspp_viirs_sdr.yml`.
+`buildspecs/aggregation.yml` is no longer read by Terraform and is effectively retired; the sync
+CodeBuild fallback and `aggregation_sync.yml` were removed on 2026-11-20 (the sync path uses the
+same aggregation job, `PN_ENCODED=true`). Reference/diagnostic buildspec: `../scripts/cspp_viirs_sdr.yml`.
 
 ### Not the cause — do not re-litigate
 

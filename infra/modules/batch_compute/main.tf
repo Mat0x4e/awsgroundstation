@@ -607,6 +607,11 @@ resource "aws_batch_job_definition" "aggregation" {
       { name = "CONTACT_ID", value = "" },
       { name = "CONTACT_DATE", value = "" },
       { name = "KMS_KEY_ID", value = "" },
+      # Sync steering variables (empty = async behaviour; the sync state machine
+      # overrides them at submit time: cadu / true / the SDR output bucket).
+      { name = "CADU_PREFIX", value = "" },
+      { name = "PN_ENCODED", value = "" },
+      { name = "ASSETS_BUCKET", value = "" },
     ]
 
     jobRoleArn       = aws_iam_role.batch_aggregation_job.arn

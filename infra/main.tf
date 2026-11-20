@@ -136,6 +136,9 @@ module "sdr_pipeline" {
   satellite_id      = var.satellite_id
   tags              = local.common_tags
 
+  # Only contacts booked on the Terraform-managed async profile start this pipeline.
+  mission_profile_arn = var.ground_station_enabled ? module.mission_profile[0].mission_profile_arn : ""
+
   # clean-compute-pipeline Stage 1 strangler wiring.
   # Cycle broken via deterministic-ARN locals: module.batch_compute already reads
   # module.sdr_pipeline outputs (ECR URL, output bucket). Referencing

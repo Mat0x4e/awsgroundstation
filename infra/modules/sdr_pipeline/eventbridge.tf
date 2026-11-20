@@ -23,6 +23,12 @@
 #
 # Ground Station Contact State Change fires once, after the contact ends, when
 # every chunk has been delivered. That is the correct trigger granularity.
+#
+# The rule is also scoped to the async mission profile (missionProfileArn). A
+# contact reserved on the sync profile must NOT start this async pipeline (the
+# sync_pipeline module has its own rules, filtered on the sync profile), so
+# bookings must use the Terraform-managed async profile passed in as
+# var.mission_profile_arn.
 
 ###############################################################################
 # EventBridge Rule — Ground Station contact COMPLETED
@@ -36,7 +42,8 @@ resource "aws_cloudwatch_event_rule" "contact_completed" {
     source        = ["aws.groundstation"]
     "detail-type" = ["Ground Station Contact State Change"]
     detail = {
-      contactStatus = ["COMPLETED"]
+      contactStatus     = ["COMPLETED"]
+      missionProfileArn = [var.mission_profile_arn]
     }
   })
 

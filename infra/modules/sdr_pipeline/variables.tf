@@ -23,6 +23,11 @@ variable "sns_topic_arn" {
   type        = string
 }
 
+variable "mission_profile_arn" {
+  description = "ARN of the Terraform-managed async (DigIF) mission profile; only contacts booked on it start the SDR pipeline, so a sync-profile contact never triggers it"
+  type        = string
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

@@ -378,7 +378,8 @@ resource "aws_iam_role_policy" "batch_execution" {
 # reads frames from contacts/*/cadu/ and writes rdr/, sdr/ and logs/ under
 # contacts/* of the sync bucket. software/ and lut-cache/ stay in the SDR
 # output bucket (ASSETS_BUCKET), already covered above. Empty when the sync
-# pipeline is disabled.
+# pipeline is disabled. No DeleteObject: the entrypoint only lists, reads and
+# writes (no aws s3 rm, no sync --delete), and raw/ must not be erasable.
 locals {
   sync_agg_statements = [for s in [
     {
@@ -387,7 +388,6 @@ locals {
       Action = [
         "s3:GetObject",
         "s3:PutObject",
-        "s3:DeleteObject",
       ]
       Resource = "${var.sync_output_bucket_arn}/contacts/*"
     },

@@ -168,4 +168,9 @@ variable "batch_aggregation_job_definition_arn" {
 variable "assets_bucket_name" {
   description = "Name of the SDR output bucket, which holds software/ (CSPP J01 LUT tarball) and lut-cache/. Passed to the shared aggregation job as ASSETS_BUCKET; the sync bucket has neither prefix."
   type        = string
+
+  validation {
+    condition     = length(var.assets_bucket_name) > 0
+    error_message = "assets_bucket_name must be set: the shared aggregation job reads the CSPP LUT assets from the SDR output bucket, so enable_sync_pipeline requires enable_sdr_pipeline = true."
+  }
 }

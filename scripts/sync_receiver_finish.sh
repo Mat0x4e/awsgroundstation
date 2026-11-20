@@ -80,9 +80,15 @@ fi
 RAW_CAPTURE_FILE="${WORK_DIR}/raw_capture.bin"
 if [ -f "$RAW_CAPTURE_FILE" ] && [ -s "$RAW_CAPTURE_FILE" ]; then
     log_json "INFO" "Uploading raw UDP tee capture to ${S3_PREFIX}/raw/"
-    aws s3 cp "$RAW_CAPTURE_FILE" "${S3_PREFIX}/raw/raw_capture.bin" \
-        --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID"
-    log_json "INFO" "Raw capture upload complete"
+    # Best-effort: the raw tee is evidence only. A failure here (it is the
+    # larger file) must never block the parsed capture upload in Step 3, which
+    # is what the aggregation job consumes.
+    if aws s3 cp "$RAW_CAPTURE_FILE" "${S3_PREFIX}/raw/raw_capture.bin" \
+        --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID"; then
+        log_json "INFO" "Raw capture upload complete"
+    else
+        log_json "WARN" "Raw capture upload failed -- continuing with the parsed capture upload"
+    fi
 else
     log_json "INFO" "No raw tee capture found -- skipping raw/ upload"
 fi

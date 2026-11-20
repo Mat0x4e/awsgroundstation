@@ -5,12 +5,15 @@ Covers:
               RECEIVING_MARKER written on first packet arrival.
   - Task 9.2: --raw-tee writes every raw UDP payload to the tee path AND
               the normal parsed-frame bytes to the main output in the same run.
+  - Python 3.9 compatibility: `from __future__ import annotations` is present
+                              and no PEP 604 (X | Y) syntax is used at runtime.
 
 Sockets are fully mocked -- no real UDP traffic is opened.  The _MockSocket
 helper feeds packets from a fixed list, then sets _shutdown and raises
 socket.timeout so main() exits cleanly.
 """
 
+import ast
 import socket
 import sys
 from pathlib import Path
@@ -216,3 +219,86 @@ class TestRawTee:
         _run_main(tmp_path, extra_args=["--raw-tee", str(tee_path)], packets=[])
         assert tee_path.exists(), "--raw-tee file must be created even with no packets"
         assert tee_path.read_bytes() == b"", "Tee file must be empty when no packets arrived"
+
+
+
+# ---------------------------------------------------------------------------
+# Python 3.9 compatibility tests
+# ---------------------------------------------------------------------------
+
+
+class TestPython39Compatibility:
+    """Regression tests to ensure sync_receiver_listen.py is importable on Python 3.9.
+    
+    PEP 604 type union syntax (X | Y) was added in Python 3.10 and requires
+    `from __future__ import annotations` to work on 3.9. This test verifies the fix.
+    """
+
+    def test_from_future_annotations_present(self):
+        """The module must have `from __future__ import annotations` as the first import."""
+        source = Path(__file__).parent.parent / "scripts" / "sync_receiver_listen.py"
+        with open(source) as f:
+            lines = f.readlines()
+
+        # Find the first non-docstring, non-shebang line
+        import_found = False
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            # Skip shebang, docstring, and blank lines
+            if stripped.startswith("#!") or stripped.startswith('"""') or stripped.startswith("'''") or not stripped:
+                continue
+            # First real statement should be the __future__ import
+            if "__future__" in line and "annotations" in line:
+                import_found = True
+                break
+            # If we hit any other import before __future__, fail
+            if stripped.startswith("import ") or stripped.startswith("from "):
+                break
+
+        assert import_found, (
+            "`from __future__ import annotations` must be present as the first import "
+            "(after docstring) to support PEP 604 syntax on Python 3.9"
+        )
+
+    def test_ast_parses_with_python39_feature_version(self):
+        """The module must parse successfully when AST is set to Python 3.9 compatibility.
+        
+        This catches any PEP 604 (X | Y) syntax, PEP 617 pattern matching (match/case),
+        or other Python 3.10+ features that would fail on 3.9.
+        """
+        source = Path(__file__).parent.parent / "scripts" / "sync_receiver_listen.py"
+        with open(source) as f:
+            source_code = f.read()
+
+        # This will raise SyntaxError if the code uses Python 3.10+ syntax
+        # (e.g., `bytes | None` instead of `Optional[bytes]`)
+        try:
+            ast.parse(source_code, feature_version=(3, 9))
+        except SyntaxError as e:
+            pytest.fail(
+                f"Module contains Python 3.10+ syntax that is not compatible with Python 3.9: {e}"
+            )
+
+    def test_no_pep604_unions_in_annotations(self):
+        """Verify no bare PEP 604 union syntax (X | Y) appears outside of string annotations.
+        
+        With `from __future__ import annotations`, all annotations are strings at
+        definition time, so they're safe. But any runtime use of `X | Y` (e.g. in
+        `isinstance(x, int | str)`) would still fail on 3.9.
+        """
+        source = Path(__file__).parent.parent / "scripts" / "sync_receiver_listen.py"
+        with open(source) as f:
+            source_code = f.read()
+
+        tree = ast.parse(source_code)
+
+        # Walk the AST looking for BinOp nodes with BitOr operator outside of strings
+        for node in ast.walk(tree):
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+                # This is a `|` operator used at runtime (not in an annotation string)
+                # which would fail on 3.9
+                pytest.fail(
+                    f"Found PEP 604 union syntax (X | Y) at runtime (line {node.lineno}). "
+                    "This will fail on Python 3.9. Use `Union[X, Y]` or "
+                    "`isinstance(x, (X, Y))` instead."
+                )

@@ -62,6 +62,9 @@ COPY enable_satdump_projection.py /opt/scripts/enable_satdump_projection.py
 # -------------------------------------------------------------------
 # RT-STPS 7.0 + Patch 1 (NASA/CIMSS) — CADU → RDR (HDF5 Level 0)
 # Full NOAA-20/JPSS-1/JPSS-2 support
+# Keep the pristine config as config/jpss1.pn-encoded.xml (PnEncoded="true",
+# frame_sync -> pn -> reed_solomon): the sync path's frames are still
+# PN-randomized and go through the same aggregation job with PN_ENCODED=true.
 # Patch jpss1.xml: set PnEncoded=false (SatDump outputs PN-decoded frames)
 # and fix link chain to skip pn node (frame_sync → reed_solomon directly)
 # -------------------------------------------------------------------
@@ -72,6 +75,8 @@ RUN tar xzf /opt/RT-STPS_7.0.tar.gz -C /opt/ && \
     tar xzf /opt/RT-STPS_7.0_PATCH_1.tar.gz -C /opt/rt-stps/ && \
     chmod +x /opt/rt-stps/bin/* 2>/dev/null || true && \
     chmod +x /opt/rt-stps/jsw/bin/*.sh 2>/dev/null || true && \
+    cp /opt/rt-stps/config/jpss1.xml /opt/rt-stps/config/jpss1.pn-encoded.xml && \
+    grep -q 'PnEncoded="true"' /opt/rt-stps/config/jpss1.pn-encoded.xml && \
     sed -i 's/PnEncoded="true"/PnEncoded="false"/' /opt/rt-stps/config/jpss1.xml && \
     sed -i 's|from="frame_sync" to="pn"|from="frame_sync" to="reed_solomon"|' /opt/rt-stps/config/jpss1.xml && \
     sed -i '/from="pn" to="reed_solomon"/d' /opt/rt-stps/config/jpss1.xml && \

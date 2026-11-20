@@ -1,18 +1,19 @@
 #!/bin/bash
-# Finishes a sync receiver contact: stops the live-UDP listener, runs RT-STPS
-# on the raw capture, and uploads the CADU capture + RDR HDF5 to S3.
-# Deployed to /opt/scripts/sync_receiver_finish.sh. Executed via SSM Run
-# Command by the FinishReceiver state in
-# infra/modules/sync_pipeline/step_functions.tf, shortly after LOS.
+# Finishes a sync receiver contact: stops the live-UDP listener and uploads the
+# frame capture (and the raw UDP tee) to S3. Deployed to
+# /opt/scripts/sync_receiver_finish.sh. Executed via SSM Run Command by the
+# FinishReceiver state in infra/modules/sync_pipeline/step_functions.tf, shortly
+# after LOS.
 #
-# Unlike scripts/aggregation.sh, RT-STPS here runs with jpss1.xml UNMODIFIED
-# (PnEncoded="true" kept, pn link node left wired): the demod/decode
-# UncodedFramesEgress stream has NOT been PN-derandomized (that only happens
-# in SatDump, upstream of the existing async pipeline's .cadu) -- see
-# infra/modules/sync_pipeline/groundstation.tf's header comment. This script
-# also does NOT run CSPP -- that happens afterward in CodeBuild (see
-# buildspecs/aggregation_sync.yml), same "needs internet egress" reasoning as
-# the existing pipeline (see scripts/aggregation.sh's header comment).
+# Since 2026-11-20 the receiver does NOT run RT-STPS (architecture principle
+# "converge at the first common artifact", docs/ARCHITECTURE.md). The capture
+# goes to <bucket>/contacts/<date>/<contact>/cadu/combined.cadu and the shared
+# aggregation Batch job (scripts/aggregation_entrypoint.sh) runs RT-STPS + CSPP
+# on it, exactly as for the async path, with CADU_PREFIX=cadu and
+# PN_ENCODED=true: the demod/decode UncodedFramesEgress stream has NOT been
+# PN-derandomized nor Reed-Solomon corrected (see
+# infra/modules/sync_pipeline/groundstation.tf's header comment). So the
+# receiver needs only /opt/scripts, no /opt/rt-stps.
 #
 # Usage: sync_receiver_finish.sh <bucket> <contact_id> <contact_date>
 #
@@ -30,7 +31,6 @@ KMS_KEY_ID="${KMS_KEY_ID:-70451aac-a58c-4a93-be24-4587cd55a795}"
 WORK_DIR="/var/tmp/sync_receiver/${CONTACT_ID}"
 CAPTURE_FILE="${WORK_DIR}/combined.cadu"
 PID_FILE="/var/run/sync_receiver_listen.pid"
-RTSTPS_HOME="/opt/rt-stps"
 S3_PREFIX="s3://${BUCKET}/contacts/${CONTACT_DATE}/${CONTACT_ID}"
 
 log_json() {
@@ -73,47 +73,10 @@ else
     log_json "WARN" "No running listener found (pid file absent or stale) -- proceeding with whatever was captured"
 fi
 
-if [ ! -s "$CAPTURE_FILE" ]; then
-    log_json "ERROR" "Capture file ${CAPTURE_FILE} missing or empty -- nothing to process"
-    exit 1
-fi
-
-CAPTURE_SIZE=$(du -h "$CAPTURE_FILE" | cut -f1)
-log_json "INFO" "Capture file size: ${CAPTURE_SIZE}"
-
 # =============================================================================
-# Step 2: Run RT-STPS (jpss1.xml unmodified -- PnEncoded="true" kept)
+# Step 2: Upload the raw UDP tee first (packet-format gate evidence), even if
+# the parsed capture turns out empty: it is the only copy of what arrived.
 # =============================================================================
-
-# Same rationale as scripts/aggregation.sh: /opt/data is a sibling of
-# RTSTPS_HOME, shared across runs -- clear it first so this contact doesn't
-# pick up a previous contact's leftover RDR.
-mkdir -p /opt/data
-log_json "INFO" "Clearing $(find /opt/data -maxdepth 1 -name '*.h5' | wc -l) RDR file(s) from previous runs"
-find /opt/data -maxdepth 1 -name '*.h5' -delete
-find /opt/data -maxdepth 1 -name '*.PDS' -delete
-
-log_json "INFO" "Running RT-STPS batch processing (jpss1.xml, PnEncoded=true)..."
-cd "$RTSTPS_HOME" && bin/batch.sh "${RTSTPS_HOME}/config/jpss1.xml" "$CAPTURE_FILE"
-
-RDR_COUNT=$(find /opt/data -maxdepth 1 -name '*.h5' | wc -l)
-log_json "INFO" "RT-STPS produced ${RDR_COUNT} RDR HDF5 file(s)"
-
-if [ "$RDR_COUNT" -eq 0 ]; then
-    log_json "ERROR" "RT-STPS produced no RDR HDF5 output -- frame sync likely failed to lock. See this script's docstring / scripts/sync_receiver_listen.py's header-format caveat."
-fi
-
-# =============================================================================
-# Step 3: Upload capture + RDR to S3
-# =============================================================================
-
-log_json "INFO" "Uploading raw CADU capture to ${S3_PREFIX}/cadu/"
-aws s3 cp "$CAPTURE_FILE" "${S3_PREFIX}/cadu/combined.cadu" \
-    --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID"
-
-# Upload the raw UDP tee capture if it was written by sync_receiver_arm.sh.
-# This gives a replayable copy of every raw UDP payload for packet-format
-# inspection (see docs/SYNC_PIPELINE.md's "Packet-format validation gate").
 RAW_CAPTURE_FILE="${WORK_DIR}/raw_capture.bin"
 if [ -f "$RAW_CAPTURE_FILE" ] && [ -s "$RAW_CAPTURE_FILE" ]; then
     log_json "INFO" "Uploading raw UDP tee capture to ${S3_PREFIX}/raw/"
@@ -124,14 +87,17 @@ else
     log_json "INFO" "No raw tee capture found -- skipping raw/ upload"
 fi
 
-if [ "$(find /opt/data -maxdepth 1 -name '*.h5' 2>/dev/null | head -1)" ]; then
-    log_json "INFO" "Uploading RDR HDF5 files to ${S3_PREFIX}/rdr/"
-    aws s3 sync /opt/data/ "${S3_PREFIX}/rdr/" \
-        --exclude '*' --include '*.h5' \
-        --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID"
-    log_json "INFO" "RDR upload complete"
-else
-    log_json "INFO" "No RDR files to upload"
+# =============================================================================
+# Step 3: Upload the frame capture for the shared aggregation chain
+# =============================================================================
+if [ ! -s "$CAPTURE_FILE" ]; then
+    log_json "ERROR" "Capture file ${CAPTURE_FILE} missing or empty -- nothing for the aggregation job"
+    exit 1
 fi
 
-log_json "INFO" "Receiver handoff complete for contact=${CONTACT_ID}"
+CAPTURE_SIZE=$(du -h "$CAPTURE_FILE" | cut -f1)
+log_json "INFO" "Uploading frame capture (${CAPTURE_SIZE}) to ${S3_PREFIX}/cadu/"
+aws s3 cp "$CAPTURE_FILE" "${S3_PREFIX}/cadu/combined.cadu" \
+    --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID"
+
+log_json "INFO" "Receiver handoff complete for contact=${CONTACT_ID} (RT-STPS + CSPP run in the shared aggregation job)"

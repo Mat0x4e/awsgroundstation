@@ -34,6 +34,12 @@ early, mutualize the rest", [`ARCHITECTURE.md`](ARCHITECTURE.md#architecture-pri
 
 ## Architecture
 
+Data flow during a sync contact (source: [`diagrams/sync-contact-dataflow.yaml`](diagrams/sync-contact-dataflow.yaml)):
+
+![Sync contact data flow](diagrams/out/sync-contact-dataflow.png)
+
+Step-by-step sequence:
+
 ```mermaid
 sequenceDiagram
     autonumber

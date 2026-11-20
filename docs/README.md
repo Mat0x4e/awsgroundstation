@@ -27,7 +27,7 @@ find the right file without opening them all.
 | [SYNC_ONBOARDING_INVESTIGATION.md](SYNC_ONBOARDING_INVESTIGATION.md) | **Superseded** (2026-11-19): the "not onboarded" reading of the zero sync windows |
 | [reviews/](reviews/) | Expert reviews, the Terraform clean-reference investigation, PR reviews, the 2026-11-19 repo review |
 | [Asciiart-archi.txt](Asciiart-archi.txt) | Historical component-level ASCII diagrams (pre- and post-Batch migration); the current two-pipeline diagram is in [ARCHITECTURE.md](ARCHITECTURE.md#architecture-principle-converge-early-mutualize-the-rest) |
-| [diagrams/](diagrams/) | awsdac sources (`*.yaml`) and rendered PNGs (`out/`) |
+| [diagrams/](diagrams/) | awsdac sources (`*.yaml`) and rendered PNGs (`out/`), including the sync-contact data flow ([`sync-contact-dataflow.png`](diagrams/out/sync-contact-dataflow.png)) |
 
 ## Side topics (not the pipeline)
 

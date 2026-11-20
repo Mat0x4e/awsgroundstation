@@ -271,9 +271,12 @@ resource "aws_network_interface_attachment" "receiver" {
 ###############################################################################
 
 resource "aws_eip" "receiver" {
-  domain                    = "vpc"
-  network_interface         = aws_instance.receiver.primary_network_interface_id
-  associate_with_private_ip = aws_instance.receiver.private_ip
+  domain            = "vpc"
+  network_interface = aws_instance.receiver.primary_network_interface_id
+
+  # No associate_with_private_ip: the private IP is not stable across the
+  # stop/start the receiver does every contact; omitted, the EIP binds to the
+  # ENI's primary address.
 
   tags = merge(var.tags, {
     Name    = "${var.project_name}-sync-receiver-eip"

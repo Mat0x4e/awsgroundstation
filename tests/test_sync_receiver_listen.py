@@ -30,7 +30,7 @@ import scripts.sync_receiver_listen as listener_mod
 
 # Minimal valid VITA-49 Signal Data packet (type=1, 7-word header, 4-byte payload).
 #   header word 0: top nibble = 1 (Signal Data), low 16 bits = 8 words (size incl. header)
-#   8 words × 4 = 32 bytes total; words 1-6 are zero padding; word 7 is the payload.
+#   8 words Ã— 4 = 32 bytes total; words 1-6 are zero padding; word 7 is the payload.
 _HEADER_WORDS = 7
 _FRAME_PAYLOAD = b"\xDE\xAD\xBE\xEF"
 _PKT_SIZE_WORDS = _HEADER_WORDS + 1  # 8 words
@@ -114,7 +114,7 @@ def _run_main(tmp_path, extra_args=None, packets=None):
 
 
 # ---------------------------------------------------------------------------
-# Task 9.1 — Readiness markers
+# Task 9.1 â€” Readiness markers
 # ---------------------------------------------------------------------------
 
 
@@ -157,7 +157,7 @@ class TestReceivingMarker:
 
 
 # ---------------------------------------------------------------------------
-# Task 9.2 — --raw-tee dual output
+# Task 9.2 â€” --raw-tee dual output
 # ---------------------------------------------------------------------------
 
 
@@ -223,82 +223,79 @@ class TestRawTee:
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Python 3.9 compatibility tests
 # ---------------------------------------------------------------------------
+LISTENER_SOURCE = Path(__file__).parent.parent / "scripts" / "sync_receiver_listen.py"
+
+
+def _has_future_annotations(tree: ast.Module) -> bool:
+    return any(
+        isinstance(n, ast.ImportFrom)
+        and n.module == "__future__"
+        and any(a.name == "annotations" for a in n.names)
+        for n in tree.body
+    )
+
+
+def _runtime_pep604_annotations(source: str) -> list:
+    """Line numbers of `X | Y` annotations that Python 3.9 would evaluate.
+
+    PEP 604 unions in annotations only fail on 3.9 when annotations are
+    evaluated at definition time, i.e. WITHOUT `from __future__ import
+    annotations`. Only annotation nodes are inspected (AnnAssign, arg,
+    function returns); bitwise `|` elsewhere is legitimate on 3.9.
+    """
+    tree = ast.parse(source)
+    if _has_future_annotations(tree):
+        return []
+    bad = []
+    for node in ast.walk(tree):
+        annotations = []
+        if isinstance(node, ast.AnnAssign):
+            annotations.append(node.annotation)
+        elif isinstance(node, ast.arg) and node.annotation is not None:
+            annotations.append(node.annotation)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.returns is not None:
+            annotations.append(node.returns)
+        for ann in annotations:
+            bad.extend(
+                n.lineno
+                for n in ast.walk(ann)
+                if isinstance(n, ast.BinOp) and isinstance(n.op, ast.BitOr)
+            )
+    return bad
 
 
 class TestPython39Compatibility:
-    """Regression tests to ensure sync_receiver_listen.py is importable on Python 3.9.
-    
-    PEP 604 type union syntax (X | Y) was added in Python 3.10 and requires
-    `from __future__ import annotations` to work on 3.9. This test verifies the fix.
-    """
+    """The listener runs on AL2023 Python 3.9, where `-> bytes | None` raises
+    TypeError at import unless `from __future__ import annotations` is present."""
 
     def test_from_future_annotations_present(self):
-        """The module must have `from __future__ import annotations` as the first import."""
-        source = Path(__file__).parent.parent / "scripts" / "sync_receiver_listen.py"
-        with open(source) as f:
-            lines = f.readlines()
+        assert "from __future__ import annotations" in LISTENER_SOURCE.read_text()
 
-        # Find the first non-docstring, non-shebang line
-        import_found = False
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            # Skip shebang, docstring, and blank lines
-            if stripped.startswith("#!") or stripped.startswith('"""') or stripped.startswith("'''") or not stripped:
-                continue
-            # First real statement should be the __future__ import
-            if "__future__" in line and "annotations" in line:
-                import_found = True
-                break
-            # If we hit any other import before __future__, fail
-            if stripped.startswith("import ") or stripped.startswith("from "):
-                break
+    def test_listener_has_no_runtime_evaluated_pep604_annotations(self):
+        assert _runtime_pep604_annotations(LISTENER_SOURCE.read_text()) == []
 
-        assert import_found, (
-            "`from __future__ import annotations` must be present as the first import "
-            "(after docstring) to support PEP 604 syntax on Python 3.9"
-        )
+    def test_checker_flags_return_union_without_future_import(self):
+        src = "def f() -> bytes | None:\n    return None\n"
+        assert _runtime_pep604_annotations(src) == [1]
 
-    def test_ast_parses_with_python39_feature_version(self):
-        """The module must parse successfully when AST is set to Python 3.9 compatibility.
-        
-        This catches any PEP 604 (X | Y) syntax, PEP 617 pattern matching (match/case),
-        or other Python 3.10+ features that would fail on 3.9.
-        """
-        source = Path(__file__).parent.parent / "scripts" / "sync_receiver_listen.py"
-        with open(source) as f:
-            source_code = f.read()
+    def test_checker_flags_arg_and_annassign_unions_without_future_import(self):
+        src = "def f(x: int | str) -> int:\n    y: bytes | None = None\n    return 1\n"
+        assert sorted(_runtime_pep604_annotations(src)) == [1, 2]
 
-        # This will raise SyntaxError if the code uses Python 3.10+ syntax
-        # (e.g., `bytes | None` instead of `Optional[bytes]`)
-        try:
-            ast.parse(source_code, feature_version=(3, 9))
-        except SyntaxError as e:
-            pytest.fail(
-                f"Module contains Python 3.10+ syntax that is not compatible with Python 3.9: {e}"
-            )
+    def test_checker_accepts_union_with_future_import(self):
+        src = "from __future__ import annotations\n\ndef f() -> bytes | None:\n    return None\n"
+        assert _runtime_pep604_annotations(src) == []
 
-    def test_no_pep604_unions_in_annotations(self):
-        """Verify no bare PEP 604 union syntax (X | Y) appears outside of string annotations.
-        
-        With `from __future__ import annotations`, all annotations are strings at
-        definition time, so they're safe. But any runtime use of `X | Y` (e.g. in
-        `isinstance(x, int | str)`) would still fail on 3.9.
-        """
-        source = Path(__file__).parent.parent / "scripts" / "sync_receiver_listen.py"
-        with open(source) as f:
-            source_code = f.read()
+    def test_checker_ignores_bitwise_or_outside_annotations(self):
+        src = "FLAGS = 1 | 2\nS = {1} | {2}\n\ndef f(a: int) -> int:\n    return a | 1\n"
+        assert _runtime_pep604_annotations(src) == []
 
-        tree = ast.parse(source_code)
-
-        # Walk the AST looking for BinOp nodes with BitOr operator outside of strings
-        for node in ast.walk(tree):
-            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-                # This is a `|` operator used at runtime (not in an annotation string)
-                # which would fail on 3.9
-                pytest.fail(
-                    f"Found PEP 604 union syntax (X | Y) at runtime (line {node.lineno}). "
-                    "This will fail on Python 3.9. Use `Union[X, Y]` or "
-                    "`isinstance(x, (X, Y))` instead."
-                )
+    def test_checker_agrees_with_real_python_behaviour(self):
+        """On interpreters < 3.10 the flagged source really fails at import."""
+        if sys.version_info >= (3, 10):
+            pytest.skip("PEP 604 evaluation only fails on Python < 3.10")
+        with pytest.raises(TypeError):
+            exec("def f() -> bytes | None:\n    return None\n", {})

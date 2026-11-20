@@ -457,12 +457,14 @@ actually contains the change.
 **Fix (validate-from-the-branch, without mutating `main` or the project config)**:
 1. Commit AND push the feature branch to the remote the CodeBuild project reads
    (CodeBuild pulls from the remote, not your local clone).
-2. Trigger the rebuild pinned to that branch with a one-off source override:
-   `aws codebuild start-build --project-name <image-build-project> --source-version <branch>`.
-   This overrides `sourceVersion` for a single build without editing the project / Terraform.
+2. Trigger the rebuild pinned to that branch with a one-off variable override:
+   `aws codebuild start-build --project-name <image-build-project> --environment-variables-override name=REPO_BRANCH,value=<branch>,type=PLAINTEXT --timeout-in-minutes-override 120`.
+   The inline buildspec does its own `git clone` of `$REPO_BRANCH`, so `--source-version` is
+   ignored. The override applies to a single build without editing the project / Terraform.
 3. Confirm the new image actually contains the change before re-validating: check the ECR push
-   time advanced (`aws ecr describe-images ... --query 'imageDetails[0].imagePushedAt'`), then
-   re-run the Batch job.
+   time advanced (`aws ecr describe-images ... --query 'imageDetails[0].imagePushedAt'`) and the
+   image content is right (SDR image: `config/jpss1.pn-encoded.xml` present), then re-run the
+   Batch job.
 
 **Interaction with the strangler cutover (important ordering hazard)**: if the orchestrator has
 already been flipped to the Batch path (e.g. `RENDER_COMPUTE=batch`) and applied, the PRODUCTION
@@ -482,7 +484,7 @@ count=14) were confirmed this way before Stage 3 was called done.
 
 **Rule**: for any container-based compute (Batch/ECS/Fargate) whose code is image-baked via
 `COPY`, treat the image-build source ref as part of the deploy. When the code is on a feature
-branch, rebuild the image with `--source-version <branch>` and verify the ECR push time advanced,
+branch, rebuild the image with `--environment-variables-override name=REPO_BRANCH,value=<branch>,type=PLAINTEXT` and verify the ECR push time advanced,
 BEFORE running any validation -- and prefer verifying the job's product/metric evidence over its
 exit status.
 

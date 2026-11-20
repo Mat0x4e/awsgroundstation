@@ -580,13 +580,51 @@ resource "aws_iam_role" "batch_render_job" {
   })
 }
 
+# Sync bucket access for the render job. The viirs orchestrator passes the
+# event bucket to the job as INPUT_BUCKET, so a sync contact is rendered from
+# the sync bucket: read contacts/*, write products/* there. Prefix-scoped, no
+# DeleteObject, no whole-bucket grant. Empty when the sync pipeline is disabled.
+locals {
+  sync_render_statements = [for s in [
+    {
+      Sid      = "S3ReadSyncContactsPrefix"
+      Effect   = "Allow"
+      Action   = ["s3:GetObject"]
+      Resource = "${var.sync_output_bucket_arn}/contacts/*"
+    },
+    {
+      Sid    = "S3WriteSyncProductsPrefix"
+      Effect = "Allow"
+      Action = [
+        "s3:PutObject",
+        "s3:GetObject",
+      ]
+      Resource = "${var.sync_output_bucket_arn}/products/*"
+    },
+    {
+      Sid      = "S3ListSyncBucketPermittedPrefixes"
+      Effect   = "Allow"
+      Action   = ["s3:ListBucket"]
+      Resource = var.sync_output_bucket_arn
+      Condition = {
+        StringLike = {
+          "s3:prefix" = [
+            "contacts/*",
+            "products/*",
+          ]
+        }
+      }
+    },
+  ] : s if var.sync_output_bucket_arn != ""]
+}
+
 resource "aws_iam_role_policy" "batch_render_job" {
   name = "${var.project_name}-batch-render-job-policy"
   role = aws_iam_role.batch_render_job.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       # S3 - read the render inputs under contacts/*. The entrypoint aws s3 sync
       # reads from contacts/{date}/{id}/satdump/, /coordinates/, and /sdr/.
       # coordinates/ is nested under contacts/, so contacts/* covers it - no
@@ -688,7 +726,9 @@ resource "aws_iam_role_policy" "batch_render_job" {
           }
         }
       },
-    ]
+      ],
+      local.sync_render_statements,
+    )
   })
 }
 

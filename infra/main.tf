@@ -172,6 +172,10 @@ module "viirs_visualization" {
   sns_topic_arn          = module.security.sns_topic_arn
   tags                   = local.common_tags
 
+  # Sync bucket read access for the orchestrator (list/get contacts/* only).
+  # sync_pipeline does not read viirs_visualization outputs, so this is acyclic.
+  sync_output_bucket_arn = var.enable_sync_pipeline ? module.sync_pipeline[0].output_bucket_arn : ""
+
   # Stage 3b strangler - flips the orchestrator Lambda to AWS Batch render when
   # enable_batch_compute is set; CodeBuild remains the fallback. Deterministic
   # ARNs (not module.batch_compute outputs) avoid a module cycle (batch_compute

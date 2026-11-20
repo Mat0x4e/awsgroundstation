@@ -1,18 +1,18 @@
-# iam.tf — IAM roles and policies for the VIIRS visualization pipeline
+# iam.tf â€” IAM roles and policies for the VIIRS visualization pipeline
 #
 # Resources:
-#   - aws_iam_role.lambda_execution         — Lambda orchestrator execution role
-#   - aws_iam_policy.lambda_execution       — Inline policy for Lambda (least-privilege)
-#   - aws_iam_role_policy_attachment.lambda — Attaches policy to Lambda role
-#   - aws_iam_role.codebuild_service        — CodeBuild service role
-#   - aws_iam_policy.codebuild_service      — Inline policy for CodeBuild (least-privilege)
-#   - aws_iam_role_policy_attachment.codebuild — Attaches policy to CodeBuild role
+#   - aws_iam_role.lambda_execution         â€” Lambda orchestrator execution role
+#   - aws_iam_policy.lambda_execution       â€” Inline policy for Lambda (least-privilege)
+#   - aws_iam_role_policy_attachment.lambda â€” Attaches policy to Lambda role
+#   - aws_iam_role.codebuild_service        â€” CodeBuild service role
+#   - aws_iam_policy.codebuild_service      â€” Inline policy for CodeBuild (least-privilege)
+#   - aws_iam_role_policy_attachment.codebuild â€” Attaches policy to CodeBuild role
 #
 # Satisfies: Requirements 11.3, 11.4
 
-# ─────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Lambda execution role
-# ─────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 resource "aws_iam_role" "lambda_execution" {
   name = "${var.project_name}-viirs-lambda-execution"
@@ -40,8 +40,8 @@ resource "aws_iam_policy" "lambda_execution" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      # CloudWatch Logs — write logs for this Lambda function
+    Statement = concat([
+      # CloudWatch Logs â€” write logs for this Lambda function
       {
         Sid    = "CloudWatchLogs"
         Effect = "Allow"
@@ -52,7 +52,7 @@ resource "aws_iam_policy" "lambda_execution" {
         ]
         Resource = "arn:aws:logs:*:${var.account_id}:log-group:/aws/lambda/${var.project_name}-viirs-*:*"
       },
-      # CodeBuild — start visualization build jobs
+      # CodeBuild â€” start visualization build jobs
       {
         Sid      = "StartCodeBuild"
         Effect   = "Allow"
@@ -90,7 +90,7 @@ resource "aws_iam_policy" "lambda_execution" {
           }
         }
       },
-      # S3 — list and read objects from the SDR output bucket
+      # S3 â€” list and read objects from the SDR output bucket
       {
         Sid      = "S3ListBucket"
         Effect   = "Allow"
@@ -103,14 +103,14 @@ resource "aws_iam_policy" "lambda_execution" {
         Action   = "s3:GetObject"
         Resource = "${var.sdr_output_bucket_arn}/*"
       },
-      # KMS — decrypt objects encrypted with the project KMS key
+      # KMS â€” decrypt objects encrypted with the project KMS key
       {
         Sid      = "KMSDecrypt"
         Effect   = "Allow"
         Action   = "kms:Decrypt"
         Resource = var.kms_key_arn
       },
-      # CloudWatch Metrics — publish ProductsWritten and other pipeline metrics.
+      # CloudWatch Metrics â€” publish ProductsWritten and other pipeline metrics.
       # Resource = "*" is the only valid value: cloudwatch:PutMetricData has no
       # resource-level constraint in IAM.  The namespace condition below limits
       # this permission to the SDRPipeline namespace exclusively, making the
@@ -126,7 +126,31 @@ resource "aws_iam_policy" "lambda_execution" {
           }
         }
       },
-    ]
+      ],
+      # Sync bucket: the sync state machine passes the sync bucket in the
+      # StartVisualization event, and the orchestrator lists/reads the contact
+      # prefix there. Prefix-scoped (contacts/* only), no write. Omitted when
+      # the sync pipeline is disabled.
+      [for s in [
+        {
+          Sid      = "S3ListSyncBucketContactsPrefix"
+          Effect   = "Allow"
+          Action   = "s3:ListBucket"
+          Resource = var.sync_output_bucket_arn
+          Condition = {
+            StringLike = {
+              "s3:prefix" = ["contacts/*"]
+            }
+          }
+        },
+        {
+          Sid      = "S3GetSyncContactsPrefix"
+          Effect   = "Allow"
+          Action   = "s3:GetObject"
+          Resource = "${var.sync_output_bucket_arn}/contacts/*"
+        },
+      ] : s if var.sync_output_bucket_arn != ""],
+    )
   })
 
   tags = var.tags
@@ -137,9 +161,9 @@ resource "aws_iam_role_policy_attachment" "lambda_execution" {
   policy_arn = aws_iam_policy.lambda_execution.arn
 }
 
-# ─────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # CodeBuild service role
-# ─────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 resource "aws_iam_role" "codebuild_service" {
   name = "${var.project_name}-viirs-codebuild-service"
@@ -168,7 +192,7 @@ resource "aws_iam_policy" "codebuild_service" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      # S3 — read inputs and write rendered products to the SDR output bucket
+      # S3 â€” read inputs and write rendered products to the SDR output bucket
       {
         Sid      = "S3ListBucket"
         Effect   = "Allow"
@@ -184,7 +208,7 @@ resource "aws_iam_policy" "codebuild_service" {
         ]
         Resource = "${var.sdr_output_bucket_arn}/*"
       },
-      # KMS — encrypt/decrypt S3 objects written with SSE-KMS
+      # KMS â€” encrypt/decrypt S3 objects written with SSE-KMS
       {
         Sid    = "KMSEncryptDecrypt"
         Effect = "Allow"
@@ -195,7 +219,7 @@ resource "aws_iam_policy" "codebuild_service" {
         ]
         Resource = var.kms_key_arn
       },
-      # CloudWatch Logs — write CodeBuild build logs
+      # CloudWatch Logs â€” write CodeBuild build logs
       {
         Sid    = "CloudWatchLogs"
         Effect = "Allow"
@@ -206,7 +230,7 @@ resource "aws_iam_policy" "codebuild_service" {
         ]
         Resource = "arn:aws:logs:*:${var.account_id}:log-group:/aws/codebuild/${var.project_name}-viirs-*:*"
       },
-      # ECR — pull the visualization Docker image
+      # ECR â€” pull the visualization Docker image
       {
         Sid      = "ECRAuthToken"
         Effect   = "Allow"
@@ -222,7 +246,7 @@ resource "aws_iam_policy" "codebuild_service" {
         ]
         Resource = "arn:aws:ecr:*:${var.account_id}:repository/${var.project_name}-viirs-*"
       },
-      # ECR — push the visualization Docker image (docker build + push)
+      # ECR â€” push the visualization Docker image (docker build + push)
       {
         Sid    = "ECRPushImage"
         Effect = "Allow"
@@ -235,7 +259,7 @@ resource "aws_iam_policy" "codebuild_service" {
         ]
         Resource = "arn:aws:ecr:*:${var.account_id}:repository/${var.project_name}-viirs-*"
       },
-      # CloudWatch Metrics — publish ProductsWritten from the buildspec post_build phase.
+      # CloudWatch Metrics â€” publish ProductsWritten from the buildspec post_build phase.
       # Resource = "*" is the only valid value: cloudwatch:PutMetricData has no
       # resource-level constraint in IAM.  The namespace condition below limits
       # this permission to the SDRPipeline namespace exclusively, making the

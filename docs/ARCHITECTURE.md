@@ -47,6 +47,85 @@ Applied (2026-11-20):
 | CSPP assets (J01 LUTs, LUT cache) | SDR output bucket | **same** (`ASSETS_BUCKET`) | yes |
 | Visualization + render | `viirs-orchestrator` + render Batch job | **same** | yes |
 
+The two data pipelines (state 2026-11-20). The sync side of the shared part has not run on real
+data yet: no sync contact flown.
+
+```
+ ASYNC (DigIF)                                   SYNC (demod/decode)
+ ─────────────                                   ───────────────────
+        NOAA-20  X-band HRD 7812 MHz (QPSK, Viterbi 1/2, PN, Reed-Solomon)
+              │                                              │
+              ▼                                              ▼
+ ┌──────────────────────────┐                ┌──────────────────────────────┐
+ │ AWS Ground Station       │                │ AWS Ground Station           │
+ │ AntennaDownlinkConfig    │                │ AntennaDownlinkDemodDecode   │
+ │ (raw DigIF, no demod)    │                │ QPSK + Viterbi + NRZ-M       │
+ │ profile 32a1fdbb         │                │ UncodedFramesEgress          │
+ └────────────┬─────────────┘                │ (PN kept, no Reed-Solomon)   │
+              │ S3RecordingConfig            │ profile 2e719f99             │
+              ▼                              └──────────────┬───────────────┘
+ ┌──────────────────────────┐                               │ live UDP :55888
+ │ S3 reception bucket      │                               │ (VITA-49 Ext., format unverified)
+ │ ~22-50 x 2.18 GB .pcap   │                               ▼
+ └────────────┬─────────────┘                ┌──────────────────────────────┐
+              │                              │ Receiver EC2 (private subnet,│
+  EventBridge │ COMPLETED                    │ 2nd ENI + EIP)               │
+  (filter: 32a1fdbb)                         │  PREPASS -600s: receiver_arm │
+              ▼                              │  Lambda starts EC2 + SSM arm │
+ ┌──────────────────────────┐                │  sync_receiver_listen.py     │
+ │ Step Functions           │                │  -> combined.cadu + raw tee  │
+ │ groundstation-noaa20-    │                └──────────────┬───────────────┘
+ │ sdr-pipeline             │                               │
+ └────────────┬─────────────┘                   EventBridge │ COMPLETED
+              │ Map fan-out                     (filter: 2e719f99)
+              ▼                                             ▼
+ ┌──────────────────────────┐                ┌──────────────────────────────┐
+ │ AWS Batch fan-out (Spot) │                │ Step Functions               │
+ │ chunk jobs, SatDump:     │                │ groundstation-noaa20-        │
+ │ .pcap -> I/Q -> QPSK     │                │ sync-pipeline                │
+ │ Viterbi, PN, RS -> .cadu │                │ FinishReceiver (SSM):        │
+ └────────────┬─────────────┘                │ stop listener, upload, stop  │
+              │                              └──────────────┬───────────────┘
+              ▼                                             ▼
+   s3://sdr-output/contacts/                 s3://sync-output/contacts/
+     <date>/<id>/satdump/*.cadu                <date>/<id>/cadu/combined.cadu
+     (frames, PN removed)                      (frames, PN still applied)
+                                               <date>/<id>/raw/raw_capture.bin
+              │                                             │
+              └──────────────────┬──────────────────────────┘
+          ═══════════════════════╪══════════════════  FIRST COMMON ARTIFACT
+                                 │                     (shared from here on)
+                                 ▼
+          ┌─────────────────────────────────────────────────────┐
+          │ AWS Batch aggregation job  groundstation-noaa20-    │
+          │ aggregation (on-demand), SDR image, one entrypoint  │
+          │ scripts/aggregation_entrypoint.sh                   │
+          │                                                     │
+          │   async: CADU_PREFIX=satdump  PN_ENCODED=false      │
+          │   sync : CADU_PREFIX=cadu     PN_ENCODED=true       │
+          │          ASSETS_BUCKET=sdr-output                   │
+          │                                                     │
+          │  1. CSPP J01 LUTs + LUT cache  <- sdr-output        │
+          │     software/, lut-cache/  (shared assets)          │
+          │  2. RT-STPS  frames -> RDR (Level 0)                │
+          │     jpss1.xml (patched)  |  jpss1.pn-encoded.xml    │
+          │  3. CSPP viirs_sdr.sh  RDR -> SDR + GEO (Level 1)   │
+          │  4. upload rdr/ sdr/ logs/ to OUTPUT_BUCKET         │
+          └──────────────────────────┬──────────────────────────┘
+                                     ▼
+          ┌─────────────────────────────────────────────────────┐
+          │ viirs-orchestrator Lambda  (StartVisualization)     │
+          │   -> AWS Batch render job (viirs image)             │
+          │      satdump + NASA branches -> PNG / GeoTIFF       │
+          └──────────────────────────┬──────────────────────────┘
+                                     ▼
+                 products/<date>/<id>/  + ProductsWritten metric
+                 verify: scripts/verify_pass.py (async only, today)
+
+ Alarms -> SNS: ChunksFailed, ExecutionsFailed, VisualizationFailed,
+                ProductsWritten==0, ReceiverReadyFailure, OptDriftDetected (/opt/scripts)
+```
+
 Consequences:
 - The sync receiver only captures and uploads (`/opt/scripts`); it no longer runs RT-STPS,
   so there is no hand-installed `/opt/rt-stps` to drift.

@@ -46,6 +46,22 @@ Batch job fails almost immediately with, e.g.:
    ```
 5. Only now submit/validate the Batch job that consumes the image.
 
+## SECOND TRAP: the SDR image push outlives the project timeout (learned live 2026-11-20)
+
+`groundstation-noaa20-sdr-docker-build` has `timeoutInMinutes = 30`. The SDR image is ~22 GB:
+the Docker BUILD phase takes ~15 min and the ECR push (POST_BUILD) another ~15-25 min, so a
+cold build **times out in POST_BUILD** and `latest` is NOT updated (the first IaC build ever,
+2026-11-20, failed this way; until then `latest` dated from 2026-09-02, pushed by the old
+out-of-band project). Pass a one-off override:
+```
+aws codebuild start-build --project-name groundstation-noaa20-sdr-docker-build \
+  --source-version <branch> --timeout-in-minutes-override 120 --region eu-central-1
+```
+Layers pushed by a timed-out build stay in ECR, so a retry pushes less. Always confirm step 4
+(ECR `imagePushedAt` advanced) - a FAILED build leaves the old image in place silently.
+(Raising `timeoutInMinutes` in `infra/modules/sdr_pipeline/codebuild_image.tf` is the
+permanent fix.)
+
 ## Note
 
 Unlike the aggregation entrypoint (which is pulled from S3 at job start -- see the

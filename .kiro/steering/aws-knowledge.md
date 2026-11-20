@@ -526,3 +526,23 @@ that parses the file with `ast.parse(src, feature_version=(3, 9))`.
 
 **Rule**: scripts executed by the instance's system interpreter must target that interpreter's
 version, not the dev venv's. Dry-run them on the real instance before a paid contact.
+
+---
+
+## `aws_eip` on a Multi-ENI Instance -- Keep `associate_with_private_ip`
+
+**Symptom**: dropping `associate_with_private_ip` from an `aws_eip` that targets
+`network_interface = aws_instance.X.primary_network_interface_id` makes the in-place update
+DISASSOCIATE the EIP, then fail to re-associate with
+`InvalidInstanceID: There are multiple interfaces attached to instance ... Please specify an
+interface ID`. The instance is left with no egress (live 2026-11-20, sync receiver).
+
+**❌ INCORRECT**: `network_interface = ...primary_network_interface_id` alone ("the private IP is
+unstable, and the default is the primary address anyway").
+
+**✅ CORRECT**: keep both `network_interface` and `associate_with_private_ip =
+aws_instance.X.private_ip`. The primary ENI's private IP does not change across stop/start in a
+VPC, so pinning it is safe.
+
+**Rule**: treat an EIP change on a multi-ENI instance as a possible egress outage: check
+`aws ec2 describe-addresses` shows the association right after the apply.

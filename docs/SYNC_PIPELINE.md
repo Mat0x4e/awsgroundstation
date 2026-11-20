@@ -193,6 +193,17 @@ needs, copied to the paths the scripts expect:
 That is all: no `/opt/rt-stps` on the receiver since 2026-11-20 (RT-STPS runs in the shared
 aggregation job, from the SDR image). The `OptDriftDetected` alarm checks these three files.
 
+Two receiver constraints found by the 2026-11-20 dry run:
+
+- **Egress path.** The receiver has two ENIs (primary + the dataflow ENI), so AWS gives it no
+  automatic public IP, and the default VPC has no NAT or VPC endpoint. Without the Elastic IP
+  on the primary ENI (`aws_eip.receiver`, about 3.6 USD/month), SSM Run Command (arm/finish)
+  and the S3 upload cannot work. Check `aws ssm describe-instance-information` shows it Online
+  a minute after start.
+- **Python 3.9.** The AMI ships Python 3.9: `sync_receiver_listen.py` must stay
+  3.9-compatible (`from __future__ import annotations`, no `match`). A regression test in
+  `tests/test_sync_receiver_listen.py` guards it.
+
 ## Enabling it
 
 ```hcl

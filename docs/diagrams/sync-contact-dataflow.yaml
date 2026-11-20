@@ -37,7 +37,7 @@ Diagram:
     AWSCloud:
       Type: AWS::Diagram::Cloud
       Preset: AWSCloudNoLogo
-      Direction: vertical
+      Direction: horizontal
       Align: center
       Children:
         - RegionAntenna
@@ -86,13 +86,23 @@ Diagram:
       Title: "VPC"
       Children:
         - ReceiverSubnet
+        - IGW
 
     ReceiverSubnet:
       Type: AWS::EC2::Subnet
-      Preset: PrivateSubnet
-      Title: "receiver subnet"
+      Preset: PublicSubnet
+      Title: "default-VPC public subnet"
       Children:
         - Receiver
+        - EIP
+
+    EIP:
+      Type: AWS::EC2::EIP
+      Title: "Elastic IP (eth0)"
+
+    IGW:
+      Type: AWS::EC2::InternetGateway
+      Title: "Internet gateway"
 
     Receiver:
       Type: AWS::EC2::Instance
@@ -168,14 +178,14 @@ Diagram:
           Title: "X-band 7812 MHz"
 
     - Source: GroundStation
-      SourcePosition: SW
+      SourcePosition: E
       Target: EventBridge
-      TargetPosition: N
+      TargetPosition: W
       TargetArrowHead:
         Type: Open
       Labels:
         TargetLeft:
-          Title: "1 PREPASS, 4 COMPLETED"
+          Title: "1 PREPASS / COMPLETED"
 
     - Source: EventBridge
       SourcePosition: S
@@ -183,29 +193,26 @@ Diagram:
       TargetPosition: N
       TargetArrowHead:
         Type: Open
-      Labels:
-        SourceLeft:
-          Title: "1"
 
     - Source: ArmLambda
       SourcePosition: S
-      Target: VPC
+      Target: Receiver
       TargetPosition: N
       TargetArrowHead:
         Type: Open
       Labels:
-        SourceLeft:
+        SourceRight:
           Title: "2 start + arm"
 
     - Source: GroundStation
       SourcePosition: S
       Target: Receiver
-      TargetPosition: NE
+      TargetPosition: W
       LineStyle: dashed
       TargetArrowHead:
         Type: Open
       Labels:
-        SourceRight:
+        SourceLeft:
           Title: "3 live UDP frames"
 
     - Source: EventBridge
@@ -215,13 +222,13 @@ Diagram:
       TargetArrowHead:
         Type: Open
       Labels:
-        TargetLeft:
+        SourceRight:
           Title: "4"
 
     - Source: SyncSFN
       SourcePosition: SW
       Target: Receiver
-      TargetPosition: E
+      TargetPosition: NE
       TargetArrowHead:
         Type: Open
       Labels:
@@ -229,14 +236,28 @@ Diagram:
           Title: "5 finish (SSM)"
 
     - Source: Receiver
-      SourcePosition: NE
+      SourcePosition: E
+      Target: EIP
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+
+    - Source: EIP
+      SourcePosition: S
+      Target: IGW
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+
+    - Source: IGW
+      SourcePosition: E
       Target: SyncBucket
       TargetPosition: W
       TargetArrowHead:
         Type: Open
       Labels:
-        TargetLeft:
-          Title: "5 cadu/ raw/"
+        SourceRight:
+          Title: "5 egress: cadu/ raw/"
 
     - Source: SyncBucket
       SourcePosition: S
@@ -251,14 +272,10 @@ Diagram:
           Title: "6 cadu in, rdr sdr out"
 
     - Source: AssetsBucket
-      SourcePosition: SW
-      Target: AggJob
-      TargetPosition: NE
-      TargetArrowHead:
-        Type: Open
-      Labels:
-        TargetRight:
-          Title: "6 assets"
+      SourcePosition: S
+      Target: ECR
+      TargetPosition: N
+      Type: orthogonal
 
     - Source: ECR
       SourcePosition: W
@@ -266,6 +283,9 @@ Diagram:
       TargetPosition: E
       TargetArrowHead:
         Type: Open
+      Labels:
+        TargetRight:
+          Title: "6 image, assets"
 
     - Source: AggJob
       SourcePosition: S
@@ -274,7 +294,7 @@ Diagram:
       TargetArrowHead:
         Type: Open
       Labels:
-        SourceLeft:
+        SourceRight:
           Title: "7"
 
     - Source: VizLambda

@@ -1,19 +1,19 @@
 # step_functions.tf — Step Functions state machine for the synchronous pipeline
 #
 # Flow: DeriveDateOnly -> DeriveDateParts -> BuildContactDate -> WaitForDelivery
-#       -> FinishReceiver (SSM: stop listener, run RT-STPS, upload CADU+RDR)
+#       -> FinishReceiver (SSM: stop listener, upload the CADU frame capture)
 #       -> WaitForFinish -> CheckFinishStatus -> StopReceiver
-#       -> StartAggregationBuild (CodeBuild: CSPP only) -> WaitForAggregation
-#       -> CheckAggregationBuild -> StartVisualization -> PipelineSucceeded
+#       -> SubmitBatchAggregation (shared Batch job: RT-STPS -> RDR -> CSPP)
+#       -> StartVisualization -> PipelineSucceeded
 #       -> (any stage) FailureNotify -> FailExecution
 #
-# Unlike modules/sdr_pipeline's state machine, there is no chunk fan-out Map
-# state: the receiver EC2 writes one combined CADU capture per contact (there
-# is nothing to parallelize -- see scripts/sync_receiver_finish.sh), and RT-STPS
-# already ran on that EC2 by the time this state machine's CodeBuild stage
-# starts. This state machine's job is: hand off from the receiver, then run
-# CSPP, then visualize.
-
+# Architecture principle: sync and async converge at the first common artifact
+# (the frame capture in S3) and share everything after it. This state machine
+# only owns what is sync-specific: the receiver handoff. Aggregation is the
+# SAME Batch queue + job definition as the async pipeline, parameterised by env
+# overrides (CADU_PREFIX, PN_ENCODED, OUTPUT_BUCKET, ASSETS_BUCKET). There is
+# no chunk fan-out Map state: the receiver writes one combined CADU capture per
+# contact (see scripts/sync_receiver_finish.sh).
 ###############################################################################
 # CloudWatch Log Group — Step Functions execution logs
 ###############################################################################
@@ -43,7 +43,7 @@ resource "aws_sfn_state_machine" "sync_pipeline" {
   type     = "STANDARD"
 
   definition = jsonencode({
-    Comment        = "NOAA-20 synchronous demod/decode pipeline — receiver handoff + CSPP aggregation + visualization"
+    Comment        = "NOAA-20 synchronous demod/decode pipeline — receiver handoff + shared Batch aggregation + visualization"
     TimeoutSeconds = 5400
     StartAt        = "DeriveDateOnly"
 
@@ -101,12 +101,12 @@ resource "aws_sfn_state_machine" "sync_pipeline" {
 
       # ── 3. FinishReceiver ──────────────────────────────────────────────────
       # Sends scripts/sync_receiver_finish.sh via SSM: stops the live-UDP
-      # listener, assembles the capture into a combined CADU, runs RT-STPS
-      # locally (PnEncoded="true" kept -- see groundstation.tf's header
-      # comment), and uploads the raw capture + RDR HDF5 to S3.
+      # listener, assembles the capture into a combined CADU and uploads it
+      # (+ the raw capture) to S3. RT-STPS is NOT run here any more: it is part
+      # of the shared Batch aggregation chain (see SubmitBatchAggregation).
       FinishReceiver = {
         Type     = "Task"
-        Comment  = "SSM: stop listener, run RT-STPS, upload CADU+RDR"
+        Comment  = "SSM: stop listener, upload the CADU frame capture"
         Resource = "arn:aws:states:::aws-sdk:ssm:sendCommand"
         Parameters = {
           InstanceIds  = [aws_instance.receiver.id]
@@ -140,7 +140,7 @@ resource "aws_sfn_state_machine" "sync_pipeline" {
         Next = "WaitForFinish"
       }
 
-      # Poll every 30 s: RT-STPS batch processing of a full pass is fast
+      # Poll every 30 s: assembling and uploading the capture is fast
       # (seconds to low minutes), so this should resolve quickly.
       WaitForFinish = {
         Type    = "Wait"
@@ -220,60 +220,32 @@ resource "aws_sfn_state_machine" "sync_pipeline" {
         Catch = [
           {
             ErrorEquals = ["States.ALL"]
-            Next        = "InjectAggFlag"
+            Next        = "SubmitBatchAggregation"
             ResultPath  = "$.stop_error"
           }
         ]
-        Next = "InjectAggFlag"
+        Next = "SubmitBatchAggregation"
       }
 
-      # ── 4a. InjectAggFlag ─────────────────────────────────────────────────
-      # Injects the build-time Batch gate flag into the state via ResultPath so
-      # ChooseAggregationCompute can branch. Using a dedicated Pass state (rather
-      # than the Task-state StopReceiver) is necessary because Task states cannot
-      # inject values via Parameters+ResultPath without altering their output shape.
-      InjectAggFlag = {
-        Type       = "Pass"
-        Comment    = "Stage 2 strangler: inject build-time Batch gate into state for the compute router"
-        Result     = var.use_batch_aggregation
-        ResultPath = "$.use_batch_agg"
-        Next       = "ChooseAggregationCompute"
-      }
-
-      # ── 4b. ChooseAggregationCompute ──────────────────────────────────────
-      # Stage 2 strangler gate. Routes to Batch (RTSTPS=off) when use_batch_agg
-      # is true; falls through to the existing CodeBuild CSPP poll-loop otherwise.
-      # Both branches remain until task 8 retires the sync CSPP CodeBuild project.
-      ChooseAggregationCompute = {
-        Type    = "Choice"
-        Comment = "Stage 2 strangler: Batch aggregation (RTSTPS=off) or CodeBuild poll-loop"
-        Choices = [
-          {
-            Variable      = "$.use_batch_agg"
-            BooleanEquals = true
-            Next          = "SubmitBatchAggregation"
-          }
-        ]
-        Default = "StartAggregationBuild"
-      }
-
-      # ── 4c. SubmitBatchAggregation ────────────────────────────────────────
-      # Batch on-demand aggregation job: RDR -> CSPP only (RTSTPS=off).
-      # RT-STPS already ran on the receiver EC2 in FinishReceiver, producing
-      # the RDR that lives in sync_output/contacts/.../rdr/. The same aggregation
-      # job definition is shared with the async pipeline; RTSTPS=off selects the
-      # CSPP-only branch in aggregation_entrypoint.sh.
+      # ── 5. SubmitBatchAggregation ─────────────────────────────────────────
+      # The SHARED aggregation chain (architecture principle: both downlink
+      # paths converge at the first common artifact -- the frame capture in S3
+      # -- and share everything after it). Same Batch queue + job definition as
+      # the async pipeline: frames in S3 -> RT-STPS -> RDR -> CSPP -> SDR/GEO.
+      # Sync differences are expressed ONLY as env overrides:
+      #   CADU_PREFIX=cadu   frames live under contacts/.../cadu/ (async: satdump/)
+      #   PN_ENCODED=true    the demod/decode egress is not PN-derandomized, so
+      #                      the image's pristine jpss1.pn-encoded.xml is used
+      #   OUTPUT_BUCKET      the sync bucket (frames in, rdr/sdr/logs out)
+      #   ASSETS_BUCKET      the SDR output bucket, which holds software/ (CSPP
+      #                      J01 LUTs) and lut-cache/ -- the sync bucket has neither
       #
       # CRITICAL: Batch Ref:: substitution only works inside job-def command[],
       # NOT in environment[].value. All per-contact values are passed via
-      # ContainerOverrides.Environment (mirrors the sdr_pipeline SubmitBatchChunk pattern).
-      #
-      # RECEPTION_BUCKET is omitted: the RTSTPS=off branch reads the RDR from
-      # OUTPUT_BUCKET/contacts/.../rdr/ (already in sync_output), not the
-      # reception bucket.
+      # ContainerOverrides.Environment (mirrors the sdr_pipeline pattern).
       SubmitBatchAggregation = {
         Type     = "Task"
-        Comment  = "Submit Batch aggregation job (RDR -> CSPP, RTSTPS=off, Stage 2)"
+        Comment  = "Submit the shared Batch aggregation job (frames -> RT-STPS -> RDR -> CSPP -> SDR/GEO)"
         Resource = "arn:aws:states:::batch:submitJob.sync"
         Parameters = {
           "JobName.$"   = "States.Format('agg-{}', $.contact_id)"
@@ -283,11 +255,23 @@ resource "aws_sfn_state_machine" "sync_pipeline" {
             Environment = [
               {
                 Name  = "RTSTPS"
-                Value = "off"
+                Value = "on"
+              },
+              {
+                Name  = "CADU_PREFIX"
+                Value = "cadu"
+              },
+              {
+                Name  = "PN_ENCODED"
+                Value = "true"
               },
               {
                 Name  = "OUTPUT_BUCKET"
                 Value = aws_s3_bucket.sync_output.id
+              },
+              {
+                Name  = "ASSETS_BUCKET"
+                Value = var.assets_bucket_name
               },
               {
                 Name      = "CONTACT_ID"
@@ -322,122 +306,6 @@ resource "aws_sfn_state_machine" "sync_pipeline" {
         ]
         Next = "StartVisualization"
       }
-
-      # ── 5. StartAggregationBuild ───────────────────────────────────────────
-      # CSPP-only build -- RT-STPS already ran on the receiver EC2 in
-      # FinishReceiver. Same reasoning as modules/sdr_pipeline for why this is
-      # CodeBuild and not EC2: CSPP's sdr_luts.sh needs internet egress the
-      # receiver's security group deliberately does not have.
-      StartAggregationBuild = {
-        Type     = "Task"
-        Comment  = "Start the CodeBuild CSPP aggregation job (RDR -> SDR/GEO)"
-        Resource = "arn:aws:states:::aws-sdk:codebuild:startBuild"
-        Parameters = {
-          ProjectName       = aws_codebuild_project.sync_aggregation.name
-          BuildspecOverride = file("${path.module}/../../../buildspecs/aggregation_sync.yml")
-          EnvironmentVariablesOverride = [
-            {
-              Name  = "OUTPUT_BUCKET"
-              Value = aws_s3_bucket.sync_output.id
-              Type  = "PLAINTEXT"
-            },
-            {
-              Name      = "CONTACT_ID"
-              "Value.$" = "$.contact_id"
-              Type      = "PLAINTEXT"
-            },
-            {
-              Name      = "CONTACT_DATE"
-              "Value.$" = "$.contact_date"
-              Type      = "PLAINTEXT"
-            },
-            {
-              Name  = "KMS_KEY_ID"
-              Value = var.kms_key_id
-              Type  = "PLAINTEXT"
-            }
-          ]
-        }
-        ResultSelector = {
-          "build_id.$" = "$.Build.Id"
-        }
-        ResultPath = "$.aggregation"
-        Retry = [
-          {
-            ErrorEquals     = ["CodeBuild.CodeBuildException", "States.TaskFailed"]
-            IntervalSeconds = 30
-            MaxAttempts     = 2
-            BackoffRate     = 2.0
-          }
-        ]
-        Catch = [
-          {
-            ErrorEquals = ["States.ALL"]
-            Next        = "AggregationFailure"
-            ResultPath  = "$.error"
-          }
-        ]
-        Next = "WaitForAggregation"
-      }
-
-      # Poll every 60 s: sdr_luts.sh alone runs ~10 min before CSPP itself starts.
-      WaitForAggregation = {
-        Type    = "Wait"
-        Seconds = 60
-        Next    = "CheckAggregationBuild"
-      }
-
-      CheckAggregationBuild = {
-        Type     = "Task"
-        Comment  = "Poll the aggregation build status"
-        Resource = "arn:aws:states:::aws-sdk:codebuild:batchGetBuilds"
-        Parameters = {
-          "Ids.$" = "States.Array($.aggregation.build_id)"
-        }
-        ResultSelector = {
-          "build_status.$" = "$.Builds[0].BuildStatus"
-        }
-        ResultPath = "$.aggregation_poll"
-        Retry = [
-          {
-            ErrorEquals     = ["States.TaskFailed"]
-            IntervalSeconds = 10
-            MaxAttempts     = 3
-            BackoffRate     = 1.5
-          }
-        ]
-        Next = "EvaluateAggregation"
-      }
-
-      EvaluateAggregation = {
-        Type    = "Choice"
-        Comment = "Route based on the aggregation build status"
-        Choices = [
-          {
-            Variable     = "$.aggregation_poll.build_status"
-            StringEquals = "IN_PROGRESS"
-            Next         = "WaitForAggregation"
-          },
-          {
-            Variable     = "$.aggregation_poll.build_status"
-            StringEquals = "SUCCEEDED"
-            Next         = "StartVisualization"
-          }
-        ]
-        Default = "MarkAggregationFailed"
-      }
-
-      MarkAggregationFailed = {
-        Type    = "Pass"
-        Comment = "Record why the aggregation build was considered failed"
-        Parameters = {
-          "Error"   = "AggregationBuildFailed"
-          "Cause.$" = "States.Format('CodeBuild aggregation build {} finished with status {}', $.aggregation.build_id, $.aggregation_poll.build_status)"
-        }
-        ResultPath = "$.error"
-        Next       = "AggregationFailure"
-      }
-
       # ── 6. StartVisualization ──────────────────────────────────────────────
       # Reuses the existing VIIRS orchestrator Lambda UNMODIFIED -- see
       # lambdas/viirs_visualizer/handler.py. It only parses contact_id and
@@ -480,7 +348,7 @@ resource "aws_sfn_state_machine" "sync_pipeline" {
       # ── 7. Terminal states ─────────────────────────────────────────────────
       PipelineSucceeded = {
         Type    = "Succeed"
-        Comment = "Receiver handoff, CSPP aggregation, and visualization complete"
+        Comment = "Receiver handoff, shared Batch aggregation, and visualization complete"
       }
 
       ReceiverFailure = {
@@ -509,9 +377,9 @@ resource "aws_sfn_state_machine" "sync_pipeline" {
           Message = {
             "input.$" = "$$.Execution.Input"
             "error.$" = "$.error"
-            "stage"   = "StartAggregationBuild"
+            "stage"   = "SubmitBatchAggregation"
           }
-          Subject = "Sync Pipeline — CSPP Aggregation Failed"
+          Subject = "Sync Pipeline — Aggregation Failed"
         }
         ResultPath = null
         Next       = "FailExecution"

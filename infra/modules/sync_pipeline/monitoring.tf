@@ -135,7 +135,7 @@ resource "aws_cloudwatch_metric_alarm" "sync_pipeline_execution_failures" {
 #
 # Mirror of sdr_pipeline/monitoring.tf's opt_drift alarm. The SSM association in
 # ssm_drift_check.tf emits OptDriftDetected=1 (namespace SyncPipeline) when
-# /opt/rt-stps or /opt/rt-stps/config/jpss1.xml is missing or empty on the receiver.
+# a receiver helper script (/opt/scripts/sync_receiver_*.sh) is missing or not executable.
 #
 # The receiver is normally stopped between passes. treat_missing_data=notBreaching
 # means no data during stopped periods is not treated as drift.
@@ -143,7 +143,7 @@ resource "aws_cloudwatch_metric_alarm" "sync_pipeline_execution_failures" {
 
 resource "aws_cloudwatch_metric_alarm" "opt_drift" {
   alarm_name          = "${var.project_name}-sync-receiver-opt-drift"
-  alarm_description   = "Hand-installed /opt/rt-stps or jpss1.xml absent or empty on sync receiver EC2 -- manual restoration required before next pass (OE-2)"
+  alarm_description   = "Hand-installed /opt/scripts/sync_receiver_* helper missing or not executable on sync receiver EC2 -- manual restoration required before next pass (OE-2)"
   namespace           = "SyncPipeline"
   metric_name         = "OptDriftDetected"
   statistic           = "Maximum"

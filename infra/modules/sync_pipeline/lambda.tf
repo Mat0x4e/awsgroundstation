@@ -8,8 +8,8 @@
 # moment Ground Station starts streaming. There is no S3 buffer in this path,
 # so a late start loses the pass outright.
 #
-# The corresponding "finish" step (stop the UDP listener, run RT-STPS, upload
-# RDR to S3) is invoked directly by Step Functions via SSM SDK integration
+# The corresponding "finish" step (stop the UDP listener, upload
+# the CADU capture to S3) is invoked directly by Step Functions via SSM SDK integration
 # (see step_functions.tf and iam.tf's sfn role) rather than through a second
 # Lambda, since Step Functions can call ssm:sendCommand natively.
 

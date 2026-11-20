@@ -562,9 +562,10 @@ resource "aws_batch_job_queue" "aggregation" {
 ###############################################################################
 # Batch Job Definition - aggregation (on-demand EC2)
 ###############################################################################
-# Converged aggregation job: replaces BOTH aggregation.yml (async, RTSTPS=on)
-# and aggregation_sync.yml (sync, RTSTPS=off). The RTSTPS env var selects the
-# branch; all other env vars are injected at submit time by the SFN via
+# Converged aggregation job: ONE chain (frames in S3 -> RT-STPS -> RDR -> CSPP
+# -> SDR/GEO) shared by the async and sync pipelines. RTSTPS=on is required (off is retired);
+# sync/async differences (CADU_PREFIX, PN_ENCODED, ASSETS_BUCKET) and all other
+# env vars are injected at submit time by the SFN via
 # ContainerOverrides.Environment (canary blocker #6: Ref:: does not work in
 # environment[], only in command[]).
 #

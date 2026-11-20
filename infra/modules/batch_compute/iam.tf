@@ -364,12 +364,46 @@ resource "aws_iam_role_policy" "batch_execution" {
 #   - S3 read on output_bucket/software/* (entrypoint + J01 LUT tarball)
 #   - S3 read on output_bucket/lut-cache/* (PERF-1 SDR_4_1_DB cache fast-path)
 #   - S3 ListBucket on output bucket conditioned to those three prefixes
+#   - SYNC bucket (when enabled): read+write contacts/* and ListBucket on contacts/*
+#     (frames from cadu/, rdr/sdr/logs out); software/ + lut-cache/ stay in the
+#     SDR output bucket (ASSETS_BUCKET)
 #   - S3 GetObject + ListBucket on reception bucket (RECEPTION_BUCKET parity)
 #   - KMS Encrypt/Decrypt/GenerateDataKey on the pipeline key
 #   - ECR pull on the sdr-pipeline repository + GetAuthorizationToken on *
 #   - logs:Create*/PutLogEvents on the aggregation log group only
 # No PutMetricData: the aggregation entrypoint does not emit custom metrics.
 
+# Sync pipeline bucket access for the SHARED aggregation job (architecture
+# principle: sync and async share the chain after the frame capture). The job
+# reads frames from contacts/*/cadu/ and writes rdr/, sdr/ and logs/ under
+# contacts/* of the sync bucket. software/ and lut-cache/ stay in the SDR
+# output bucket (ASSETS_BUCKET), already covered above. Empty when the sync
+# pipeline is disabled.
+locals {
+  sync_agg_statements = [for s in [
+    {
+      Sid    = "S3ReadWriteSyncContactsPrefix"
+      Effect = "Allow"
+      Action = [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+      ]
+      Resource = "${var.sync_output_bucket_arn}/contacts/*"
+    },
+    {
+      Sid      = "S3ListSyncBucketContactsPrefix"
+      Effect   = "Allow"
+      Action   = ["s3:ListBucket"]
+      Resource = var.sync_output_bucket_arn
+      Condition = {
+        StringLike = {
+          "s3:prefix" = ["contacts/*"]
+        }
+      }
+    },
+  ] : s if var.sync_output_bucket_arn != ""]
+}
 resource "aws_iam_role" "batch_aggregation_job" {
   name        = "${var.project_name}-batch-agg-job"
   description = "Task role for aggregation Batch jobs - S3 rw contacts/*, ro software/*, ro lut-cache/*, ECR pull, KMS, logs"
@@ -401,7 +435,7 @@ resource "aws_iam_role_policy" "batch_aggregation_job" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       # S3 - read+write on contacts/* (download cadu, upload rdr/sdr/logs)
       # GetObject    - download .cadu files (async) or .h5 RDR (sync)
       # PutObject    - upload rdr/sdr/logs
@@ -501,7 +535,7 @@ resource "aws_iam_role_policy" "batch_aggregation_job" {
         ]
         Resource = "${aws_cloudwatch_log_group.aggregation.arn}:*"
       },
-    ]
+    ], local.sync_agg_statements)
   })
 }
 

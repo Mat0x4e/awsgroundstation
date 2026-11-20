@@ -28,11 +28,6 @@ output "state_machine_arn" {
   value       = aws_sfn_state_machine.sync_pipeline.arn
 }
 
-output "codebuild_project_name" {
-  description = "Name of the CSPP-only aggregation CodeBuild project"
-  value       = aws_codebuild_project.sync_aggregation.name
-}
-
 output "receiver_arm_lambda_arn" {
   description = "ARN of the Receiver Arm Lambda function"
   value       = aws_lambda_function.receiver_arm.arn

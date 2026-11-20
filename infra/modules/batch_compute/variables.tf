@@ -65,3 +65,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "sync_output_bucket_arn" {
+  description = "ARN of the sync pipeline output bucket. When set, the shared aggregation job role may read/write contacts/* there (sync converges onto the shared aggregation chain). Empty string when the sync pipeline is disabled."
+  type        = string
+  default     = ""
+}

@@ -131,6 +131,38 @@ resource "aws_cloudwatch_metric_alarm" "sync_pipeline_execution_failures" {
 }
 
 ###############################################################################
+# Step Functions -- execution timeouts. A budget overrun is reported as
+# ExecutionsTimedOut and bypasses every Catch block, so the SNS notification
+# from AggregationFailure/ReceiverFailure never fires; this alarm is the only
+# signal for it.
+###############################################################################
+
+resource "aws_cloudwatch_metric_alarm" "sync_pipeline_execution_timeouts" {
+  alarm_name          = "${var.project_name}-sync-pipeline-execution-timeouts"
+  alarm_description   = "Sync pipeline Step Functions execution timed out (Catch/SNS paths are skipped on timeout)"
+  namespace           = "AWS/States"
+  metric_name         = "ExecutionsTimedOut"
+  statistic           = "Sum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+
+  dimensions = {
+    StateMachineArn = aws_sfn_state_machine.sync_pipeline.arn
+  }
+
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [var.sns_topic_arn]
+
+  tags = merge(var.tags, {
+    Name    = "${var.project_name}-sync-pipeline-execution-timeouts"
+    Service = "sync-pipeline"
+  })
+}
+
+###############################################################################
 # Task 6.1 (mirror) — /opt/* drift detected on sync receiver EC2 (R5-AC2, OE-2)
 #
 # Mirror of sdr_pipeline/monitoring.tf's opt_drift alarm. The SSM association in

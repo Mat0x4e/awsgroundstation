@@ -34,7 +34,8 @@
 #                   still PN-randomized: the image's pristine
 #                   config/jpss1.pn-encoded.xml is used unmodified)
 #   ASSETS_BUCKET   bucket holding the shared assets software/ (CSPP J01 LUTs)
-#                   and lut-cache/ (PERF-1); default OUTPUT_BUCKET. The sync
+#                   and lut-cache/ (PERF-1); default OUTPUT_BUCKET for async, REQUIRED
+#                   when PN_ENCODED=true (fails if empty). The sync
 #                   pipeline passes the SDR output bucket so both paths share
 #                   one set of assets.
 #   RECEPTION_BUCKET  passed by the async SFN for parity; not used (all I/O
@@ -73,6 +74,13 @@ case "${PN_ENCODED:=false}" in
 esac
 CADU_PREFIX="${CADU_PREFIX:-satdump}"
 : "${OUTPUT_BUCKET:?OUTPUT_BUCKET is required}"
+# ASSETS_BUCKET: async keeps the fallback (assets and output share a bucket).
+# Sync (PN_ENCODED=true) must name it: the sync bucket holds neither software/
+# nor lut-cache/, so a silent fallback only fails later on a missing LUT archive.
+if [ "$PN_ENCODED" = "true" ] && [ -z "${ASSETS_BUCKET:-}" ]; then
+    printf '[ERROR] ASSETS_BUCKET is required when PN_ENCODED=true (sync): the sync output bucket does not hold software/ or lut-cache/; refusing to fall back to OUTPUT_BUCKET\n' >&2
+    exit 1
+fi
 ASSETS_BUCKET="${ASSETS_BUCKET:-$OUTPUT_BUCKET}"
 : "${CONTACT_ID:?CONTACT_ID is required}"
 : "${CONTACT_DATE:?CONTACT_DATE is required}"
@@ -304,6 +312,25 @@ fi
         ts_log "INFO" "Step 8a: RDR upload complete"
     else
         ts_log "INFO" "Step 8a: no RDR files to upload"
+    fi
+
+    # -----------------------------------------------------------------------
+    # Step 9a: output contract for the sync configuration (PN_ENCODED=true).
+    # A sync contact exists to produce imagery: zero VIIRS RDR or zero SDR/GEO
+    # means the capture was not parsed (bad framing / PN), so the job must FAIL
+    # rather than report a green pass with an empty sdr/ prefix. Runs after the
+    # uploads so any RDR evidence is preserved. Async (PN_ENCODED=false) keeps
+    # warn-and-continue for non-VIIRS passes.
+    # -----------------------------------------------------------------------
+    if [ "$PN_ENCODED" = "true" ]; then
+        if [ -z "$VIIRS_RDR" ]; then
+            ts_log "ERROR" "Step 9a: sync contact produced no VIIRS RDR (RNSCA-RVIRS*.h5; ${RDR_COUNT} other RDR file(s)) -- failing the job"
+            exit 1
+        fi
+        if [ "$SDR_COUNT" -eq 0 ]; then
+            ts_log "ERROR" "Step 9a: sync contact: CSPP produced zero SDR/GEO files from ${VIIRS_RDR} -- failing the job"
+            exit 1
+        fi
     fi
 
 

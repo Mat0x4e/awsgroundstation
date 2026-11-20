@@ -46,6 +46,19 @@ Batch job fails almost immediately with, e.g.:
    ```
 5. Only now submit/validate the Batch job that consumes the image.
 
+## CORRECTION (learned live 2026-11-20): `--source-version` does NOT pick the branch for the SDR image
+
+`groundstation-noaa20-sdr-docker-build`'s inline buildspec ignores the source CodeBuild
+downloads and runs its own `git clone --branch "$REPO_BRANCH"` (project env var, default
+`main`). `--source-version <branch>` therefore still builds `main`. Override the variable:
+```
+aws codebuild start-build --project-name groundstation-noaa20-sdr-docker-build \
+  --environment-variables-override name=REPO_BRANCH,value=<branch>,type=PLAINTEXT \
+  --timeout-in-minutes-override 120 --region eu-central-1
+```
+and confirm in the build log: `Building from branch <branch> at <sha>`. (Check the viirs
+project's buildspec for the same pattern before relying on `--source-version` there.)
+
 ## SECOND TRAP: the SDR image push outlives the project timeout (learned live 2026-11-20)
 
 `groundstation-noaa20-sdr-docker-build` has `timeoutInMinutes = 30`. The SDR image is ~22 GB:

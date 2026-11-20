@@ -29,7 +29,7 @@ end-to-end sequence with real timings, and the constraints that shaped the desig
 | [`infra/`](infra/) | All Terraform: root config, `terraform.tfvars`, and `infra/modules/*` |
 | [`docs/`](docs/) | Architecture, operational runbooks, contact log (below) |
 | [`scripts/`](scripts/) | Pass planner, I/Q extraction, aggregation, VIIRS visualisation |
-| [`buildspecs/`](buildspecs/) | Legacy CodeBuild buildspecs. Mostly superseded by the AWS Batch entrypoints (`scripts/aggregation_entrypoint.sh`, `scripts/viirs/render_entrypoint.sh`); `docker_build*.yml` still drive the image builds. `aggregation_sync.yml` is still `file()`-read on the CodeBuild sync fallback branch only |
+| [`buildspecs/`](buildspecs/) | Legacy CodeBuild buildspecs. Mostly superseded by the AWS Batch entrypoints (`scripts/aggregation_entrypoint.sh`, `scripts/viirs/render_entrypoint.sh`); `docker_build*.yml` still drive the image builds. The sync aggregation buildspec (`aggregation_sync.yml`) and the sync CodeBuild fallback were removed: the sync path runs the same Batch aggregation job as async |
 | [`docker/`](docker/) | Image definitions — SatDump, RT-STPS, CSPP SDR in one image. `sdr-pipeline/enable_satdump_projection.py` turns on SatDump's own georeferencing at build time |
 | [`lambdas/`](lambdas/) | Lambda handlers (scheduler, aggregation trigger, VIIRS orchestrator) |
 | [`articles/`](articles/) | Write-ups of the project, with their own `awsdac` figures |

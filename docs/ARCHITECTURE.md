@@ -68,8 +68,8 @@ data yet: no sync contact flown.
  │ S3 reception bucket      │                               │ (VITA-49 Ext., format unverified)
  │ ~22-50 x 2.18 GB .pcap   │                               ▼
  └────────────┬─────────────┘                ┌──────────────────────────────┐
-              │                              │ Receiver EC2 (private subnet,│
-  EventBridge │ COMPLETED                    │ 2nd ENI + EIP)               │
+              │                              │ Receiver EC2 (public subnet, │
+  EventBridge │ COMPLETED                    │ default VPC, Elastic IP)     │
   (filter: 32a1fdbb)                         │  PREPASS -600s: receiver_arm │
               ▼                              │  Lambda starts EC2 + SSM arm │
  ┌──────────────────────────┐                │  sync_receiver_listen.py     │

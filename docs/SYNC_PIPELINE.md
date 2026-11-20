@@ -167,7 +167,11 @@ validation experiment.
    `frame_sync` logs successful lock and produces RDR HDF5 output. Zero RDR output with
    frame-sync errors means the header parsing is stripping too many or too few bytes.
    Zero RDR output with no frame-sync errors means the frames are malformed before
-   reaching RT-STPS.
+   reaching RT-STPS. Since the shared chain, the aggregation job itself FAILS in the sync
+   configuration (`PN_ENCODED=true`) when there is no `RNSCA-RVIRS*.h5` RDR or CSPP yields zero
+   SDR/GEO (RDR files are uploaded first as evidence), so the state machine reaches Catch and SNS
+   instead of a silent success. A visualization failure notifies via SNS and a metric alarm
+   (`SyncPipeline` namespace) before the execution ends.
 
 4. **Record the result.** Once all three steps pass, update this section with the contact
    ID, date, and verified header layout. Until then, treat the `ReceiverReadyFailure`

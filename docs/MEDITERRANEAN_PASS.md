@@ -174,7 +174,9 @@ paid contacts. **Reserve manually.**
 
 ```bash
 export AWS_PROFILE=AWSAdminAccess-471112743408 AWS_REGION=eu-central-1
-export MP=arn:aws:groundstation:eu-central-1:471112743408:mission-profile/2655b0f6-8196-44d3-bbc0-3782b1942d34
+# Managed async profile (32a1fdbb-...). Contacts #5/#6 were booked on the legacy unmanaged
+# 2655b0f6-... profile; since 2026-11-19 the async pipeline only triggers on the managed one.
+export MP=$(terraform -chdir=infra output -raw mission_profile_arn)
 export SAT=arn:aws:groundstation::471112743408:satellite/33f035e1-73f7-47a5-9df8-fbc48636dca8
 
 # 1. Refresh the offer list (max 7 days ahead, or it throws)

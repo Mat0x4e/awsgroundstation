@@ -8,9 +8,11 @@ Read-only. Live checks ran (SSO was valid). Nothing was edited except this repor
 > table; trial scripts moved to `scripts/archive/sync-onboarding-trials/`; root `contacts_*.json`
 > removed and ignored; `.worktrees/` ignored. Settled: contact #7 used the managed profile
 > `32a1fdbb` (`describe-contact`), so `CONTACTS.md` was right and `WORKSTREAMS.md` was corrected.
-> **New finding:** the async rule `contact-completed-sdr` does not filter on the mission profile,
-> so a sync contact would also start the async state machine (checklist step 1). Still open: the
-> two paid contacts (fresh async on Batch, first sync), `matplotlib` in `test_env`.
+> **New finding, fixed the same day:** the async rule `contact-completed-sdr` did not filter on the
+> mission profile, so a sync contact would also have started the async state machine. It now
+> matches only the managed profile `32a1fdbb` (applied with agreement, `terraform plan` = No
+> changes). Local test suite green after installing `matplotlib==3.9.0` in `test_env` (293 passed,
+> 6 skipped). Still open: the two paid contacts (fresh async on Batch, first sync).
 
 ## Bottom line
 

@@ -261,6 +261,27 @@ resource "aws_network_interface_attachment" "receiver" {
 }
 
 ###############################################################################
+# Elastic IP on the PRIMARY ENI (eth0) for SSM + S3 egress
+#
+# The instance has a secondary ENI (device_index 1), so AWS does not
+# auto-assign a public IP. With no NAT and no VPC endpoint, the instance could
+# not reach SSM (Run Command) or S3 (upload). An EIP on the primary ENI gives
+# it an egress path via the IGW (~3.6 USD/month). The dataflow ENI and the
+# endpoint group binding are untouched.
+###############################################################################
+
+resource "aws_eip" "receiver" {
+  domain                    = "vpc"
+  network_interface         = aws_instance.receiver.primary_network_interface_id
+  associate_with_private_ip = aws_instance.receiver.private_ip
+
+  tags = merge(var.tags, {
+    Name    = "${var.project_name}-sync-receiver-eip"
+    Service = "sync-pipeline"
+  })
+}
+
+###############################################################################
 # Dataflow Endpoint Group -- the live network endpoint Ground Station streams
 # demod/decoded data to during the contact
 ###############################################################################

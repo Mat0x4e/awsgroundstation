@@ -37,3 +37,8 @@ output "receiver_arm_lambda_function_name" {
   description = "Function name of the Receiver Arm Lambda"
   value       = aws_lambda_function.receiver_arm.function_name
 }
+
+output "receiver_public_ip" {
+  description = "Elastic IP on the sync receiver primary ENI (SSM and S3 egress)"
+  value       = aws_eip.receiver.public_ip
+}

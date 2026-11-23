@@ -267,6 +267,11 @@ A first sync contact is a **packet-format experiment**, not a production pass: e
 frame sync to fail on the first try. The goal is a raw capture you can inspect. Do the steps in
 order; each one is cheap except step 6 (paid, ~$105 at Stockholm 1, explicit user go-ahead).
 
+> **Before step 6 (reserve), complete the dry run in [`SYNC_DRY_RUN.md`](SYNC_DRY_RUN.md).**
+> The dry run invokes the real Lambda and state machine (not operator credentials) and must
+> pass before the contact is booked. See that document for the full deviation list and
+> PowerShell commands.
+
 1. **Check the async rule is scoped**: `contact-completed-sdr`'s event pattern must contain
    `missionProfileArn` (done 2026-11-19; `aws events describe-rule --name
    groundstation-noaa20-contact-completed-sdr`). Otherwise a sync contact also starts the async

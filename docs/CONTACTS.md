@@ -605,3 +605,20 @@ faults, each fatal on its own; neither was exercised by the dry run:
 
 No Step Functions execution ran (no LOS handoff). The contact is probably billed as flown (not
 verified on the bill).
+
+### Pre-contact dry run gaps (2026-11-20)
+
+The dry run run on 2026-11-20 used operator credentials for the SSM arm/finish commands
+rather than the real `receiver_arm` Lambda. That substitution hid both fatal faults.
+
+| Deviation | Validated? | Result |
+|-----------|-----------|--------|
+| SSM arm/finish run as operator (admin), not as `receiver_arm` Lambda | Not validated -- same operator start that always worked | Fatal: Lambda had no KMS permissions; operator role did. Instance never reached running. |
+| DFEG ENI creation (Ground Station managed, contact time only) | Cannot be validated offline | Fatal: Ground Station role had no EC2 permissions. Contact failed before AOS. |
+| No real UDP stream | Known risk (REL-5) | No data -- also due to the above failures. |
+| Fake contact ID | None needed (passthrough string) | n/a |
+
+Both fatal deviations are fixed in branch `fix/sync-contact8-failures` (IAM policies updated and
+verified by `simulate-principal-policy` / `simulate-custom-policy`). The corrected dry run
+plan -- using the real Lambda and state machine, not operator credentials -- is in
+[`docs/SYNC_DRY_RUN.md`](SYNC_DRY_RUN.md).

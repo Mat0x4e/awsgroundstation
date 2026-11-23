@@ -560,7 +560,7 @@ first try; the raw capture in S3 is the deliverable. Flown through the shared ag
 | Property | Value |
 |----------|-------|
 | **Contact ID** | `c5e93aa1-4c0e-42b6-b7bf-20669d7ef53d` |
-| **Status** | 📅 SCHEDULED (reserved 2026-11-20) |
+| **Status** | ❌ FAILED (2026-11-22 11:23:59 UTC) - no data received |
 | **Satellite** | NOAA-20 (NORAD 43013) |
 | **Ground Station** | Stockholm 1 (`eu-north-1`) |
 | **Mission Profile** | **sync** demod/decode (`2e719f99-35f5-4720-b974-ba177036c1ee`) |
@@ -581,4 +581,81 @@ Readiness:
   0 RDR, as expected for already-derandomized frames (the same frames give 5 RDR with
   `PN_ENCODED=false`: the PN switch reaches RT-STPS).
 - ✅ 2026-11-20: async regression on contact #7 with the shared chain: 5 RDR, 6 SDR/GEO.
-- ⏳ Receiver `/opt/scripts` install + dry arm (checklist steps 2-3) - before Sunday 10:54 UTC.
+- ✅ 2026-11-20: receiver `/opt/scripts` install + dry arm/finish via SSM (run with operator
+  credentials, not as the receiver_arm Lambda - see outcome).
+
+Outcome (diagnosed 2026-11-23): **FAILED, no data received.** Two independent configuration
+faults, each fatal on its own; neither was exercised by the dry run:
+
+1. **Dataflow endpoint group role has no EC2 permissions.** Contact `errorMessage`: "Your Dataflow
+   Endpoint Group's role is missing the necessary permissions to create Elastic Network
+   Interfaces". The DFEG reuses `groundstation-noaa20-demo-groundstation-role`, whose only policy
+   is the async S3 delivery (`s3:PutObject`, KMS). AWS's example role policy for a dataflow
+   endpoint needs `ec2:CreateNetworkInterface`, `DeleteNetworkInterface`,
+   `CreateNetworkInterfacePermission`, `DeleteNetworkInterfacePermission`, `DescribeSubnets`,
+   `DescribeVpcs`, `DescribeSecurityGroups`
+   ([doc](https://docs.aws.amazon.com/ground-station/latest/ug/how-it-works.dataflow-endpoint-group.html)).
+   Ground Station creates that ENI only at contact time, so no dry run can catch it.
+2. **The receiver never started.** The receiver_arm Lambda called `StartInstances` at 10:54:38,
+   10:59:45 and 11:05:56 UTC. Each time the instance went `pending` and fell back to `stopped`
+   with `Client.InvalidKMSKey`: the root volume is encrypted with the pipeline CMK
+   (`70451aac-...`), and the Lambda role has no KMS permissions (`kms:CreateGrant` etc.) to start
+   an instance with a CMK-encrypted volume. Operator starts worked because the admin role has
+   KMS access. Each Lambda attempt also waited ~4 min on a state that had already failed.
+
+No Step Functions execution ran (no LOS handoff). The contact is probably billed as flown (not
+verified on the bill).
+
+### Pre-contact dry run gaps (2026-11-20)
+
+The dry run run on 2026-11-20 used operator credentials for the SSM arm/finish commands
+rather than the real `receiver_arm` Lambda. That substitution hid both fatal faults.
+
+| Deviation | Validated? | Result |
+|-----------|-----------|--------|
+| SSM arm/finish run as operator (admin), not as `receiver_arm` Lambda | Not validated -- same operator start that always worked | Fatal: Lambda had no KMS permissions; operator role did. Instance never reached running. |
+| DFEG ENI creation (Ground Station managed, contact time only) | Cannot be validated offline | Fatal: Ground Station role had no EC2 permissions. Contact failed before AOS. |
+| No real UDP stream | Known risk (REL-5) | No data -- also due to the above failures. |
+| Fake contact ID | None needed (passthrough string) | n/a |
+
+**Third fault (found during dry-run preparation, after the contact):** the receiver security
+group used the Ground Station agent pattern (ingress from the Ground Station prefix list, no UDP
+egress). A dataflow endpoint ENI in our subnet needs self-referencing UDP ingress and egress on
+the shared SG instead. Found by reading the doc "VPC configuration with a dataflow endpoint"
+(https://docs.aws.amazon.com/ground-station/latest/ug/dataflows.vpc-configuration.html). It
+would have blocked frame delivery even with the two IAM fixes. Fixed by commit `cae5ccf` on
+`fix/sync-contact8-failures`; validated in the dry run by the network canary (SYNC_DRY_RUN.md
+Step 1b).
+
+Both fatal deviations are fixed in branch `fix/sync-contact8-failures` (IAM policies updated and
+verified by `simulate-principal-policy` / `simulate-custom-policy`). The corrected dry run
+plan -- using the real Lambda and state machine, not operator credentials -- is in
+[`docs/SYNC_DRY_RUN.md`](SYNC_DRY_RUN.md).
+
+---
+
+## Contact #9 — first SYNC contact, retry of #8 (packet-format experiment)
+
+Retry of contact #8 after the three configuration faults were fixed (branch
+`fix/sync-contact8-failures`, PR #10) and the live-faithful dry run passed on 2026-11-23
+([`SYNC_DRY_RUN.md`](SYNC_DRY_RUN.md) "Run log"). Same purpose as #8: capture what the
+antenna sends over UDP; `raw/raw_capture.bin` in S3 is the deliverable.
+
+| Property | Value |
+|----------|-------|
+| **Contact ID** | `ccc4fe43-eb79-4ac3-9ebe-80d44330908a` |
+| **Status** | 📅 SCHEDULED (reserved 2026-11-23, user go-ahead) |
+| **Satellite** | NOAA-20 (NORAD 43013) |
+| **Ground Station** | Stockholm 1 (`eu-north-1`) |
+| **Mission Profile** | **sync** demod/decode (`2e719f99-35f5-4720-b974-ba177036c1ee`) |
+| **Pre-pass Start** | 2026-11-26 11:18:46 UTC (receiver_arm PREPASS) |
+| **Visibility** | 2026-11-26 11:28:46 → 11:40:38 UTC (11m52s) |
+| **Post-pass End** | 2026-11-26 11:42:38 UTC |
+| **Max Elevation** | 80.42° (AWS) |
+| **Estimated Cost** | ~$120-130 (on-demand narrowband, $10/min at Stockholm 1) |
+| **Tags** | `Purpose=first-sync-contact-retry`, `Experiment=packet-format`, `Retry-Of=c5e93aa1` |
+
+Known risks accepted before booking (not validatable offline, see `SYNC_DRY_RUN.md`): real
+VITA-49 Extension packet layout, Ground Station-side ENI creation, eu-north-1 -> eu-central-1
+transport, CSPP + visualization on sync data. The network canary stays deployed so the
+network check can be repeated just before PREPASS.

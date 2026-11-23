@@ -39,13 +39,6 @@ data "aws_subnets" "default" {
   }
 }
 
-# AWS Ground Station's managed prefix list -- scopes the UDP ingress rule to
-# Ground Station's own address space instead of 0.0.0.0/0, per AWS's dataflow
-# endpoint security group guidance.
-data "aws_ec2_managed_prefix_list" "groundstation" {
-  name = "com.amazonaws.global.groundstation"
-}
-
 ###############################################################################
 # Security Group
 ###############################################################################
@@ -55,12 +48,28 @@ resource "aws_security_group" "receiver" {
   description = "Synchronous receiver EC2 -- UDP ingress from Ground Stations dataflow endpoint only; SSM outbound HTTPS only"
   vpc_id      = data.aws_vpc.default.id
 
+  # Dataflow endpoint path: Ground Station creates an ENI in our subnet with
+  # the DFEG security group (this same SG) and sends UDP from that private IP
+  # to the receiver. So the SG needs UDP ingress from itself and UDP egress to
+  # itself. The Ground Station prefix list (public IPs) is the agent pattern
+  # and does not apply here.
+  # https://docs.aws.amazon.com/ground-station/latest/ug/dataflows.vpc-configuration.html
+  # NOTE: the SG description above is immutable (change forces replacement);
+  # it is left as is on purpose.
   ingress {
-    description     = "Ground Station demod/decode dataflow stream"
-    from_port       = var.receiver_udp_port
-    to_port         = var.receiver_udp_port
-    protocol        = "udp"
-    prefix_list_ids = [data.aws_ec2_managed_prefix_list.groundstation.id]
+    description = "Ground Station dataflow stream from the DFEG ENI (self)"
+    from_port   = var.receiver_udp_port
+    to_port     = var.receiver_udp_port
+    protocol    = "udp"
+    self        = true
+  }
+
+  egress {
+    description = "Ground Station dataflow stream from DFEG ENI to receiver (self)"
+    from_port   = var.receiver_udp_port
+    to_port     = var.receiver_udp_port
+    protocol    = "udp"
+    self        = true
   }
 
   egress {

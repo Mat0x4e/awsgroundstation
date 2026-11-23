@@ -94,6 +94,40 @@ resource "aws_iam_role_policy" "receiver_arm_lambda" {
         Action   = ["ssm:DescribeInstanceInformation"]
         Resource = "*"
       },
+      # KMS -- starting an instance whose root volume is encrypted with the CMK
+      # needs the caller to create a grant for EC2 (else the instance falls back
+      # to stopped with Client.InvalidKMSKey). Limited to EC2 use of this key.
+      # The key policy's root-account statement delegates to IAM, so no key
+      # policy change is needed.
+      {
+        Sid    = "KMSForEncryptedRootVolume"
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKeyWithoutPlaintext",
+          "kms:DescribeKey",
+        ]
+        Resource = var.kms_key_arn
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ec2.${data.aws_region.current.id}.amazonaws.com"
+          }
+        }
+      },
+      {
+        Sid      = "KMSCreateGrantForAwsResources"
+        Effect   = "Allow"
+        Action   = ["kms:CreateGrant"]
+        Resource = var.kms_key_arn
+        Condition = {
+          Bool = {
+            "kms:GrantIsForAWSResource" = "true"
+          }
+          StringEquals = {
+            "kms:ViaService" = "ec2.${data.aws_region.current.id}.amazonaws.com"
+          }
+        }
+      },
       # CloudWatch Logs — write Lambda execution logs
       {
         Sid    = "CloudWatchLogs"

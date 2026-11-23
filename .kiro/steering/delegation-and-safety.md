@@ -58,6 +58,20 @@ without needing to invoke a workflow file. Keep this file short so the always-on
   `ProductsWritten` emitted AFTER the upload, and fresh object timestamps. (See aws-knowledge.md
   "dispatch-vs-completion".)
 
+## Dry runs: as close to live conditions as possible
+
+(Decided by the project owner 2026-11-23, after contact #8 failed on two faults the dry run
+could not see.)
+
+- A dry run before a paid contact exercises the REAL live path: the same triggers, the same
+  principals (invoke the real Lambda / state machine with a test event; never substitute operator
+  or admin credentials), the same instance state at start (stopped), the same network path.
+- Every deviation from live conditions (fake contact id, no satellite signal, skipped step) is
+  listed BEFORE the dry run, with how that gap is validated another way (IAM policy simulation,
+  reading the role policy against the AWS doc, a canary). A gap with no validation is a known
+  risk to state to the user before booking, not something to discover at AOS.
+- Record the deviation list and its validation in the contact's entry in `docs/CONTACTS.md`.
+
 ## ASCII-only in Terraform argument values
 
 - `description`, `name`, and tag VALUES in `*.tf` must be ASCII only. A non-ASCII character

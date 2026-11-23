@@ -76,6 +76,12 @@ variable "enable_sync_pipeline" {
   default     = false
 }
 
+variable "enable_network_canary" {
+  description = "Create the TEMPORARY network canary Lambda in the sync receiver subnet and SG (requires enable_sync_pipeline = true). Remove once the dataflow UDP path is validated."
+  type        = bool
+  default     = false
+}
+
 variable "satellite_norad_id" {
   description = "NORAD catalog ID for the target satellite"
   type        = number

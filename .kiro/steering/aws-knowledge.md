@@ -570,3 +570,24 @@ https://docs.aws.amazon.com/ground-station/latest/ug/dataflows.vpc-configuration
 
 **Rule**: read the doc for the exact delivery mechanism before writing SG rules. Validate with a
 canary in the same subnet and SG (`lambdas/network_canary`, `docs/SYNC_DRY_RUN.md` Step 1b).
+
+---
+
+## EC2 -- DescribeInstances Right After StartInstances Can Return the Previous Stopped State
+
+**Symptom**: `receiver_arm` raised "failed to start" 91 ms after `StartInstances` in the 2026-11-23
+dry run, while the instance then started normally. The poll saw `stopped` with a stale
+`StateReason` (e.g. `Client.InvalidKMSKey` left over from an earlier failed start).
+
+**Root cause**: EC2 is eventually consistent. A `DescribeInstances` issued immediately after
+`StartInstances` can still return the pre-call state (`stopped`) and its old `StateReason`.
+
+**❌ INCORRECT**: poll once after `StartInstances` and raise if the state is `stopped` (or the
+`StateReason` looks like an error).
+
+**✅ CORRECT**: treat `stopped` as a failure only after observing a transition out of `stopped`
+(`pending`/`running`) and a later return to `stopped`, or after a grace period (tens of seconds)
+has elapsed since `StartInstances`. Never fail on the first poll.
+
+**Rule**: a stale `StateReason` is not evidence of a current failure; judge the start by the state
+transition, not by one early read.

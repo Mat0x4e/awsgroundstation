@@ -39,7 +39,8 @@ Read and act on this table BEFORE running any step.
 | 6 | Security group (third Contact #8 fault): the rules were the Ground Station agent pattern (prefix-list ingress, no UDP egress), wrong for a dataflow endpoint ENI. Fixed by commit `cae5ccf`: self-referencing UDP ingress and egress on port 55888 on the shared SG (`infra/modules/sync_pipeline/ec2.tf`). | Read against https://docs.aws.amazon.com/ground-station/latest/ug/dataflows.vpc-configuration.html, then exercised by the canary (Step 1b): it uses the same SG, so its datagrams only arrive if the self-referencing UDP rules work. | Validated by Step 1b (SG rules only, not the Ground Station ENI itself) |
 | 3 | DFEG ENI creation by Ground Station (at contact time only -- no dry-run mechanism can trigger it). The IAM fix grants the 7 required EC2 actions to the Ground Station role. | `simulate-principal-policy` on the updated `groundstation-noaa20-demo-groundstation-role` for `ec2:CreateNetworkInterface`, `ec2:DeleteNetworkInterface`, `ec2:CreateNetworkInterfacePermission`, `ec2:DeleteNetworkInterfacePermission`, `ec2:DescribeSubnets`, `ec2:DescribeVpcs`, `ec2:DescribeSecurityGroups` -- all `allowed`, including region condition (prior step, branch `fix/sync-contact8-failures`). | Pre-validated via simulation; IAM cannot be exercised further offline |
 | 4 | EC2 start KMS path. `StartInstances` on `i-06a51f5b29e26aeaa` requires the receiver_arm Lambda role to call `kms:CreateGrant` etc. via `ec2.eu-central-1.amazonaws.com` with `kms:GrantIsForAWSResource=true`, because the root volume is encrypted with the pipeline CMK (`70451aac-...`). The fix adds those permissions to the Lambda role. | `simulate-custom-policy` on the updated `receiver_arm_lambda` policy for `kms:CreateGrant`, `kms:Decrypt`, `kms:GenerateDataKeyWithoutPlaintext`, `kms:DescribeKey` with `kms:ViaService=ec2.eu-central-1.amazonaws.com` and `kms:GrantIsForAWSResource=true` -- all `allowed` (prior step). The key policy allows `kms:*` for the account root, which delegates to IAM -- no key policy change needed. The simulation evaluates identity policies only; key policy evaluation and the actual EC2-to-KMS runtime call are exercised live in Step 1 when the Lambda calls `start_instances`. | Exercised live in Step 1 |
-| 5 | Empty CADU capture. The canary datagrams are not VITA-49 Signal Data, so the parser drops them and `combined.cadu` stays empty. The finish script then exits 1 (after uploading `raw/raw_capture.bin`), so the state machine ends via `ReceiverFailure` (or `AggregationFailure` if a capture was somehow uploaded). | Expected: SNS notification and `FailExecution`. This is the correct end state for the dry run -- not a pipeline error. | Expected / acceptable |
+| 5 | Canary payload is not real satellite data. With `"vita49": true` (Step 1b) the canary frames each datagram as VITA-49 Signal Data (28-byte header, so our own assumption of the layout), and the listener extracts a non-empty `combined.cadu`. The CADU bytes are filler, not PN-encoded CCSDS frames, so RT-STPS finds no frames and produces no RDR. The finish script uploads both `raw/raw_capture.bin` and `cadu/combined.cadu`, the real state machine runs `SubmitBatchAggregation`, and the job fails on the sync zero-RDR strict check. The execution ends via `AggregationFailure` + SNS (`FailExecution`). | Expected: SNS "Sync Pipeline - Aggregation Failed" and status `FAILED`. This is the correct end state for the dry run -- not a pipeline error. It exercises FinishReceiver, the CADU upload, Batch submission and the strict check. | Expected / acceptable |
+| 7 | EventBridge triggers bypassed by direct invocation. Steps 1 and 2 invoke the Lambda and the state machine directly, so the PREPASS and COMPLETED rules and their input transformers do not fire. | Validated by the orchestrator on 2026-11-23: (a) PREPASS rule proven live on contact #8 (`receiver_arm` invoked 10:54:35 UTC = PREPASS start). (b) COMPLETED rule `groundstation-noaa20-contact-completed-sync`: `aws events test-event-pattern` with the real contact #8 event (status set to COMPLETED) returns True; it returns False for `contact-completed-sdr` and `contact-prepass-sync`. Input paths: `contact_id=$.detail.contactId`, `contact_time=$.time`, `bucket` = sync output bucket. (c) `simulate-principal-policy` for role `groundstation-noaa20-sync-eventbridge`, `states:StartExecution` on the sync state machine: allowed. | Validated (rule match and permission); not exercised end to end until the live contact |
 
 **Note on the IAM simulations:** the simulator evaluates identity policies only. It does
 not confirm that Ground Station or EC2 succeed at runtime, and it does not evaluate the
@@ -248,11 +249,17 @@ the receiver security group. Defaults for `target_ip` (receiver ENI private IP) 
 `port` (55888) come from its environment, so the event can be minimal. Each datagram is
 `GSCANARY` + a 4-byte big-endian sequence number, zero-padded to `payload_size`.
 
+With `"vita49": true` the datagram is framed as VITA-49 Signal Data so the listener
+extracts a payload: `payload_size` is then the total datagram length (rounded down to a
+multiple of 4, minimum 40) and each datagram carries `payload_size - 28` payload bytes.
+The response reports `expected_listener_payload_bytes` = `sent x (payload_size - 28)`
+(0 when `vita49` is false). This step uses `vita49: true`, so 100 x (1000 - 28) = 97200.
+
 ```powershell
 $CANARY_FN = terraform -chdir=infra output -raw sync_pipeline_network_canary_function_name
 # Expected: groundstation-noaa20-sync-network-canary
 
-@{ count = 100; payload_size = 1000; pacing = 0.001 } | ConvertTo-Json -Compress |
+@{ count = 100; payload_size = 1000; pacing = 0.001; vita49 = $true } | ConvertTo-Json -Compress |
   Out-File -FilePath "$env:TEMP\dryrun_canary_event.json" -Encoding ascii
 
 aws lambda invoke `
@@ -267,7 +274,7 @@ Get-Content "$env:TEMP\dryrun_canary_response.json"
 ```
 
 Expected response: `sent = 100`, `failed = 0`, `first_seq = 0`, `last_seq = 99`, `errors`
-empty, no `FunctionError`. UDP is fire-and-forget: `sent = 100` proves only that the
+empty, `expected_listener_payload_bytes = 97200`, no `FunctionError`. UDP is fire-and-forget: `sent = 100` proves only that the
 sockets accepted the datagrams. Delivery is proved by the receiver side, below.
 
 ### Verify receipt on the receiver (listener counters)
@@ -292,7 +299,8 @@ aws ssm get-command-invocation --command-id $LOG_ID `
 ```
 
 Expected: a `first_packet_received` line and a `listener_stats` line with
-`packets_received = 100`. `frames_extracted` and `bytes_written` will be `0`: see below.
+`packets_received = 100`. With `vita49: true`, `bytes_written` equals the canary's
+`expected_listener_payload_bytes` (97200).
 
 If `packets_received` stays 0 while the canary reports `sent = 100`, the SG path is still
 broken (or the canary targeted a stale IP): STOP, do not book the contact.
@@ -309,13 +317,14 @@ aws s3 ls "s3://$BUCKET/contacts/" --recursive `
 | Object | Expected | Why |
 |--------|----------|-----|
 | `.../raw/raw_capture.bin` | present, about 100000 bytes (100 x 1000) | The raw tee writes every UDP payload, whatever its content. Proves ENI -> listener -> tee -> finish upload (KMS) end to end. |
-| `.../cadu/combined.cadu` | ABSENT (finish logs `Capture file ... missing or empty` and exits 1) | Canary payloads start with `GSCA`, so the parser reads packet type 4, not Signal Data (type 1), and drops them. This is correct: the canary is not VITA-49. |
+| `.../cadu/combined.cadu` | present, non-empty, size = the canary's `expected_listener_payload_bytes` (97200) | The `vita49: true` datagrams carry a Signal Data header, so the listener extracts the payload. |
 | `.../logs/sync_receiver_finish.log` | present | Uploaded by the finish script on exit. |
 
-A non-empty `combined.cadu` is NOT expected from the canary and cannot be, without
-forging VITA-49 Signal Data headers, which would only test our own assumption about the
-layout. Because `combined.cadu` is absent, Step 2 ends in `ReceiverFailure` (after the
-FinishReceiver retries) rather than `AggregationFailure`: both end states are acceptable.
+The VITA-49 framing is our own assumption of the layout, so a non-empty `combined.cadu`
+proves the listener/finish/upload mechanics, not the real satellite format (see "What
+this dry run does NOT validate"). The payload is filler, not PN-encoded CCSDS frames, so
+Step 2 reaches `SubmitBatchAggregation` and ends in `AggregationFailure`. If it ends in
+`ReceiverFailure` instead, the finish path is broken: investigate before booking.
 Check `raw_capture.bin` size:
 
 ```powershell
@@ -386,10 +395,10 @@ aws stepfunctions describe-execution `
 |-------|-----------------|-------|
 | `DeriveDateOnly`, `DeriveDateParts`, `BuildContactDate` | Pass through instantly | Date string derivation only |
 | `WaitForDelivery` | 30-second pause | |
-| `FinishReceiver` | SSM command issued to `sync_receiver_finish.sh <bucket> dryrun-... <date>` on `i-06a51f5b29e26aeaa`; listener stops; empty capture uploaded to S3 | May exit 0 (clean empty) or non-zero (triggering up to 2 retries before Catch); either path is acceptable |
-| `CheckFinishStatus` / `EvaluateFinishStatus` | Poll SSM status -> `Success` -> `StopReceiver` (or `Failed` -> `ReceiverFailure -> SNS`) | Both routes are acceptable for the dry run |
+| `FinishReceiver` | SSM command issued to `sync_receiver_finish.sh <bucket> dryrun-... <date>` on `i-06a51f5b29e26aeaa`; listener stops; `raw/raw_capture.bin` and non-empty `cadu/combined.cadu` uploaded to S3 | Must exit 0. A failure here (`ReceiverFailure`) is NOT acceptable in this dry run |
+| `CheckFinishStatus` / `EvaluateFinishStatus` | Poll SSM status -> `Success` -> `StopReceiver` | |
 | `StopReceiver` | EC2 stop requested; instance returns to `stopped` | |
-| `SubmitBatchAggregation` | Batch job submitted with `CADU_PREFIX=cadu, PN_ENCODED=true, OUTPUT_BUCKET=<bucket>`; job FAILS (empty/absent CADU file, RT-STPS produces no RDR) | Expected failure (deviation 5) |
+| `SubmitBatchAggregation` | Batch job submitted with `CADU_PREFIX=cadu, PN_ENCODED=true, OUTPUT_BUCKET=<bucket>`; RT-STPS finds no frames in the filler payload and the job FAILS on the sync zero-RDR strict check | Expected failure (deviation 5) |
 | `AggregationFailure` | SNS notification fires, subject: "Sync Pipeline - Aggregation Failed" | Check inbox |
 | `FailExecution` | Execution reaches status `FAILED` | Correct dry-run end state |
 
@@ -425,8 +434,8 @@ aws s3 ls "s3://$BUCKET/contacts/" --recursive `
 # Expected: at least raw/ and/or cadu/ objects under the dryrun contact prefix
 ```
 
-SNS email expected: "Sync Pipeline - Aggregation Failed" (or "Sync Pipeline - Receiver
-Handoff Failed" if FinishReceiver exhausted its retries). No action required on either.
+SNS email expected: "Sync Pipeline - Aggregation Failed". No action required. A "Sync
+Pipeline - Receiver Handoff Failed" email means FinishReceiver failed: investigate.
 
 CloudWatch log group `/aws/lambda/groundstation-noaa20-sync-receiver-arm` must show
 the full arm sequence (see Step 1 expected outcome table).
@@ -457,15 +466,21 @@ aws ec2 stop-instances `
 
 ## What this dry run does NOT validate
 
-- **Packet format / VITA-49 layout** (deviation 2): the canary is not VITA-49 and proves only transport. The VITA-49 Extension header layout from Ground
-  Station's demod/decode egress is unknown until a real contact delivers a raw UDP
-  stream. The listener will bind and arm correctly; no real frames arrive. REL-5
-  (packet-format validation gate in `SYNC_PIPELINE.md`) remains open until the first
-  real contact produces `raw/raw_capture.bin` in S3 and that file is inspected against
-  the onboarding-provided VITA-49 spec.
-- **Cross-region transport eu-north-1 -> eu-central-1**: the Stockholm antenna to our eu-central-1 ENI leg is inside Ground Station and cannot be exercised; the canary starts inside our own subnet.
-- **DFEG ENI creation** (deviation 3, and the Ground Station side of the SG fix): the IAM policy is confirmed correct by
-  simulation. Ground Station's actual managed-ENI creation at contact time is not
-  exercisable offline.
+- **Real satellite packet format (VITA-49 Extension layout)** (deviation 2): the canary
+  frames its datagrams per our own assumption of the layout, so it proves transport and
+  listener mechanics only. The real Ground Station demod/decode egress layout is unknown
+  until a real contact delivers a raw UDP stream. REL-5 (packet-format validation gate in
+  `SYNC_PIPELINE.md`) remains open until the first real contact produces
+  `raw/raw_capture.bin` in S3 and that file is inspected against the onboarding-provided
+  VITA-49 spec.
+- **Ground Station-side ENI creation** (deviation 3, and the Ground Station side of the
+  SG fix): the IAM policy is confirmed correct by simulation. Ground Station's actual
+  managed-ENI creation at contact time is not exercisable offline.
+- **Transport eu-north-1 -> eu-central-1**: the Stockholm antenna to our eu-central-1 ENI
+  leg is inside Ground Station and cannot be exercised; the canary starts inside our own
+  subnet.
+- **CSPP and visualization on sync data**: the filler payload yields no RDR, so the
+  downstream CSPP and render stages never run. Validating them needs a replay of real
+  PN-encoded frames (about 160 MB per VIIRS granule), which is out of scope.
 - **Ground Station side behavior**: IAM simulation covers identity policies only --
   it does not prove that Ground Station, EC2, or KMS succeed at runtime.

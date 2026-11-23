@@ -37,6 +37,7 @@ SCRIPT_PATH = "/opt/scripts/sync_receiver_arm.sh"
 SSM_EXECUTION_TIMEOUT = 120  # arming is fire-and-forget (nohup'd listener); this just starts it
 RUNNING_POLL_INTERVAL_SECONDS = 5
 RUNNING_POLL_MAX_ATTEMPTS = 48  # 48 x 5s = 240s max
+STOPPED_GRACE_SECONDS = 30  # see _wait_for_running: tolerate stale "stopped" after start
 _FAILED_START_STATES = ("stopped", "stopping", "shutting-down", "terminated")
 SSM_ONLINE_POLL_INTERVAL_SECONDS = 5
 SSM_ONLINE_POLL_MAX_ATTEMPTS = 24  # 24 x 5s = 120s max
@@ -134,6 +135,7 @@ def _start_instance(ec2, instance_id):
 
 def _wait_for_running(ec2, instance_id):
     """Poll DescribeInstances until instance is running. Raises RuntimeError on timeout."""
+    left_stopped = False
     for attempt in range(RUNNING_POLL_MAX_ATTEMPTS):
         resp = ec2.describe_instances(InstanceIds=[instance_id])
         instance = resp["Reservations"][0]["Instances"][0]
@@ -157,11 +159,28 @@ def _wait_for_running(ec2, instance_id):
         if state == "running":
             return
 
-        # Fail fast: StartInstances was accepted, so the instance should be
-        # pending. Stopped / stopping / shutting-down / terminated (or a
-        # StateReason such as Client.InvalidKMSKey) means the start failed
-        # and polling further can never succeed.
-        if state in _FAILED_START_STATES or (reason_code and state != "pending"):
+        if state in ("pending", "running"):
+            left_stopped = True
+
+        # Fail fast, but only on evidence the start really failed.
+        # Right after StartInstances, DescribeInstances is eventually
+        # consistent and can still return the PREVIOUS "stopped" state with
+        # the PREVIOUS StateReason (seen live 2026-11-23: a stale
+        # Client.InvalidKMSKey from contact #8, 91 ms after a start that then
+        # succeeded). So stopped/stopping only counts as a failure when:
+        #   - the instance was already seen leaving stopped (pending ->
+        #     stopped is a genuine failed start), or
+        #   - it is still stopped after STOPPED_GRACE_SECONDS (a healthy
+        #     start leaves stopped within a few seconds; 30 s is generous
+        #     for EC2 eventual consistency yet small vs the 240 s budget).
+        # shutting-down / terminated are never stale-start artefacts.
+        elapsed = attempt * RUNNING_POLL_INTERVAL_SECONDS
+        stale_possible = (
+            state in ("stopped", "stopping")
+            and not left_stopped
+            and elapsed < STOPPED_GRACE_SECONDS
+        )
+        if state in _FAILED_START_STATES and not stale_possible:
             logger.error(
                 json.dumps(
                     {

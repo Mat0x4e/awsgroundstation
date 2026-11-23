@@ -631,3 +631,31 @@ Both fatal deviations are fixed in branch `fix/sync-contact8-failures` (IAM poli
 verified by `simulate-principal-policy` / `simulate-custom-policy`). The corrected dry run
 plan -- using the real Lambda and state machine, not operator credentials -- is in
 [`docs/SYNC_DRY_RUN.md`](SYNC_DRY_RUN.md).
+
+---
+
+## Contact #9 — first SYNC contact, retry of #8 (packet-format experiment)
+
+Retry of contact #8 after the three configuration faults were fixed (branch
+`fix/sync-contact8-failures`, PR #10) and the live-faithful dry run passed on 2026-11-23
+([`SYNC_DRY_RUN.md`](SYNC_DRY_RUN.md) "Run log"). Same purpose as #8: capture what the
+antenna sends over UDP; `raw/raw_capture.bin` in S3 is the deliverable.
+
+| Property | Value |
+|----------|-------|
+| **Contact ID** | `ccc4fe43-eb79-4ac3-9ebe-80d44330908a` |
+| **Status** | 📅 SCHEDULED (reserved 2026-11-23, user go-ahead) |
+| **Satellite** | NOAA-20 (NORAD 43013) |
+| **Ground Station** | Stockholm 1 (`eu-north-1`) |
+| **Mission Profile** | **sync** demod/decode (`2e719f99-35f5-4720-b974-ba177036c1ee`) |
+| **Pre-pass Start** | 2026-11-26 11:18:46 UTC (receiver_arm PREPASS) |
+| **Visibility** | 2026-11-26 11:28:46 → 11:40:38 UTC (11m52s) |
+| **Post-pass End** | 2026-11-26 11:42:38 UTC |
+| **Max Elevation** | 80.42° (AWS) |
+| **Estimated Cost** | ~$120-130 (on-demand narrowband, $10/min at Stockholm 1) |
+| **Tags** | `Purpose=first-sync-contact-retry`, `Experiment=packet-format`, `Retry-Of=c5e93aa1` |
+
+Known risks accepted before booking (not validatable offline, see `SYNC_DRY_RUN.md`): real
+VITA-49 Extension packet layout, Ground Station-side ENI creation, eu-north-1 -> eu-central-1
+transport, CSPP + visualization on sync data. The network canary stays deployed so the
+network check can be repeated just before PREPASS.

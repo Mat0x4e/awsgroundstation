@@ -484,3 +484,29 @@ aws ec2 stop-instances `
   PN-encoded frames (about 160 MB per VIIRS granule), which is out of scope.
 - **Ground Station side behavior**: IAM simulation covers identity policies only --
   it does not prove that Ground Station, EC2, or KMS succeed at runtime.
+
+## Run log
+
+### 2026-11-23 -- PASS (second attempt)
+
+First attempt (14:35 UTC) stopped at Step 1: the receiver_arm fail-fast read the STALE
+`stopped` / `Client.InvalidKMSKey` state of contact #8 91 ms after `StartInstances` and
+aborted (the instance then reached `running`, proving the KMS fix). Fixed in `b1a1f43`
+(ignore stale stopped state right after a start), redeployed, re-run from Step 1.
+
+Second attempt, contact id `dryrun-0000-0000-0000-000000000001`, contact_time
+`2026-11-23T15:01:53Z`, instance `stopped` at start (stale StateReason
+`Client.UserInitiatedShutdown`):
+
+| Step | Evidence |
+|---|---|
+| 1 arm (real Lambda) | 51 s; instance started from stopped (KMS fix live), SSM Online, arm command `cc30988f` Success, listener bound `0.0.0.0:55888` |
+| 1b canary (vita49) | `sent=100 failed=0`, `expected_listener_payload_bytes=97200`; listener `first_packet_received` (security group self-referencing UDP rules work) |
+| 2 state machine | execution `dryrun-20261123160459`: Derive* -> WaitForDelivery -> FinishReceiver (Success) -> StopReceiver -> SubmitBatchAggregation -> AggregationFailure -> FailExecution (FAILED, the expected end state) |
+| S3 after finish | `cadu/combined.cadu` 97200 bytes (= canary payload bytes, zero loss), `raw/raw_capture.bin` 100000 bytes (100 x 1000), `logs/sync_receiver_finish.log` |
+| Batch job `0247e890` | env `CADU_PREFIX=cadu PN_ENCODED=true ASSETS_BUCKET=<SDR bucket>`; LUT cache hit; pristine RT-STPS config; 0 RDR; `Step 9a: sync contact produced no VIIRS RDR -- failing the job` (exit 1) |
+| Notifications | SNS `NumberOfNotificationsDelivered` = 2 on the contact-notifications topic |
+| Cleanup | instance `stopped`; test prefix deleted; temp files deleted |
+
+Still unvalidated (unchanged): real satellite packet format, Ground Station-side ENI
+creation, eu-north-1 -> eu-central-1 transport, CSPP + visualization on sync data.

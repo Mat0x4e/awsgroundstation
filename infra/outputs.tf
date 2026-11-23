@@ -78,6 +78,11 @@ output "sync_pipeline_receiver_instance_id" {
   value       = var.enable_sync_pipeline ? module.sync_pipeline[0].receiver_instance_id : null
 }
 
+output "sync_pipeline_network_canary_function_name" {
+  description = "Function name of the temporary network canary Lambda (when enabled)"
+  value       = var.enable_sync_pipeline ? module.sync_pipeline[0].network_canary_function_name : null
+}
+
 output "sync_pipeline_state_machine_arn" {
   description = "ARN of the sync pipeline Step Functions state machine (when sync pipeline is enabled)"
   value       = var.enable_sync_pipeline ? module.sync_pipeline[0].state_machine_arn : null

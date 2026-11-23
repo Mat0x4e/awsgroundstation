@@ -174,3 +174,9 @@ variable "assets_bucket_name" {
     error_message = "assets_bucket_name must be set: the shared aggregation job reads the CSPP LUT assets from the SDR output bucket, so enable_sync_pipeline requires enable_sdr_pipeline = true."
   }
 }
+
+variable "enable_network_canary" {
+  description = "Create the TEMPORARY network canary Lambda (in the receiver subnet with the receiver SG) that sends test UDP datagrams to the receiver ENI"
+  type        = bool
+  default     = false
+}

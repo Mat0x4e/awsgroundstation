@@ -201,6 +201,9 @@ module "sync_pipeline" {
   sns_topic_arn          = module.security.sns_topic_arn
   tags                   = local.common_tags
 
+  # Temporary network canary Lambda (validates the GS ENI -> receiver UDP path).
+  enable_network_canary = var.enable_network_canary
+
   # Shared aggregation chain (sync converges with async at the frame capture in S3).
   # Same aggregation queue+jobdef as sdr_pipeline; the sync-specific behaviour is
   # carried by env overrides in the sync state machine (CADU_PREFIX=cadu,

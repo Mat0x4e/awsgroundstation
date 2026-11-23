@@ -42,3 +42,8 @@ output "receiver_public_ip" {
   description = "Elastic IP on the sync receiver primary ENI (SSM and S3 egress)"
   value       = aws_eip.receiver.public_ip
 }
+
+output "network_canary_function_name" {
+  description = "Function name of the temporary network canary Lambda (null when disabled)"
+  value       = var.enable_network_canary ? aws_lambda_function.network_canary[0].function_name : null
+}

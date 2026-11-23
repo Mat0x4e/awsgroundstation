@@ -123,6 +123,13 @@ def handler(event, context=None):
     first_seq = last_seq = None
     sock = socket.socket(socket.AF_INET6 if ":" in target else socket.AF_INET,
                          socket.SOCK_DGRAM)
+    # Windows requires explicit bind before sendto, and for loopback targets the
+    # socket must bind to 127.0.0.1 (not 0.0.0.0, which picks the primary NIC).
+    # Linux auto-binds and doesn't have this issue, but explicit bind is harmless.
+    if target.startswith("127."):
+        sock.bind(("127.0.0.1", 0))
+    else:
+        sock.bind(("", 0))
     try:
         for seq in range(count):
             try:

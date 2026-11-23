@@ -31,10 +31,12 @@ def test_sends_all_datagrams_with_header_seq_and_size(rx):
     res = h.handler({"target_ip": "127.0.0.1", "port": port, "count": 20,
                      "payload_size": 300, "pacing": 0})
     got = _drain(rx)
+    # Guard against vacuous assertions if sendto failed silently
+    assert res["sent"] == 20, f"Expected 20 sent, got {res['sent']}, errors: {res['errors']}"
     assert len(got) == 20
     assert all(len(d) == 300 and d[:8] == b"GSCANARY" for d in got)
     assert sorted(struct.unpack(">I", d[8:12])[0] for d in got) == list(range(20))
-    assert res["sent"] == 20 and res["failed"] == 0
+    assert res["failed"] == 0
     assert (res["first_seq"], res["last_seq"]) == (0, 19)
     assert res["target"] == "127.0.0.1" and res["port"] == port
     assert res["payload_size"] == 300 and res["errors"] == {}
@@ -45,7 +47,9 @@ def test_defaults_from_env(rx, monkeypatch):
     monkeypatch.setenv("CANARY_TARGET_IP", "127.0.0.1")
     monkeypatch.setenv("CANARY_PORT", str(port))
     res = h.handler({"count": 3, "pacing": 0})
-    assert res["sent"] == 3 and res["payload_size"] == 1000
+    # Guard against sendto failures
+    assert res["sent"] == 3, f"Expected 3 sent, got {res['sent']}, errors: {res['errors']}"
+    assert res["payload_size"] == 1000
     assert [len(d) for d in _drain(rx)] == [1000] * 3
 
 
@@ -63,7 +67,9 @@ def test_send_errors_are_counted(rx):
     with patch.object(socket.socket, "sendto", flaky):
         res = h.handler({"target_ip": "127.0.0.1", "port": port, "count": 10,
                          "payload_size": 100, "pacing": 0})
-    assert res["sent"] == 5 and res["failed"] == 5
+    # Flaky sends alternating success/fail: 5 succeed, 5 fail
+    assert res["sent"] == 5, f"Expected 5 sent, got {res['sent']}, errors: {res['errors']}"
+    assert res["failed"] == 5
     assert res["errors"] == {"OSError: boom": 5}
     assert len(_drain(rx)) == 5
 
@@ -112,6 +118,8 @@ def test_vita49_datagrams_accepted_by_real_listener_parser(rx):
     res = h.handler({"target_ip": "127.0.0.1", "port": port, "count": 25,
                      "payload_size": 1000, "pacing": 0, "vita49": True})
     got = _drain(rx)
+    # Guard against vacuous truth if no datagrams received
+    assert res["sent"] == 25, f"Expected 25 sent, got {res['sent']}, errors: {res['errors']}"
     assert len(got) == 25 and res["vita49"] is True
     total = 0
     for d in got:
@@ -157,5 +165,7 @@ def test_plain_datagram_rejected_by_listener_parser(rx):
     res = h.handler({"target_ip": "127.0.0.1", "port": port, "count": 5,
                      "payload_size": 300, "pacing": 0})
     got = _drain(rx)
+    # Guard against vacuous truth — ensure datagrams were sent before checking parser
+    assert res["sent"] == 5, f"Expected 5 sent, got {res['sent']}, errors: {res['errors']}"
     assert len(got) == 5 and res["expected_listener_payload_bytes"] == 0
     assert all(extract_frame_payload(d) is None for d in got)

@@ -546,3 +546,27 @@ VPC, so pinning it is safe.
 
 **Rule**: treat an EIP change on a multi-ENI instance as a possible egress outage: check
 `aws ec2 describe-addresses` shows the association right after the apply.
+
+---
+
+## Ground Station Dataflow Endpoint -- Security Group Is NOT the Agent Pattern
+
+**Symptom**: no error anywhere, but no UDP frames would reach the receiver (found by reading the
+doc during Contact #8 dry-run preparation, before it could bite): the SG had prefix-list ingress and
+no UDP egress.
+
+**Root cause**: two different Ground Station patterns exist. The Ground Station AGENT (downlink to
+EC2 over public IPs) needs ingress from the `com.amazonaws.global.groundstation` prefix list. A
+DATAFLOW ENDPOINT (DFEG) makes Ground Station create an ENI in OUR subnet with the DFEG security
+group, and that ENI sends UDP from a private IP to the receiver. Prefix-list rules never match that
+traffic, and an SG with no UDP egress drops it at the source ENI.
+
+**❌ INCORRECT**: ingress UDP from the Ground Station prefix list (public IPs), no UDP egress, for a
+dataflow endpoint receiver.
+
+**✅ CORRECT**: one shared SG used by the receiver and the DFEG, with `self = true` UDP ingress AND
+egress on the stream port (`infra/modules/sync_pipeline/ec2.tf`). Doc:
+https://docs.aws.amazon.com/ground-station/latest/ug/dataflows.vpc-configuration.html
+
+**Rule**: read the doc for the exact delivery mechanism before writing SG rules. Validate with a
+canary in the same subnet and SG (`lambdas/network_canary`, `docs/SYNC_DRY_RUN.md` Step 1b).

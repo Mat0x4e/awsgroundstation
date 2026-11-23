@@ -618,6 +618,15 @@ rather than the real `receiver_arm` Lambda. That substitution hid both fatal fau
 | No real UDP stream | Known risk (REL-5) | No data -- also due to the above failures. |
 | Fake contact ID | None needed (passthrough string) | n/a |
 
+**Third fault (found during dry-run preparation, after the contact):** the receiver security
+group used the Ground Station agent pattern (ingress from the Ground Station prefix list, no UDP
+egress). A dataflow endpoint ENI in our subnet needs self-referencing UDP ingress and egress on
+the shared SG instead. Found by reading the doc "VPC configuration with a dataflow endpoint"
+(https://docs.aws.amazon.com/ground-station/latest/ug/dataflows.vpc-configuration.html). It
+would have blocked frame delivery even with the two IAM fixes. Fixed by commit `cae5ccf` on
+`fix/sync-contact8-failures`; validated in the dry run by the network canary (SYNC_DRY_RUN.md
+Step 1b).
+
 Both fatal deviations are fixed in branch `fix/sync-contact8-failures` (IAM policies updated and
 verified by `simulate-principal-policy` / `simulate-custom-policy`). The corrected dry run
 plan -- using the real Lambda and state machine, not operator credentials -- is in

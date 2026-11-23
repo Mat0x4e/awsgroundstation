@@ -37,6 +37,7 @@ SCRIPT_PATH = "/opt/scripts/sync_receiver_arm.sh"
 SSM_EXECUTION_TIMEOUT = 120  # arming is fire-and-forget (nohup'd listener); this just starts it
 RUNNING_POLL_INTERVAL_SECONDS = 5
 RUNNING_POLL_MAX_ATTEMPTS = 48  # 48 x 5s = 240s max
+_FAILED_START_STATES = ("stopped", "stopping", "shutting-down", "terminated")
 SSM_ONLINE_POLL_INTERVAL_SECONDS = 5
 SSM_ONLINE_POLL_MAX_ATTEMPTS = 24  # 24 x 5s = 120s max
 
@@ -135,7 +136,11 @@ def _wait_for_running(ec2, instance_id):
     """Poll DescribeInstances until instance is running. Raises RuntimeError on timeout."""
     for attempt in range(RUNNING_POLL_MAX_ATTEMPTS):
         resp = ec2.describe_instances(InstanceIds=[instance_id])
-        state = resp["Reservations"][0]["Instances"][0]["State"]["Name"]
+        instance = resp["Reservations"][0]["Instances"][0]
+        state = instance["State"]["Name"]
+        reason = instance.get("StateReason") or {}
+        reason_code = reason.get("Code")
+        reason_message = reason.get("Message")
 
         logger.info(
             json.dumps(
@@ -143,6 +148,7 @@ def _wait_for_running(ec2, instance_id):
                     "action": "instance_state_poll",
                     "instance_id": instance_id,
                     "state": state,
+                    "state_reason_code": reason_code,
                     "attempt": attempt + 1,
                 }
             )
@@ -151,9 +157,25 @@ def _wait_for_running(ec2, instance_id):
         if state == "running":
             return
 
-        if state == "terminated":
+        # Fail fast: StartInstances was accepted, so the instance should be
+        # pending. Stopped / stopping / shutting-down / terminated (or a
+        # StateReason such as Client.InvalidKMSKey) means the start failed
+        # and polling further can never succeed.
+        if state in _FAILED_START_STATES or (reason_code and state != "pending"):
+            logger.error(
+                json.dumps(
+                    {
+                        "action": "instance_start_failed",
+                        "instance_id": instance_id,
+                        "state": state,
+                        "state_reason_code": reason_code,
+                        "state_reason_message": reason_message,
+                    }
+                )
+            )
             raise RuntimeError(
-                f"Instance {instance_id} is in terminated state and cannot be started"
+                f"Instance {instance_id} failed to start: state={state}, "
+                f"StateReason code={reason_code}, message={reason_message}"
             )
 
         time.sleep(RUNNING_POLL_INTERVAL_SECONDS)

@@ -560,7 +560,7 @@ first try; the raw capture in S3 is the deliverable. Flown through the shared ag
 | Property | Value |
 |----------|-------|
 | **Contact ID** | `c5e93aa1-4c0e-42b6-b7bf-20669d7ef53d` |
-| **Status** | 📅 SCHEDULED (reserved 2026-11-20) |
+| **Status** | ❌ FAILED (2026-11-22 11:23:59 UTC) - no data received |
 | **Satellite** | NOAA-20 (NORAD 43013) |
 | **Ground Station** | Stockholm 1 (`eu-north-1`) |
 | **Mission Profile** | **sync** demod/decode (`2e719f99-35f5-4720-b974-ba177036c1ee`) |
@@ -581,4 +581,27 @@ Readiness:
   0 RDR, as expected for already-derandomized frames (the same frames give 5 RDR with
   `PN_ENCODED=false`: the PN switch reaches RT-STPS).
 - ✅ 2026-11-20: async regression on contact #7 with the shared chain: 5 RDR, 6 SDR/GEO.
-- ⏳ Receiver `/opt/scripts` install + dry arm (checklist steps 2-3) - before Sunday 10:54 UTC.
+- ✅ 2026-11-20: receiver `/opt/scripts` install + dry arm/finish via SSM (run with operator
+  credentials, not as the receiver_arm Lambda - see outcome).
+
+Outcome (diagnosed 2026-11-23): **FAILED, no data received.** Two independent configuration
+faults, each fatal on its own; neither was exercised by the dry run:
+
+1. **Dataflow endpoint group role has no EC2 permissions.** Contact `errorMessage`: "Your Dataflow
+   Endpoint Group's role is missing the necessary permissions to create Elastic Network
+   Interfaces". The DFEG reuses `groundstation-noaa20-demo-groundstation-role`, whose only policy
+   is the async S3 delivery (`s3:PutObject`, KMS). AWS's example role policy for a dataflow
+   endpoint needs `ec2:CreateNetworkInterface`, `DeleteNetworkInterface`,
+   `CreateNetworkInterfacePermission`, `DeleteNetworkInterfacePermission`, `DescribeSubnets`,
+   `DescribeVpcs`, `DescribeSecurityGroups`
+   ([doc](https://docs.aws.amazon.com/ground-station/latest/ug/how-it-works.dataflow-endpoint-group.html)).
+   Ground Station creates that ENI only at contact time, so no dry run can catch it.
+2. **The receiver never started.** The receiver_arm Lambda called `StartInstances` at 10:54:38,
+   10:59:45 and 11:05:56 UTC. Each time the instance went `pending` and fell back to `stopped`
+   with `Client.InvalidKMSKey`: the root volume is encrypted with the pipeline CMK
+   (`70451aac-...`), and the Lambda role has no KMS permissions (`kms:CreateGrant` etc.) to start
+   an instance with a CMK-encrypted volume. Operator starts worked because the admin role has
+   KMS access. Each Lambda attempt also waited ~4 min on a state that had already failed.
+
+No Step Functions execution ran (no LOS handoff). The contact is probably billed as flown (not
+verified on the bill).

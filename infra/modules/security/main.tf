@@ -185,6 +185,37 @@ resource "aws_iam_role_policy" "groundstation" {
         Resource = [
           aws_kms_key.groundstation.arn
         ]
+      },
+      # Dataflow endpoint group role permissions (AWS Ground Station user guide,
+      # "Dataflow endpoint group"): Ground Station creates and deletes ENIs in the
+      # endpoint's subnet using this role. Scoped to this account/region; the
+      # network-interface, subnet and security-group types are what
+      # CreateNetworkInterface evaluates.
+      {
+        Sid    = "DataflowEndpointEni"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateNetworkInterface",
+          "ec2:DeleteNetworkInterface",
+          "ec2:CreateNetworkInterfacePermission",
+          "ec2:DeleteNetworkInterfacePermission"
+        ]
+        Resource = [
+          "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:network-interface/*",
+          "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:subnet/*",
+          "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:security-group/*"
+        ]
+      },
+      # Describe* actions do not support resource-level permissions.
+      {
+        Sid    = "DataflowEndpointDescribe"
+        Effect = "Allow"
+        Action = [
+          "ec2:DescribeSubnets",
+          "ec2:DescribeVpcs",
+          "ec2:DescribeSecurityGroups"
+        ]
+        Resource = "*"
       }
     ]
   })

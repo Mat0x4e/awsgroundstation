@@ -591,3 +591,30 @@ has elapsed since `StartInstances`. Never fail on the first poll.
 
 **Rule**: a stale `StateReason` is not evidence of a current failure; judge the start by the state
 transition, not by one early read.
+
+---
+
+## Ground Station Dataflow Endpoint Streams Are DTLS -- the Receiver Must Run the Dataflow Endpoint Application
+
+**Symptom**: contact ends `FAILED` with an EMPTY `errorMessage` (contact and dataflow). The
+receiver's UDP listener gets ~1 small packet per second (~127 bytes) for the whole pass and no
+frames. Hex: every packet starts `16 fe ff` (DTLS 1.0 handshake record) with type `01`
+(ClientHello). Live: contact #9, 2026-11-26.
+
+**Root cause**: dataflow endpoint streams are encrypted with DTLS (self-signed certificates).
+Ground Station opens a DTLS session to the endpoint and only streams data once it is
+established. A raw UDP socket never answers the ClientHello, so no data is ever sent and the
+contact is adjudicated FAILED.
+
+**❌ INCORRECT**: a plain AMI + a custom UDP listener bound on the DFEG endpoint address/port,
+expecting plain VITA-49 datagrams.
+
+**✅ CORRECT**: run the AWS-supplied dataflow endpoint application on the receiver. AWS shares
+private AMIs with it after onboarding (`groundstation-al2023-ddx2.6.2-ami-*`, owner
+575398917104; find with `aws ec2 describe-images --executable-users self --filters
+Name=name,Values=*roundstation*`). The application terminates DTLS and egresses the decrypted
+stream locally for your own processing.
+
+**Rule**: a canary that sends plain UDP proves the network path only. For the dataflow endpoint
+pattern, the endpoint software (DTLS) is part of the path and must be in the design before the
+first paid contact.

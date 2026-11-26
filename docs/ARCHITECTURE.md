@@ -25,7 +25,7 @@ fallback behind feature flags. A second, live demod/decode path exists alongside
 [`SYNC_PIPELINE.md`](SYNC_PIPELINE.md) — not flown yet. Its mission profile gets contacts offered
 since 2026-11-19 (it got zero before because of two config defects, not onboarding; the earlier
 [`SYNC_ONBOARDING_INVESTIGATION.md`](SYNC_ONBOARDING_INVESTIGATION.md) conclusion is superseded).
-The open gate is the packet-format check on a first real sync contact.
+The open gate is a first successful sync contact: contacts #8 and #9 failed (the last one because the receiver lacked the DTLS endpoint application DDX, see [`LESSONS_SYNC_FIRST_CONTACTS.md`](LESSONS_SYNC_FIRST_CONTACTS.md)); the receiver rebuild is specified in [`.kiro/specs/sync-receiver-ddx`](../.kiro/specs/sync-receiver-ddx/design.md), after which the packet-format check remains.
 
 ---
 
@@ -64,15 +64,15 @@ data yet: no sync contact flown.
  └────────────┬─────────────┘                │ (PN kept, no Reed-Solomon)   │
               │ S3RecordingConfig            │ profile 2e719f99             │
               ▼                              └──────────────┬───────────────┘
- ┌──────────────────────────┐                               │ live UDP :55888
- │ S3 reception bucket      │                               │ (VITA-49 Ext., format unverified)
+ ┌──────────────────────────┐                               │ DTLS :55888 (DDX)
+ │ S3 reception bucket      │                               │ (then VITA-49 Ext. on lo:50000)  
  │ ~22-50 x 2.18 GB .pcap   │                               ▼
  └────────────┬─────────────┘                ┌──────────────────────────────┐
               │                              │ Receiver EC2 (public subnet, │
   EventBridge │ COMPLETED                    │ default VPC, Elastic IP)     │
   (filter: 32a1fdbb)                         │  PREPASS -600s: receiver_arm │
-              ▼                              │  Lambda starts EC2 + SSM arm │
- ┌──────────────────────────┐                │  sync_receiver_listen.py     │
+              ▼                              │  starts EC2, tags, verifies  │
+ ┌──────────────────────────┐                │  DDX -> lo:50000 -> listener │
  │ Step Functions           │                │  -> combined.cadu + raw tee  │
  │ groundstation-noaa20-    │                └──────────────┬───────────────┘
  │ sdr-pipeline             │                               │
@@ -84,7 +84,7 @@ data yet: no sync contact flown.
  │ chunk jobs, SatDump:     │                │ groundstation-noaa20-        │
  │ .pcap -> I/Q -> QPSK     │                │ sync-pipeline                │
  │ Viterbi, PN, RS -> .cadu │                │ FinishReceiver (SSM):        │
- └────────────┬─────────────┘                │ stop listener, upload, stop  │
+ └────────────┬─────────────┘                │ rotate, upload, stop         │
               │                              └──────────────┬───────────────┘
               ▼                                             ▼
    s3://sdr-output/contacts/                 s3://sync-output/contacts/
@@ -125,6 +125,8 @@ data yet: no sync contact flown.
  Alarms -> SNS: ChunksFailed, ExecutionsFailed, VisualizationFailed,
                 ProductsWritten==0, ReceiverReadyFailure, OptDriftDetected (/opt/scripts)
 ```
+
+> **Update 2026-11-26.** The sync box above predates the DDX finding: a dataflow endpoint stream is DTLS, so the receiver runs the AWS dataflow endpoint application (DDX) on `eth1:55888`, which sends plain UDP to the listener on `127.0.0.1:50000`; the listener is a boot-time service and `receiver_arm` no longer arms by SSM. The earlier wording (listener on `:55888`, SSM arm) is superseded by [`.kiro/specs/sync-receiver-ddx`](../.kiro/specs/sync-receiver-ddx/design.md); the picture is kept as history until the rebuild lands.
 
 Consequences:
 - The sync receiver only captures and uploads (`/opt/scripts`); it no longer runs RT-STPS,

@@ -3,6 +3,8 @@
 A second, independent reception path for NOAA-20, alongside the DigIF pipeline described
 in [`ARCHITECTURE.md`](ARCHITECTURE.md). Not yet flown.
 
+> **2026-11-26: receiver redesign (supersedes the receiver description below).** Contacts #8 and #9 failed; #9 showed that a dataflow endpoint stream is DTLS and the receiver must run the AWS dataflow endpoint application (DDX). The rebuilt receiver is specified in [`.kiro/specs/sync-receiver-ddx`](../.kiro/specs/sync-receiver-ddx/design.md) (requirements and design; implementation not started). Statements below about the listener on UDP :55888, arming by SSM at PREPASS, hand-installed `/opt/scripts`, a plain-UDP canary and the unverified packet layout as the only open risk are **superseded by that spec** and kept as history. What stays valid: the shared aggregation chain, the mission profile, the DFEG and its fixed ENI, the buckets and the state machine shape.
+>
 > **2026-11-19: the sync mission profile now gets contacts offered** (21-34 per onboarded station over
 > 7 days). Until then it got 0 on every station because of two config defects: the
 > `DataflowEndpointConfig` lacked `dataflowEndpointRegion`, and the demod/decode `unvalidatedJSON`
@@ -38,7 +40,7 @@ Data flow during a sync contact (source: [`diagrams/sync-contact-dataflow.yaml`]
 
 ![Sync contact data flow](diagrams/out/sync-contact-dataflow.png)
 
-Step-by-step sequence:
+Step-by-step sequence (**superseded for the receiver steps** by the DDX design, see the 2026-11-26 note above: DDX terminates DTLS, the listener starts at boot and reads `127.0.0.1:50000`, `receiver_arm` only starts and verifies; the lifecycle diagram is in the spec design):
 
 ```mermaid
 sequenceDiagram
@@ -84,9 +86,9 @@ sequenceDiagram
 | Layer | Resource | File |
 |---|---|---|
 | Ground Station config | `AntennaDownlinkDemodDecodeConfig` (QPSK, Viterbi 1/2, NRZ-M, `UncodedFramesEgress`), tracking config, dataflow endpoint config, mission profile `noaa20_sync` | [`groundstation.tf`](../infra/modules/sync_pipeline/groundstation.tf) |
-| Receiver network | Dedicated EC2 + SG (UDP ingress from Ground Station's managed prefix list only, HTTPS egress for SSM/S3), dataflow endpoint group bound to its ENI | [`ec2.tf`](../infra/modules/sync_pipeline/ec2.tf) |
-| Pre-AOS arm | `receiver_arm` Lambda: start EC2, poll running + SSM Online, `SendCommand` to arm the listener | [`lambda.tf`](../infra/modules/sync_pipeline/lambda.tf), [`lambdas/receiver_arm/handler.py`](../lambdas/receiver_arm/handler.py) |
-| Live listener | UDP socket bound before AOS, strips a VITA-49-style header per packet, writes the decoded CCSDS frame stream to disk, plus a raw tee of every payload | [`scripts/sync_receiver_listen.py`](../scripts/sync_receiver_listen.py) |
+| Receiver network | Dedicated EC2 + SG, dataflow endpoint group bound to its ENI. *(The "managed prefix list" wording was superseded on 2026-11-23: the SG is self-referencing UDP in/out plus HTTPS egress. The receiver itself is superseded by the DDX design.)* | [`ec2.tf`](../infra/modules/sync_pipeline/ec2.tf) |
+| Pre-AOS arm | **Superseded** (DDX spec): `receiver_arm` Lambda will tag the contact id, start EC2 and verify readiness; no SSM arming. Today: start EC2, poll running + SSM Online, `SendCommand` to arm the listener | [`lambda.tf`](../infra/modules/sync_pipeline/lambda.tf), [`lambdas/receiver_arm/handler.py`](../lambdas/receiver_arm/handler.py) |
+| Live listener | **Superseded** (DDX spec): a boot-time service reading `127.0.0.1:50000`. Today: UDP socket bound before AOS, strips a VITA-49-style header per packet, writes the decoded CCSDS frame stream to disk, plus a raw tee of every payload | [`scripts/sync_receiver_listen.py`](../scripts/sync_receiver_listen.py) |
 | Post-LOS handoff | Stop listener, upload the raw tee then the frame capture to S3 (no RT-STPS on the receiver) | [`scripts/sync_receiver_finish.sh`](../scripts/sync_receiver_finish.sh) |
 | Orchestration | Step Functions: wait, `FinishReceiver` (SSM), poll, stop EC2, `SubmitBatchAggregation`, `StartVisualization` | [`step_functions.tf`](../infra/modules/sync_pipeline/step_functions.tf) |
 | Aggregation (**shared**) | The async pipeline's on-demand Batch aggregation job (`...-agg-queue`, `...-aggregation`, SDR image): `RTSTPS=on CADU_PREFIX=cadu PN_ENCODED=true`, `OUTPUT_BUCKET` = sync bucket, `ASSETS_BUCKET` = SDR bucket | [`infra/modules/batch_compute/`](../infra/modules/batch_compute/), [`scripts/aggregation_entrypoint.sh`](../scripts/aggregation_entrypoint.sh) |
@@ -123,6 +125,8 @@ contacts per onboarded station over 7 days. No sync contact has been flown yet, 
 risk below is now the live one.
 
 ## Open risk — packet format unverified
+
+> **Update 2026-11-26.** This was framed as the only open risk; contact #9 showed a broader one (the protocol on the wire is DTLS, fault 5). The packet layout risk remains, now behind DDX: the listener will derive the header length from the VITA-49 flags and keep the raw tee ([spec design 5.4](../.kiro/specs/sync-receiver-ddx/design.md)).
 
 `scripts/sync_receiver_listen.py` assumes the demod/decode `UncodedFramesEgress` stream
 uses AWS's "VITA-49 Extension" format with the *same* 4-byte big-endian header layout as
@@ -184,6 +188,8 @@ during PREPASS if the listener fails to bind before AOS.
 ---
 
 ## Manual prerequisites (installed by hand, outside Terraform)
+
+> **Superseded** by the DDX spec: the receiver is rebuilt from the DDX AMI with user data and scripts pulled from S3 at boot; nothing is installed by hand. Kept as history.
 
 Same pattern as the existing aggregation EC2 (`ARCHITECTURE.md`'s constraints section):
 `ec2.tf` deliberately ships no `user_data`. Before the first test, the receiver instance

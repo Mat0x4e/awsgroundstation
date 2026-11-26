@@ -156,7 +156,7 @@ document whether `FAILED` contacts are billed.
 
 | Item | Status |
 |------|--------|
-| Receiver redesign around the dataflow endpoint application (DDX) | Investigation running |
+| Receiver redesign around the dataflow endpoint application (DDX) | Investigation + AMI inspection done ([`DDX_AMI_INSPECTION.md`](DDX_AMI_INSPECTION.md)); design next |
 | Dry run able to exercise the DTLS leg (DTLS-speaking canary or DDX test mode) | Open, depends on investigation |
 | Evidence upload on `FAILED` contacts (not only on `COMPLETED`) | Open |
 | Pre-flight checklist of AWS customer-side requirements per delivery pattern | Open |

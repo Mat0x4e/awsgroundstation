@@ -598,7 +598,8 @@ transition, not by one early read.
 
 **Symptom**: contact ends `FAILED` with an EMPTY `errorMessage` (contact and dataflow). The
 receiver's UDP listener gets ~1 small packet per second (~127 bytes) for the whole pass and no
-frames. Hex: every packet starts `16 fe ff` (DTLS 1.0 handshake record) with type `01`
+frames. Hex: every packet starts `16 fe ff` (DTLS handshake record; record-layer `fe ff` is
+conventional) with type `01` and `client_version` `fe fd` = DTLS 1.2
 (ClientHello). Live: contact #9, 2026-11-26.
 
 **Root cause**: dataflow endpoint streams are encrypted with DTLS (self-signed certificates).

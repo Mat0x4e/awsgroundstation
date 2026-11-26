@@ -671,7 +671,8 @@ dataflow `errorMessage` are both empty. The three contact #8 fixes all worked li
 - The listener received 946 packets from 11:26:47 UTC to LOS (~1 per second): security group
   fix OK, end-to-end UDP path OK.
 
-Root cause: every packet is a **DTLS 1.0 ClientHello** (`16 fe ff ... 01`, ECDHE-GCM cipher
+Root cause: every packet is a **DTLS 1.2 ClientHello** (`16 fe ff ... 01`, `client_version`
+`fe fd`, empty cookie, ECDHE AES256-GCM/SHA384 cipher
 suites), resent about once per second, ~127 bytes each (`raw_capture.bin` 120293 bytes,
 `frames_extracted=0`; receiver NetworkIn ~1 KB/s, no data stream). AWS documents that dataflow
 endpoint streams are DTLS-encrypted with self-signed certificates and that the receiver runs the

@@ -101,7 +101,8 @@ document whether `FAILED` contacts are billed.
   answered and no frames were sent. The contact was adjudicated `FAILED` with an **empty**
   `errorMessage`.
 - **Evidence**: `raw/raw_capture.bin` (120293 bytes, sha256 `62705a9f...`), every datagram
-  `16 fe ff ...` with handshake type `01`, ECDHE-GCM cipher suites, retransmitted ~1/s;
+  `16 fe ff ...` with handshake type `01` and `client_version` `fe fd` (DTLS 1.2), empty cookie,
+  ECDHE AES256-GCM/SHA384 cipher suites, retransmitted ~1/s (standard DTLS retransmit timer);
   receiver NetworkIn ~1 KB/s for the whole pass.
 - **Why missed**:
   - The design assumed "Ground Station sends plain VITA-49 datagrams to the endpoint address".

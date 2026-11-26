@@ -1,7 +1,7 @@
 # Synchronous pipeline — live demod/decode reception
 
 A second, independent reception path for NOAA-20, alongside the DigIF pipeline described
-in [`ARCHITECTURE.md`](ARCHITECTURE.md). Not yet flown.
+in [`ARCHITECTURE.md`](ARCHITECTURE.md). Flown twice (contacts #8 and #9, both FAILED); no frame delivered yet.
 
 > **2026-11-26: receiver redesign (supersedes the receiver description below).** Contacts #8 and #9 failed; #9 showed that a dataflow endpoint stream is DTLS and the receiver must run the AWS dataflow endpoint application (DDX). The rebuilt receiver is specified in [`.kiro/specs/sync-receiver-ddx`](../.kiro/specs/sync-receiver-ddx/design.md) (requirements and design; implementation not started). Statements below about the listener on UDP :55888, arming by SSM at PREPASS, hand-installed `/opt/scripts`, a plain-UDP canary and the unverified packet layout as the only open risk are **superseded by that spec** and kept as history. What stays valid: the shared aggregation chain, the mission profile, the DFEG and its fixed ENI, the buckets and the state machine shape.
 >

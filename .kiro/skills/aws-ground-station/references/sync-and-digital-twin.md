@@ -1,6 +1,15 @@
 # Sync reception and the digital twin
 
-> **Current status (2026-11-19) - read this first.** The "0 contacts" problem is **solved**: two
+> **Update 2026-11-26 - supersedes the receiver parts below.** Sync contacts #8 and #9 were flown
+> and FAILED. #9 proved the network path but showed that a dataflow endpoint stream is **DTLS 1.2**:
+> the receiver must run the AWS dataflow endpoint application (DDX), which it did not. Receiver
+> rebuild: `.kiro/specs/sync-receiver-ddx` (DDX on `eth1:55888` -> listener on `127.0.0.1:50000`,
+> boot-time services, `receiver_arm` tags + starts + verifies, no SSM arming). Facts:
+> `docs/LESSONS_SYNC_FIRST_CONTACTS.md`, `docs/DDX_AMI_INSPECTION.md`. References below to
+> `sync_receiver_arm.sh`, an SSM arm and a listener bound on `:55888` describe the pre-DDX receiver.
+> The digital twin still does not deliver data, so it cannot test DTLS or DDX.
+>
+> **Status (2026-11-19).** The "0 contacts" problem is **solved**: two
 > config defects (missing `dataflowEndpointRegion`; `jsonencode`d `unvalidatedJSON`), fixed in
 > `infra/modules/sync_pipeline/groundstation.tf` and applied. The sync profile now gets 21-34
 > contacts per onboarded station over 7 days. Account onboarding for demod/decode confirmed by AWS

@@ -22,7 +22,7 @@ CodeBuild (the chunk fan-out, the aggregation, and the visualization render were
 migrated off CodeBuild per ADR-002 / the `clean-compute-pipeline` spec;
 `enable_batch_compute = true`). The CodeBuild projects are retained only as a strangler
 fallback behind feature flags. A second, live demod/decode path exists alongside it — see
-[`SYNC_PIPELINE.md`](SYNC_PIPELINE.md) — not flown yet. Its mission profile gets contacts offered
+[`SYNC_PIPELINE.md`](SYNC_PIPELINE.md) — flown twice (contacts #8 and #9), no frames delivered yet. Its mission profile gets contacts offered
 since 2026-11-19 (it got zero before because of two config defects, not onboarding; the earlier
 [`SYNC_ONBOARDING_INVESTIGATION.md`](SYNC_ONBOARDING_INVESTIGATION.md) conclusion is superseded).
 The open gate is a first successful sync contact: contacts #8 and #9 failed (the last one because the receiver lacked the DTLS endpoint application DDX, see [`LESSONS_SYNC_FIRST_CONTACTS.md`](LESSONS_SYNC_FIRST_CONTACTS.md)); the receiver rebuild is specified in [`.kiro/specs/sync-receiver-ddx`](../.kiro/specs/sync-receiver-ddx/design.md), after which the packet-format check remains.

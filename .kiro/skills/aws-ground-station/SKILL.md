@@ -64,8 +64,9 @@ Anything not verified is marked `[unverified]`. Do not turn an `[unverified]` it
 | Config | `AntennaDownlinkConfig` -> `S3RecordingConfig` | `AntennaDownlinkDemodDecodeConfig` (`UncodedFramesEgress`) -> `DataflowEndpointConfig` |
 | Delivery | `.pcap` chunks in S3 after the contact | live UDP to a receiver EC2 during the contact |
 | Safety net | S3 holds the data; replayable | none: receiver must be listening before AOS |
+| Receiver software | none (S3 delivery) | **AWS dataflow endpoint application (DDX)** from the shared private AMI `groundstation-al2023-ddx2.6.2-ami-*`: Ground Station opens a **DTLS 1.2** session to the endpoint and streams only once DDX answers; DDX forwards plain UDP to `127.0.0.1:50000`. A raw UDP socket on the endpoint port gets only ClientHello retransmits (contact #9) |
 | RT-STPS PN | `PnEncoded="false"` (SatDump derandomizes upstream) | `PnEncoded="true"` (no PN, no Reed-Solomon in the egress) |
-| Status | flown on several contacts (`docs/CONTACTS.md`) | **contacts offered since 2026-11-19** (fix: `dataflowEndpointRegion` + verbatim `unvalidatedJSON`); never flown, packet format unverified - see `references/sync-and-digital-twin.md` |
+| Status | flown on several contacts (`docs/CONTACTS.md`) | **contacts offered since 2026-11-19** (fix: `dataflowEndpointRegion` + verbatim `unvalidatedJSON`). Flown twice, both FAILED: #8 (config faults, fixed), #9 (no DDX on the receiver). Receiver rebuild specified in `.kiro/specs/sync-receiver-ddx`; read `docs/LESSONS_SYNC_FIRST_CONTACTS.md` and `docs/DDX_AMI_INSPECTION.md` first |
 
 Details: `docs/ARCHITECTURE.md` (async), `docs/SYNC_PIPELINE.md` (sync).
 

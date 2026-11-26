@@ -619,3 +619,24 @@ stream locally for your own processing.
 **Rule**: a canary that sends plain UDP proves the network path only. For the dataflow endpoint
 pattern, the endpoint software (DTLS) is part of the path and must be in the design before the
 first paid contact.
+
+---
+
+## DDX (Ground Station Dataflow Endpoint App) AMI -- Three Boot Traps
+
+Found by inspecting `groundstation-al2023-ddx2.6.2-ami-*` on 2026-11-26 (`docs/DDX_AMI_INSPECTION.md`).
+
+1. **vCPU floor.** `rtlogic-ddx.service` pins `CPUAffinity=2..15`.
+   ❌ a 2-vCPU type (`c6i.large`): `status=215/CPUAFFINITY`, DDX never starts.
+   ✅ >= 4 vCPUs (`c6i.xlarge`): DDX `active`.
+2. **First-boot NIC re-pin.** `ddx-stream-nic-firstboot.service` rewrites the stream's
+   `wanConfigDevice` to the NIC of the first default route if the saved name is gone.
+   ❌ relying on the AMI's pre-built stream with a Ground Station ENI on `eth1`: DDX may end up
+   listening on `eth0`.
+   ✅ user data writes `customer_stream_config.json` with `"wanConfigDevice": "eth1"`, runs
+   `configure_streams.py` then `save_default_config.py` (AWS template pattern).
+3. **Default route via the secondary ENI.** With two ENIs, the first boot may install the default
+   route on `eth1` first; with no public IP there, SSM/S3 time out and the SSM agent hibernates.
+   ❌ two ENIs, EIP only on `eth0`, default routing left to DHCP order.
+   ✅ pin egress to `eth0` (no default route on `eth1`) in user data; verify SSM Online after the
+   first boot of a new receiver.

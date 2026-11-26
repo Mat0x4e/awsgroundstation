@@ -10,6 +10,7 @@ find the right file without opening them all.
 | [ARCHITECTURE.md](ARCHITECTURE.md) | You want the system in one picture, the two data pipelines (ASCII, sync and async), the state machine, and the accepted trade-offs |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Before touching CSPP or the images: the exact conditions CSPP needs and what is deployed |
 | [SYNC_PIPELINE.md](SYNC_PIPELINE.md) | The synchronous (demod/decode) path, and the **first sync contact checklist** |
+| [LESSONS_SYNC_FIRST_CONTACTS.md](LESSONS_SYNC_FIRST_CONTACTS.md) | Why sync contacts #8 and #9 failed, and what changed (read before the next sync contact) |
 | [OPERATOR_RUNBOOK.md](OPERATOR_RUNBOOK.md) | Standing rules: verify a pass, alarms, scheduler, apply rule, drift |
 | [CONTACTS.md](CONTACTS.md) | Every pass booked so far: what it contained, what it cost, what went wrong |
 | [SATDUMP.md](SATDUMP.md) | Before touching geolocation: what SatDump already does |

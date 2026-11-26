@@ -510,3 +510,13 @@ Second attempt, contact id `dryrun-0000-0000-0000-000000000001`, contact_time
 
 Still unvalidated (unchanged): real satellite packet format, Ground Station-side ENI
 creation, eu-north-1 -> eu-central-1 transport, CSPP + visualization on sync data.
+
+### 2026-11-26 -- limitation exposed by contact #9
+
+The canary sends **plain UDP**. Ground Station dataflow endpoint streams are **DTLS**: Ground
+Station sends a DTLS ClientHello and streams data only after the receiver-side dataflow endpoint
+application answers. This dry run therefore validates the network path and everything
+downstream of the listener, but structurally cannot detect a missing session layer. Contact #9
+failed on exactly that (see [`LESSONS_SYNC_FIRST_CONTACTS.md`](LESSONS_SYNC_FIRST_CONTACTS.md),
+fault 5). Until the receiver runs the dataflow endpoint application and the dry run includes a
+DTLS-speaking sender, a passing dry run is NOT sufficient to book a sync contact.

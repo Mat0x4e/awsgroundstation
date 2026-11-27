@@ -644,7 +644,7 @@ antenna sends over UDP; `raw/raw_capture.bin` in S3 is the deliverable.
 | Property | Value |
 |----------|-------|
 | **Contact ID** | `ccc4fe43-eb79-4ac3-9ebe-80d44330908a` |
-| **Status** | 📅 SCHEDULED (reserved 2026-11-23, user go-ahead) |
+| **Status** | ❌ FAILED (2026-11-26) - DTLS handshake never answered, no frames delivered |
 | **Satellite** | NOAA-20 (NORAD 43013) |
 | **Ground Station** | Stockholm 1 (`eu-north-1`) |
 | **Mission Profile** | **sync** demod/decode (`2e719f99-35f5-4720-b974-ba177036c1ee`) |
@@ -659,3 +659,34 @@ Known risks accepted before booking (not validatable offline, see `SYNC_DRY_RUN.
 VITA-49 Extension packet layout, Ground Station-side ENI creation, eu-north-1 -> eu-central-1
 transport, CSPP + visualization on sync data. The network canary stays deployed so the
 network check can be repeated just before PREPASS.
+
+Outcome (diagnosed 2026-11-26 14:30 UTC): **FAILED, no frames delivered.** Contact and
+dataflow `errorMessage` are both empty. The three contact #8 fixes all worked live:
+
+- Ground Station created its ENI in our subnet at 11:13:47 UTC (CloudTrail
+  `CreateNetworkInterface`, `invokedBy=groundstation.amazonaws.com`, 172.31.25.167): DFEG role
+  fix OK.
+- receiver_arm Lambda started the instance from stopped at 11:18:50, SSM Online at 11:19:35,
+  listener armed: KMS fix and stale-state fix OK.
+- The listener received 946 packets from 11:26:47 UTC to LOS (~1 per second): security group
+  fix OK, end-to-end UDP path OK.
+
+Root cause: every packet is a **DTLS 1.2 ClientHello** (`16 fe ff ... 01`, `client_version`
+`fe fd`, empty cookie, ECDHE AES256-GCM/SHA384 cipher
+suites), resent about once per second, ~127 bytes each (`raw_capture.bin` 120293 bytes,
+`frames_extracted=0`; receiver NetworkIn ~1 KB/s, no data stream). AWS documents that dataflow
+endpoint streams are DTLS-encrypted with self-signed certificates and that the receiver runs the
+AWS-supplied **dataflow endpoint application** ("DDX" / Data Defender), shipped in private AMIs
+shared after onboarding
+([EC2 setup](https://docs.aws.amazon.com/ground-station/latest/ug/dataflows.ec2-configuration.html),
+[encryption in transit](https://docs.aws.amazon.com/ground-station/latest/ug/security.encryption-during-transit.html)).
+These AMIs ARE shared with this account (owner 575398917104,
+`groundstation-al2023-ddx2.6.2-ami-*`, latest 2026-11-23). Our receiver runs a plain ECS AL2023
+AMI with a raw UDP socket, so the handshake was never answered and Ground Station never sent
+frames. The design assumption "Ground Station sends plain VITA-49 UDP to the endpoint" was wrong
+for the dataflow endpoint pattern; no dry run could see it because the canary sends plain UDP.
+
+Evidence saved: `contacts/2026/11/26/ccc4fe43-eb79-4ac3-9ebe-80d44330908a/raw/raw_capture.bin`
+(sha256 `62705a9f...`) and `logs/sync_receiver_listen.log` in the sync bucket. No state machine
+ran (contact FAILED, the COMPLETED rule did not fire); the receiver was stopped manually at
+14:30 UTC after the evidence was saved.

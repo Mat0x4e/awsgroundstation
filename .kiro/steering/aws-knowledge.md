@@ -591,3 +591,52 @@ has elapsed since `StartInstances`. Never fail on the first poll.
 
 **Rule**: a stale `StateReason` is not evidence of a current failure; judge the start by the state
 transition, not by one early read.
+
+---
+
+## Ground Station Dataflow Endpoint Streams Are DTLS -- the Receiver Must Run the Dataflow Endpoint Application
+
+**Symptom**: contact ends `FAILED` with an EMPTY `errorMessage` (contact and dataflow). The
+receiver's UDP listener gets ~1 small packet per second (~127 bytes) for the whole pass and no
+frames. Hex: every packet starts `16 fe ff` (DTLS handshake record; record-layer `fe ff` is
+conventional) with type `01` and `client_version` `fe fd` = DTLS 1.2
+(ClientHello). Live: contact #9, 2026-11-26.
+
+**Root cause**: dataflow endpoint streams are encrypted with DTLS (self-signed certificates).
+Ground Station opens a DTLS session to the endpoint and only streams data once it is
+established. A raw UDP socket never answers the ClientHello, so no data is ever sent and the
+contact is adjudicated FAILED.
+
+**❌ INCORRECT**: a plain AMI + a custom UDP listener bound on the DFEG endpoint address/port,
+expecting plain VITA-49 datagrams.
+
+**✅ CORRECT**: run the AWS-supplied dataflow endpoint application on the receiver. AWS shares
+private AMIs with it after onboarding (`groundstation-al2023-ddx2.6.2-ami-*`, owner
+575398917104; find with `aws ec2 describe-images --executable-users self --filters
+Name=name,Values=*roundstation*`). The application terminates DTLS and egresses the decrypted
+stream locally for your own processing.
+
+**Rule**: a canary that sends plain UDP proves the network path only. For the dataflow endpoint
+pattern, the endpoint software (DTLS) is part of the path and must be in the design before the
+first paid contact.
+
+---
+
+## DDX (Ground Station Dataflow Endpoint App) AMI -- Three Boot Traps
+
+Found by inspecting `groundstation-al2023-ddx2.6.2-ami-*` on 2026-11-26 (`docs/DDX_AMI_INSPECTION.md`).
+
+1. **vCPU floor.** `rtlogic-ddx.service` pins `CPUAffinity=2..15`.
+   ❌ a 2-vCPU type (`c6i.large`): `status=215/CPUAFFINITY`, DDX never starts.
+   ✅ >= 4 vCPUs (`c6i.xlarge`): DDX `active`.
+2. **First-boot NIC re-pin.** `ddx-stream-nic-firstboot.service` rewrites the stream's
+   `wanConfigDevice` to the NIC of the first default route if the saved name is gone.
+   ❌ relying on the AMI's pre-built stream with a Ground Station ENI on `eth1`: DDX may end up
+   listening on `eth0`.
+   ✅ user data writes `customer_stream_config.json` with `"wanConfigDevice": "eth1"`, runs
+   `configure_streams.py` then `save_default_config.py` (AWS template pattern).
+3. **Default route via the secondary ENI.** With two ENIs, the first boot may install the default
+   route on `eth1` first; with no public IP there, SSM/S3 time out and the SSM agent hibernates.
+   ❌ two ENIs, EIP only on `eth0`, default routing left to DHCP order.
+   ✅ pin egress to `eth0` (no default route on `eth1`) in user data; verify SSM Online after the
+   first boot of a new receiver.

@@ -1,0 +1,198 @@
+﻿Diagram:
+  DefinitionFiles:
+    - Type: URL
+      Url: "https://raw.githubusercontent.com/awslabs/diagram-as-code/main/definitions/definition-for-aws-icons-light.yaml"
+
+  # Receiver data path of the sync pipeline after the DDX rebuild (spec sync-receiver-ddx).
+  # Numbered in time order. DTLS ends inside the receiver (DDX); the listener sees plain UDP
+  # on the loopback. From the S3 capture on, the chain is shared with the async path.
+  # Render (repo root):
+  #   awsdac docs/diagrams/sync-receiver-ddx.yaml -o docs/diagrams/out/sync-receiver-ddx.png -f
+
+  Resources:
+    Canvas:
+      Type: AWS::Diagram::Canvas
+      Direction: vertical
+      Children:
+        - Title
+        - Body
+
+    Title:
+      Type: AWS::Diagram::Resource
+      Title: "Sync receiver with DDX - DTLS ends in the receiver, listener reads plain UDP on lo:50000"
+      Align: center
+
+    Body:
+      Type: AWS::Diagram::HorizontalStack
+      Children:
+        - AWSCloud
+
+    AWSCloud:
+      Type: AWS::Diagram::Cloud
+      Preset: AWSCloudNoLogo
+      Direction: horizontal
+      Align: center
+      Children:
+        - RegionAntenna
+        - RegionMain
+
+    RegionAntenna:
+      Type: AWS::Region
+      Title: "eu-north-1"
+      Children:
+        - GroundStation
+
+    GroundStation:
+      Type: AWS::Diagram::Resource
+      Preset: "AWS Ground Station"
+      Title: "Stockholm 1 (demod/decode, DTLS client)"
+      Align: center
+
+    RegionMain:
+      Type: AWS::Region
+      Title: "eu-central-1"
+      Children:
+        - ColReceiver
+        - ColProcess
+
+    # --- column 1: receiver VPC ---------------------------------------------------
+    ColReceiver:
+      Type: AWS::Diagram::VerticalStack
+      Children:
+        - ArmLambda
+        - VPC
+
+    ArmLambda:
+      Type: AWS::Lambda::Function
+      Title: "receiver_arm (PREPASS: start, verify)"
+      Align: center
+
+    VPC:
+      Type: AWS::EC2::VPC
+      Title: "default VPC"
+      Children:
+        - ReceiverSubnet
+
+    ReceiverSubnet:
+      Type: AWS::EC2::Subnet
+      Preset: PublicSubnet
+      Title: "subnet, receiver SG (UDP 55888 self)"
+      Direction: vertical
+      Children:
+        - GsEni
+        - Receiver
+        - Canary
+
+    GsEni:
+      Type: AWS::EC2::NetworkInterface
+      Title: "1 Ground Station ENI (DFEG SG)"
+
+    Receiver:
+      Type: AWS::EC2::Instance
+      Title: "2 Receiver c6i.xlarge, DDX AMI: DDX eth1:55888 to lo:50000 listener (systemd, on boot)"
+
+    Canary:
+      Type: AWS::Lambda::Function
+      Title: "network_canary (dry run: ClientHello replay)"
+
+    # --- column 2: orchestration, S3, shared chain --------------------------------
+    ColProcess:
+      Type: AWS::Diagram::VerticalStack
+      Children:
+        - SyncSFN
+        - SyncBucket
+        - AggJob
+
+    SyncSFN:
+      Type: AWS::StepFunctions
+      Title: "Step Functions (COMPLETED and FAILED)"
+      Align: center
+
+    SyncBucket:
+      Type: AWS::S3::Bucket
+      Title: "sync bucket: cadu/ raw/ evidence/ software/"
+      Align: center
+
+    AggJob:
+      Type: AWS::Batch
+      Title: "Batch aggregation (shared with async)"
+      Align: center
+
+  Links:
+    - Source: GroundStation
+      SourcePosition: E
+      Target: GsEni
+      TargetPosition: W
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "DTLS 1.2 over the GS-managed path"
+
+    - Source: GsEni
+      SourcePosition: S
+      Target: Receiver
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "UDP 55888 (DTLS)"
+
+    - Source: ArmLambda
+      SourcePosition: W
+      Type: orthogonal
+      Target: Receiver
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceLeft:
+          Title: "start + tag contact id + verify"
+
+    - Source: Canary
+      SourcePosition: N
+      Target: Receiver
+      TargetPosition: S
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "dry run only"
+
+    - Source: Receiver
+      SourcePosition: E
+      Target: SyncBucket
+      TargetPosition: W
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "3 upload via eth0 + EIP"
+
+    - Source: SyncSFN
+      SourcePosition: S
+      Target: SyncBucket
+      TargetPosition: N
+      LineStyle: dashed
+      TargetArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "finish (SSM) 4"
+
+    - Source: SyncBucket
+      SourcePosition: S
+      Target: AggJob
+      TargetPosition: N
+      TargetArrowHead:
+        Type: Open
+      SourceArrowHead:
+        Type: Open
+      Labels:
+        SourceRight:
+          Title: "5 cadu in, rdr sdr out"
+
+

@@ -1,5 +1,7 @@
 # Sync pipeline dry run plan
 
+> **2026-11-26: written for the pre-DDX receiver; partly superseded.** Steps 1 (arm by SSM) and 1b (plain-UDP canary to `:55888`) no longer describe the target receiver: DDX owns `55888` and answers DTLS, the listener reads `127.0.0.1:50000` from boot, `receiver_arm` only tags, starts and verifies. The dry run for the rebuilt receiver, with its own deviation table, is specified in [`.kiro/specs/sync-receiver-ddx`](../.kiro/specs/sync-receiver-ddx/design.md) (design section 9). The method and the deviation discipline below stay valid; this document is kept as history and for the Step 2 state-machine mechanics.
+
 Dry run for the synchronous (demod/decode) pipeline, following the rule in
 [`delegation-and-safety.md`](../.kiro/steering/delegation-and-safety.md):
 

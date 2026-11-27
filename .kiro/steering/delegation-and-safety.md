@@ -14,6 +14,11 @@ without needing to invoke a workflow file. Keep this file short so the always-on
 - `*.py` -> a Python subagent: `python` (new or multi-file work), `python-haiku` (small
   mechanical edits), `python-debugger` (cross-file bug, or after `python` has failed). Never
   edit Python directly.
+- Bash scripts (`scripts/*.sh`) and template files (`*.tftpl`, `*.sh.tpl`) -> the `python` subagent
+  (decided 2026-11-27; no dedicated shell agent exists). Use `python-haiku` for small mechanical
+  edits and `python-debugger` after `python` has failed, as for `*.py`. A `*.tftpl` that is rendered
+  by Terraform is still verified by a pytest render test; the Terraform side of it goes through the
+  `terraform` agent.
 - Docs (`*.md`, diagram YAML) may be edited directly, or via `docs-writer` for large rewrites.
 
 ## Terraform apply: orchestrator only, with the user's explicit agreement

@@ -37,7 +37,7 @@ document whether `FAILED` contacts are billed.
 | 2026-11-23 15:01 | Dry run attempt 2: PASS (real Lambda, canary, real state machine, Batch). |
 | 2026-11-26 11:13 | Contact #9: Ground Station creates its ENI in our subnet (fault 1 fix confirmed). |
 | 2026-11-26 11:19 | receiver_arm starts the instance, SSM Online, listener armed (faults 2 and 4 fixes confirmed). |
-| 2026-11-26 11:26-11:40 | Listener receives 946 packets, ~1/s, ~127 B each (fault 3 fix confirmed); all DTLS ClientHello, 0 frames. |
+| 2026-11-26 11:26-11:40 | Listener receives 946 packets, ~1/s, ~127 B payload each (143 B datagram: 13 B DTLS record header + 130 B record; fault 3 fix confirmed); all DTLS ClientHello, 0 frames. |
 | 2026-11-26 | Contact #9 `FAILED`, empty `errorMessage`. Diagnosed 14:30 from the raw capture. |
 
 ## Fault by fault
@@ -113,7 +113,7 @@ document whether `FAILED` contacts are billed.
   - The network canary sends plain UDP, so the dry run validated the path but structurally could
     not see a missing session layer. This was listed as an accepted risk ("real packet format"),
     which was too narrow: it should have read "real protocol on the wire".
-- **Fix**: not yet. Requires a receiver redesign around the dataflow endpoint application
+- **Fix**: designed, not implemented ([`.kiro/specs/sync-receiver-ddx`](../.kiro/specs/sync-receiver-ddx/design.md)). Requires a receiver redesign around the dataflow endpoint application
   (investigation in progress, report in `.agents/tasks/ddx-dataflow-endpoint-2026-11-26/`).
 - **Lesson**: for a managed integration, identify every component the provider expects on the
   customer side (software, AMI, agent) before designing the custom part. "We will parse what
@@ -156,9 +156,10 @@ document whether `FAILED` contacts are billed.
 
 | Item | Status |
 |------|--------|
-| Receiver redesign around the dataflow endpoint application (DDX) | Investigation + AMI inspection done ([`DDX_AMI_INSPECTION.md`](DDX_AMI_INSPECTION.md)); design next |
-| Dry run able to exercise the DTLS leg (DTLS-speaking canary or DDX test mode) | Open, depends on investigation |
-| Evidence upload on `FAILED` contacts (not only on `COMPLETED`) | Open |
+| Receiver redesign around the dataflow endpoint application (DDX) | Investigation + AMI inspection done ([`DDX_AMI_INSPECTION.md`](DDX_AMI_INSPECTION.md)); requirements and design written: [`.kiro/specs/sync-receiver-ddx`](../.kiro/specs/sync-receiver-ddx/design.md) (operating model = AWS template; no tasks yet) |
+| Dry run able to exercise the DTLS leg (DTLS-speaking canary or DDX test mode) | Designed: canary ClientHello replay mode + injection at `lo:50000` + deviation table (spec R9, R10, design 9); the DDX framing inside DTLS stays unvalidated until a real contact |
+| Evidence upload on `FAILED` contacts (not only on `COMPLETED`) | Designed: FAILED/AWS_FAILED rule -> same state machine with `outcome=failed` (spec R6, R7) |
 | Pre-flight checklist of AWS customer-side requirements per delivery pattern | Open |
-| Split the shared receiver/DFEG security group and the reused DFEG role | Open, low priority |
+| Split the shared receiver/DFEG security group and the reused DFEG role | **Accepted temporary technical debt** (decided 2026-11-26, spec D8): a deviation from the AWS "VPC configuration with a dataflow endpoint" pattern. Target: two SGs (endpoint SG + instance SG) and a dedicated DFEG role. Trigger: separate change after the first successful DDX contact (it replaces the DFEG and touches the mission profile) |
+| Well-Architected deviation register for the sync receiver | Written: spec design section 11.3 (10 deviations, each with reason and resolution) |
 | Contact #9 billing check | Open (Cost Explorer lag) |

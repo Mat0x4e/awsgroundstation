@@ -442,3 +442,15 @@ user agreement and apply (one at a time).
   the next change.
 - **G9 - Canary SG shares the receiver SG (D8)**: the replay validates the SG in the shared form only;
   after the D8 follow-up it must be re-run. Recorded, no task change.
+
+## Decisions on the spec gaps (user, 2026-11-27)
+
+| Gap | Decision | Effect on tasks |
+|-----|----------|-----------------|
+| G1 | 14-day spool prune is done by the listener at start-up | Task 1.3 as written |
+| G2 | Instance-type allow-list (all 4 vCPUs or more): `c6i.xlarge`, `c6i.2xlarge`, `c6i.4xlarge`, `c5.xlarge`, `m6i.xlarge` | Task 9.1 uses exactly these five |
+| G3 | Bash scripts and `*.tftpl` are delegated to the `python` agent | Rule added to `.kiro/steering/delegation-and-safety.md` |
+| G5 | Pin AMI `ami-0da9217abb117f5a1` (`groundstation-al2023-ddx2.6.2-ami-2026-11-23T17-00-34.194Z`, the one inspected) | Task 9.1; plan-time check on owner 575398917104 and name prefix; re-verify it still exists at cutover (12.2) |
+| G8 | Runtime script changes after cutover (e.g. evidence paths found in the dry run) are collected into ONE batch, applied once with its own plan summary and agreement | Task 14.7 records the changes; one follow-up apply, not one per script |
+
+G4, G6, G7 and G9 stay as described above.
